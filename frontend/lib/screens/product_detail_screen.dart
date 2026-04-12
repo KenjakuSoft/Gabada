@@ -96,7 +96,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           const SizedBox(height: 8),
 
           ...p.stores.map((s) => StoreRow(
+                productId: p.id,
                 summary: s,
+                onOverrideChanged: _load,
                 onScrape: () async {
                   final triggeredAt = DateTime.now();
                   final messenger = ScaffoldMessenger.of(context);

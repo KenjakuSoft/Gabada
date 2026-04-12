@@ -80,6 +80,22 @@ class ApiService {
   Future<void> removeStoreLink(int productId, int productStoreId) =>
       _dio.delete('/products/$productId/stores/$productStoreId');
 
+  Future<void> upsertOverride(
+    int productId,
+    int productStoreId, {
+    double? manualPrice,
+    String? manualStockStatus,
+    String? overrideNote,
+  }) =>
+      _dio.put('/products/$productId/stores/$productStoreId/override', data: {
+        'manual_price': manualPrice,
+        'manual_stock_status': manualStockStatus,
+        'override_note': overrideNote,
+      });
+
+  Future<void> clearOverride(int productId, int productStoreId) =>
+      _dio.delete('/products/$productId/stores/$productStoreId/override');
+
   // ── Stores ───────────────────────────────────────────────────────────────────
 
   Future<List<Store>> getStores() async {
