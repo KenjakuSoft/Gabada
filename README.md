@@ -109,10 +109,10 @@ automatically scraping, logging history, and surfacing every change.*
 <td width="50%">
 
 **📥 Bulk Import**
-- **WooCommerce import** — connect via REST API key, preview products, select and import
-- **File import** — drag-and-drop CSV, Excel (`.xlsx`), or PDF product lists
-- Preview columns and sample rows before committing
-- Powered by `openpyxl` (Excel) and `pdfplumber` (PDF)
+- **WooCommerce import** — enter site URL + API keys, preview the full product catalogue, tick what you want, import in one click
+- **File import** — pick any CSV, Excel (`.xlsx`), or PDF; map Name / URL / Image columns; preview 5 sample rows before committing
+- Auto-detects common column headers (name, url, image, title, permalink…)
+- Powered by `openpyxl` (Excel) and `pdfplumber` (PDF); import button in home screen app bar
 
 </td>
 </tr>
@@ -532,35 +532,72 @@ curl -X PUT http://localhost:8000/products/3/stores/7/override \
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/import/woo/preview` | List products from a WooCommerce store (no import yet) |
-| `POST` | `/import/woo/import` | Import selected products into Gabada |
+| `POST` | `/import/woo/preview` | Fetch product list from WooCommerce (no DB writes) |
+| `POST` | `/import/woo/import` | Import selected products + create store links |
+
+**Request body — preview:**
+```json
+{
+  "credentials": {
+    "site_url": "https://myshop.example.com",
+    "consumer_key": "ck_xxxx",
+    "consumer_secret": "cs_xxxx"
+  },
+  "per_page": 50,
+  "page": 1
+}
+```
+
+**Request body — import:**
+```json
+{
+  "credentials": { "site_url": "...", "consumer_key": "...", "consumer_secret": "..." },
+  "store_id": 3,
+  "product_ids": [101, 204, 317]
+}
+```
 
 ```bash
-# Preview first 50 products
+# Preview
 curl -X POST http://localhost:8000/import/woo/preview \
   -H "Content-Type: application/json" \
-  -d '{
-    "credentials": {
-      "site_url": "https://myshop.example.com",
-      "consumer_key": "ck_xxxx",
-      "consumer_secret": "cs_xxxx"
-    },
-    "per_page": 50
-  }'
+  -d '{"credentials":{"site_url":"https://myshop.example.com","consumer_key":"ck_xxxx","consumer_secret":"cs_xxxx"},"per_page":50}'
+
+# Import selected
+curl -X POST http://localhost:8000/import/woo/import \
+  -H "Content-Type: application/json" \
+  -d '{"credentials":{...},"store_id":3,"product_ids":[101,204,317]}'
+# → {"imported": 3}
 ```
+
+> Requires a WooCommerce store with the REST API enabled. Generate keys at **WP Admin → WooCommerce → Settings → Advanced → REST API**.
 
 ### File Import (CSV / Excel / PDF)
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/import/file/preview` | Upload file, get column list + sample rows |
-| `POST` | `/import/file/commit` | Commit mapped rows as products |
+| `POST` | `/import/file/preview` | Upload file → returns columns + 5 sample rows (no DB writes) |
+| `POST` | `/import/file/commit` | Commit mapped rows → creates products + store links |
+
+**Supported formats:** `.csv`, `.xlsx`, `.xls`, `.pdf` (PDF must contain a table)
 
 ```bash
-# Preview a CSV
+# Step 1 — preview
 curl -X POST http://localhost:8000/import/file/preview \
   -F "file=@products.csv"
-# → {"columns": ["Name", "URL", "Image"], "sample_rows": [...], "total_rows": 120, "file_format": "csv"}
+# → {"columns":["Product Name","Store URL","Image"],"sample_rows":[...],"total_rows":120,"file_format":"csv"}
+
+# Step 2 — commit (map columns by index: name=0, url=1, image=2)
+curl -X POST http://localhost:8000/import/file/commit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rows": [
+      {"name": "AMD Ryzen 9 9950X", "url": "https://store.lk/ryzen9950x", "image_url": null}
+    ],
+    "store_id": 2,
+    "category_id": 1
+  }'
+# → {"imported": 1}
 ```
 
 ### Categories
@@ -821,6 +858,25 @@ git commit -m "feat: describe your change"
 ---
 
 ## 📋 Changelog
+
+### `v0.4.0` — 2026-04-13
+
+> Import screen, override endpoints wired end-to-end, store summary fixes
+
+**Added**
+- **Import screen** (Flutter) — upload icon in home app bar; two tabs:
+  - _WooCommerce tab_: credentials form → product preview list with checkboxes → Import Selected
+  - _File Import tab_: file picker (CSV / Excel / PDF) → column auto-detect → sample data table → Import
+- `POST /import/woo/preview` and `POST /import/woo/import` — WooCommerce REST API integration
+- `POST /import/file/preview` and `POST /import/file/commit` — CSV / Excel / PDF file import
+- `PUT /products/{id}/stores/{ps_id}/override` — create or replace manual price/stock override
+- `DELETE /products/{id}/stores/{ps_id}/override` — clear override
+- `file_picker ^8.1.2` Flutter dependency for native file picker dialog
+
+**Fixed**
+- `_get_store_summaries` now joins `price_logs.dealer_price` and `product_store_overrides` — dealer prices and manual overrides now actually appear in the Flutter UI after a scrape
+
+---
 
 ### `v0.3.0` — 2026-04-13
 
