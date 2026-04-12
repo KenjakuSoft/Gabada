@@ -1,12 +1,18 @@
+import asyncio
+import sys
 import logging
 from contextlib import asynccontextmanager
+
+# Playwright requires ProactorEventLoop on Windows to spawn subprocesses
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import init_db
 from scraper.engine import start_browser, stop_browser
 from scheduler.jobs import start_scheduler, stop_scheduler
-from api import products, stores, logs, scraper_routes
+from api import products, stores, logs, scraper_routes, categories, activity
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,10 +39,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(categories.router)
 app.include_router(products.router)
 app.include_router(stores.router)
 app.include_router(logs.router)
 app.include_router(scraper_routes.router)
+app.include_router(activity.router)
 
 
 @app.get("/health")

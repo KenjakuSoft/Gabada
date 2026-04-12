@@ -3,6 +3,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../models/product.dart';
+import '../models/store.dart';
 import '../models/price_log.dart';
 import '../providers/products_provider.dart';
 import '../services/api_service.dart';
@@ -60,6 +61,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             tooltip: 'Filter date range',
             onPressed: _pickRange,
           ),
+          IconButton(
+            icon: Icon(Icons.delete_outline, color: cs.error),
+            tooltip: 'Delete product',
+            onPressed: _deleteProduct,
+          ),
           const SizedBox(width: 8),
         ],
       ),
@@ -92,16 +98,28 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           ...p.stores.map((s) => StoreRow(
                 summary: s,
                 onScrape: () async {
+                  final triggeredAt = DateTime.now();
+                  final messenger = ScaffoldMessenger.of(context);
                   await context.read<ProductsProvider>().triggerScrape(s.id);
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Scraping ${s.storeName}…'),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
+                  if (!context.mounted) return;
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Scraping ${s.storeName}…'),
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 30),
+                    ),
+                  );
+                  // Poll every 5 s until a new log appears (up to 35 s)
+                  for (int i = 0; i < 7; i++) {
                     await Future.delayed(const Duration(seconds: 5));
+                    if (!context.mounted) return;
                     await _load();
+                    final hasNewLog =
+                        _logs.any((l) => l.scrapedAt.isAfter(triggeredAt));
+                    if (hasNewLog) {
+                      messenger.hideCurrentSnackBar();
+                      break;
+                    }
                   }
                 },
                 onRemove: () async {
@@ -141,58 +159,241 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
   }
 
+  Future<void> _deleteProduct() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Product?'),
+        content: Text('Remove "${_product!.canonicalName}" and all its price history?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await context.read<ProductsProvider>().deleteProduct(_product!.id);
+      if (mounted) Navigator.pop(context);
+    }
+  }
+
   Future<void> _addStoreDialog() async {
     final api = ApiService();
     final stores = await api.getStores();
     if (!mounted) return;
 
-    int? selectedStoreId;
-    final urlCtrl = TextEditingController();
-
     await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Link a Store'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<int>(
-              decoration: const InputDecoration(labelText: 'Store'),
-              items: stores
-                  .map((s) => DropdownMenuItem(value: s.id, child: Text(s.name)))
-                  .toList(),
-              onChanged: (v) => selectedStoreId = v,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: urlCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Product URL',
-                hintText: 'https://shop.com/product/...',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () async {
-              if (selectedStoreId == null || urlCtrl.text.isEmpty) return;
-              await api.addStoreLink(
-                _product!.id,
-                storeId: selectedStoreId!,
-                productUrl: urlCtrl.text.trim(),
-              );
-              if (ctx.mounted) Navigator.pop(ctx);
-              await _load();
-            },
-            child: const Text('Add'),
-          ),
-        ],
+      builder: (ctx) => _AddStoreLinkDialog(
+        productId: _product!.id,
+        existingStores: stores,
+        api: api,
+        onDone: _load,
       ),
     );
   }
 }
+
+// ── Add Store Link Dialog ──────────────────────────────────────────────────────
+
+class _AddStoreLinkDialog extends StatefulWidget {
+  final int productId;
+  final List<Store> existingStores;
+  final ApiService api;
+  final VoidCallback onDone;
+
+  const _AddStoreLinkDialog({
+    required this.productId,
+    required this.existingStores,
+    required this.api,
+    required this.onDone,
+  });
+
+  @override
+  State<_AddStoreLinkDialog> createState() => _AddStoreLinkDialogState();
+}
+
+class _AddStoreLinkDialogState extends State<_AddStoreLinkDialog> {
+  late List<Store> _stores;
+  int? _selectedStoreId;
+  final _urlCtrl = TextEditingController();
+
+  // New store creation
+  bool _creatingStore = false;
+  final _storeNameCtrl = TextEditingController();
+  final _storeBaseUrlCtrl = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _stores = List.from(widget.existingStores);
+    if (_stores.isNotEmpty) _selectedStoreId = _stores.first.id;
+  }
+
+  @override
+  void dispose() {
+    _urlCtrl.dispose();
+    _storeNameCtrl.dispose();
+    _storeBaseUrlCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Link a Store'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Store selector or "create new" toggle
+            if (!_creatingStore) ...[
+              if (_stores.isEmpty)
+                Text(
+                  'No stores yet — create one below.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 13),
+                )
+              else
+                DropdownButtonFormField<int>(
+                  initialValue: _selectedStoreId,
+                  decoration: const InputDecoration(labelText: 'Store'),
+                  items: _stores
+                      .map((s) => DropdownMenuItem(value: s.id, child: Text(s.name)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _selectedStoreId = v),
+                ),
+              const SizedBox(height: 4),
+              TextButton.icon(
+                onPressed: () => setState(() => _creatingStore = true),
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Create new store'),
+                style: TextButton.styleFrom(alignment: Alignment.centerLeft),
+              ),
+            ] else ...[
+              // Inline store creation form
+              Text('New Store',
+                  style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _storeNameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Store name *',
+                  hintText: 'e.g. Amazon, Newegg',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _storeBaseUrlCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Base URL *',
+                  hintText: 'https://amazon.com',
+                ),
+                keyboardType: TextInputType.url,
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: () => setState(() => _creatingStore = false),
+                    child: const Text('Cancel'),
+                  ),
+                  const Spacer(),
+                  FilledButton(
+                    onPressed: _saving ? null : _createStore,
+                    child: _saving
+                        ? const SizedBox(width: 16, height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Create'),
+                  ),
+                ],
+              ),
+              const Divider(height: 24),
+            ],
+
+            // Product URL (always shown when a store is selected)
+            if (!_creatingStore && _selectedStoreId != null) ...[
+              const SizedBox(height: 8),
+              TextField(
+                controller: _urlCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Product URL *',
+                  hintText: 'https://store.com/product/...',
+                ),
+                keyboardType: TextInputType.url,
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        if (!_creatingStore && _selectedStoreId != null)
+          FilledButton(
+            onPressed: _saving ? null : _linkStore,
+            child: _saving
+                ? const SizedBox(width: 16, height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Link'),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _createStore() async {
+    final name = _storeNameCtrl.text.trim();
+    final baseUrl = _storeBaseUrlCtrl.text.trim();
+    if (name.isEmpty || baseUrl.isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      final store = await widget.api.createStore(name, baseUrl);
+      setState(() {
+        _stores.add(store);
+        _selectedStoreId = store.id;
+        _creatingStore = false;
+        _saving = false;
+      });
+    } catch (e) {
+      setState(() => _saving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    }
+  }
+
+  Future<void> _linkStore() async {
+    if (_selectedStoreId == null || _urlCtrl.text.trim().isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      await widget.api.addStoreLink(
+        widget.productId,
+        storeId: _selectedStoreId!,
+        productUrl: _urlCtrl.text.trim(),
+      );
+      if (mounted) Navigator.pop(context);
+      widget.onDone();
+    } catch (e) {
+      setState(() => _saving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    }
+  }
+}
+
+// ── Price Chart ────────────────────────────────────────────────────────────────
 
 class _PriceChart extends StatelessWidget {
   final List<PriceLog> logs;
@@ -238,7 +439,7 @@ class _PriceChart extends StatelessWidget {
                 showTitles: true,
                 reservedSize: 56,
                 getTitlesWidget: (v, _) => Text(
-                  '\$${v.toStringAsFixed(0)}',
+                  NumberFormat('#,##0', 'en_US').format(v),
                   style: TextStyle(fontSize: 10, color: cs.outline),
                 ),
               ),

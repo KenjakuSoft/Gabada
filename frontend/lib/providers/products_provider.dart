@@ -29,9 +29,11 @@ class ProductsProvider extends ChangeNotifier {
     }
   }
 
-  Future<Product?> createProduct(String name, {String? imageUrl}) async {
+  Future<Product?> createProduct(String name,
+      {String? imageUrl, int? categoryId}) async {
     try {
-      final p = await _api.createProduct(name, imageUrl: imageUrl);
+      final p = await _api.createProduct(name,
+          imageUrl: imageUrl, categoryId: categoryId);
       _products.add(p);
       notifyListeners();
       return p;

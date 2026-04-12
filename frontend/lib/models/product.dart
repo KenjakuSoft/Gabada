@@ -9,6 +9,8 @@ class ProductStoreSummary {
   final double? latestDiscountedPrice;
   final String? latestStockStatus;
   final DateTime? latestScrapedAt;
+  final String? latestChangeType;
+  final double? latestPriceDelta;
 
   const ProductStoreSummary({
     required this.id,
@@ -21,6 +23,8 @@ class ProductStoreSummary {
     this.latestDiscountedPrice,
     this.latestStockStatus,
     this.latestScrapedAt,
+    this.latestChangeType,
+    this.latestPriceDelta,
   });
 
   factory ProductStoreSummary.fromJson(Map<String, dynamic> j) =>
@@ -38,6 +42,8 @@ class ProductStoreSummary {
         latestScrapedAt: j['latest_scraped_at'] != null
             ? DateTime.parse(j['latest_scraped_at'])
             : null,
+        latestChangeType: j['latest_change_type'],
+        latestPriceDelta: (j['latest_price_delta'] as num?)?.toDouble(),
       );
 
   bool get inStock => latestStockStatus == 'in_stock';
@@ -53,6 +59,9 @@ class Product {
   final int id;
   final String canonicalName;
   final String? imageUrl;
+  final int? categoryId;
+  final String? categoryName;
+  final String? categoryColor;
   final DateTime createdAt;
   final List<ProductStoreSummary> stores;
 
@@ -60,6 +69,9 @@ class Product {
     required this.id,
     required this.canonicalName,
     this.imageUrl,
+    this.categoryId,
+    this.categoryName,
+    this.categoryColor,
     required this.createdAt,
     required this.stores,
   });
@@ -68,6 +80,9 @@ class Product {
         id: j['id'],
         canonicalName: j['canonical_name'],
         imageUrl: j['image_url'],
+        categoryId: j['category_id'],
+        categoryName: j['category_name'],
+        categoryColor: j['category_color'],
         createdAt: DateTime.parse(j['created_at']),
         stores: (j['stores'] as List<dynamic>)
             .map((s) => ProductStoreSummary.fromJson(s))

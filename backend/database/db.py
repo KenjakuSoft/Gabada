@@ -14,6 +14,13 @@ async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("PRAGMA foreign_keys=ON")
         await db.executescript("""
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                color TEXT NOT NULL DEFAULT '#6C63FF',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 canonical_name TEXT NOT NULL,
@@ -55,3 +62,30 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_price_logs_scraped_at ON price_logs(scraped_at);
         """)
         await db.commit()
+
+        # Migrations for existing databases
+        try:
+            await db.execute("ALTER TABLE products ADD COLUMN category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL")
+            await db.commit()
+        except Exception:
+            pass
+
+        for col_sql in [
+            "ALTER TABLE price_logs ADD COLUMN change_type TEXT",
+            "ALTER TABLE price_logs ADD COLUMN price_delta REAL",
+            "ALTER TABLE price_logs ADD COLUMN previous_price REAL",
+            "ALTER TABLE price_logs ADD COLUMN previous_stock_status TEXT",
+        ]:
+            try:
+                await db.execute(col_sql)
+                await db.commit()
+            except Exception:
+                pass
+
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_price_logs_change ON price_logs(change_type, scraped_at)"
+            )
+            await db.commit()
+        except Exception:
+            pass

@@ -1,5 +1,6 @@
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from typing import Optional
 from database.db import get_db
 from database.models import (
     Product, ProductCreate, ProductStoreCreate, ProductStoreSummary
@@ -7,24 +8,43 @@ from database.models import (
 
 router = APIRouter(prefix="/products", tags=["products"])
 
+_PRODUCT_QUERY = """
+    SELECT p.id, p.canonical_name, p.image_url, p.created_at,
+           p.category_id, c.name AS category_name, c.color AS category_color
+    FROM products p
+    LEFT JOIN categories c ON c.id = p.category_id
+"""
+
+def _row_to_product(r, stores) -> Product:
+    return Product(
+        id=r["id"],
+        canonical_name=r["canonical_name"],
+        image_url=r["image_url"],
+        created_at=r["created_at"],
+        category_id=r["category_id"],
+        category_name=r["category_name"],
+        category_color=r["category_color"],
+        stores=stores,
+    )
+
 
 @router.get("/", response_model=list[Product])
-async def list_products():
+async def list_products(category_id: Optional[int] = Query(None)):
     db = await get_db()
     try:
-        rows = await db.execute_fetchall(
-            "SELECT id, canonical_name, image_url, created_at FROM products ORDER BY canonical_name"
-        )
+        if category_id is not None:
+            rows = await db.execute_fetchall(
+                _PRODUCT_QUERY + " WHERE p.category_id = ? ORDER BY p.canonical_name",
+                (category_id,),
+            )
+        else:
+            rows = await db.execute_fetchall(
+                _PRODUCT_QUERY + " ORDER BY p.canonical_name"
+            )
         products = []
         for row in rows:
             stores = await _get_store_summaries(db, row["id"])
-            products.append(Product(
-                id=row["id"],
-                canonical_name=row["canonical_name"],
-                image_url=row["image_url"],
-                created_at=row["created_at"],
-                stores=stores,
-            ))
+            products.append(_row_to_product(row, stores))
         return products
     finally:
         await db.close()
@@ -34,21 +54,13 @@ async def list_products():
 async def get_product(product_id: int):
     db = await get_db()
     try:
-        row = await db.execute_fetchall(
-            "SELECT id, canonical_name, image_url, created_at FROM products WHERE id = ?",
-            (product_id,),
+        rows = await db.execute_fetchall(
+            _PRODUCT_QUERY + " WHERE p.id = ?", (product_id,)
         )
-        if not row:
+        if not rows:
             raise HTTPException(status_code=404, detail="Product not found")
-        r = row[0]
         stores = await _get_store_summaries(db, product_id)
-        return Product(
-            id=r["id"],
-            canonical_name=r["canonical_name"],
-            image_url=r["image_url"],
-            created_at=r["created_at"],
-            stores=stores,
-        )
+        return _row_to_product(rows[0], stores)
     finally:
         await db.close()
 
@@ -58,12 +70,11 @@ async def create_product(body: ProductCreate):
     db = await get_db()
     try:
         cur = await db.execute(
-            "INSERT INTO products (canonical_name, image_url) VALUES (?, ?)",
-            (body.canonical_name, body.image_url),
+            "INSERT INTO products (canonical_name, image_url, category_id) VALUES (?, ?, ?)",
+            (body.canonical_name, body.image_url, body.category_id),
         )
         await db.commit()
-        product_id = cur.lastrowid
-        return await get_product(product_id)
+        return await get_product(cur.lastrowid)
     finally:
         await db.close()
 
@@ -73,8 +84,8 @@ async def update_product(product_id: int, body: ProductCreate):
     db = await get_db()
     try:
         await db.execute(
-            "UPDATE products SET canonical_name=?, image_url=? WHERE id=?",
-            (body.canonical_name, body.image_url, product_id),
+            "UPDATE products SET canonical_name=?, image_url=?, category_id=? WHERE id=?",
+            (body.canonical_name, body.image_url, body.category_id, product_id),
         )
         await db.commit()
         return await get_product(product_id)
@@ -134,14 +145,15 @@ async def _get_store_summaries(db, product_id: int) -> list[ProductStoreSummary]
             pl.price AS latest_price,
             pl.discounted_price AS latest_discounted_price,
             pl.stock_status AS latest_stock_status,
-            pl.scraped_at AS latest_scraped_at
+            pl.scraped_at AS latest_scraped_at,
+            pl.change_type AS latest_change_type,
+            pl.price_delta AS latest_price_delta
         FROM product_stores ps
         JOIN stores s ON s.id = ps.store_id
         LEFT JOIN price_logs pl ON pl.id = (
             SELECT id FROM price_logs
             WHERE product_store_id = ps.id
-            ORDER BY scraped_at DESC
-            LIMIT 1
+            ORDER BY scraped_at DESC LIMIT 1
         )
         WHERE ps.product_id = ?
         ORDER BY s.name
@@ -160,6 +172,8 @@ async def _get_store_summaries(db, product_id: int) -> list[ProductStoreSummary]
             latest_discounted_price=r["latest_discounted_price"],
             latest_stock_status=r["latest_stock_status"],
             latest_scraped_at=r["latest_scraped_at"],
+            latest_change_type=r["latest_change_type"],
+            latest_price_delta=r["latest_price_delta"],
         )
         for r in rows
     ]

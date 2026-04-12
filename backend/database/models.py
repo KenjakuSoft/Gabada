@@ -1,6 +1,18 @@
-from pydantic import BaseModel, field_validator
-from typing import Optional, Dict, Any
+from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime
+
+
+# ── Categories ────────────────────────────────────────────────────────────────
+
+class CategoryCreate(BaseModel):
+    name: str
+    color: str = "#6C63FF"
+
+class Category(CategoryCreate):
+    id: int
+    created_at: datetime
+    model_config = {"from_attributes": True}
 
 
 # ── Stores ────────────────────────────────────────────────────────────────────
@@ -37,6 +49,7 @@ class ScrapeConfig(BaseModel):
 class ProductCreate(BaseModel):
     canonical_name: str
     image_url: Optional[str] = None
+    category_id: Optional[int] = None
 
 class ProductStoreCreate(BaseModel):
     store_id: int
@@ -54,6 +67,8 @@ class ProductStoreSummary(BaseModel):
     latest_discounted_price: Optional[float] = None
     latest_stock_status: Optional[str] = None
     latest_scraped_at: Optional[datetime] = None
+    latest_change_type: Optional[str] = None
+    latest_price_delta: Optional[float] = None
 
     model_config = {"from_attributes": True}
 
@@ -61,6 +76,9 @@ class Product(BaseModel):
     id: int
     canonical_name: str
     image_url: Optional[str] = None
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
+    category_color: Optional[str] = None
     created_at: datetime
     stores: list[ProductStoreSummary] = []
 
@@ -77,6 +95,25 @@ class PriceLog(BaseModel):
     price: Optional[float] = None
     discounted_price: Optional[float] = None
     stock_status: Optional[str] = None
+    change_type: Optional[str] = None
+    price_delta: Optional[float] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ActivityEntry(BaseModel):
+    id: int
+    product_id: int
+    product_name: str
+    store_name: str
+    change_type: str
+    price: Optional[float] = None
+    discounted_price: Optional[float] = None
+    price_delta: Optional[float] = None
+    previous_price: Optional[float] = None
+    stock_status: Optional[str] = None
+    previous_stock_status: Optional[str] = None
+    scraped_at: datetime
 
     model_config = {"from_attributes": True}
 
