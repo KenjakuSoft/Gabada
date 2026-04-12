@@ -12,6 +12,9 @@ class ProductStoreSummary {
   final DateTime? latestScrapedAt;
   final String? latestChangeType;
   final double? latestPriceDelta;
+  final double? manualPrice;
+  final String? manualStockStatus;
+  final String? overrideNote;
 
   const ProductStoreSummary({
     required this.id,
@@ -27,6 +30,9 @@ class ProductStoreSummary {
     this.latestScrapedAt,
     this.latestChangeType,
     this.latestPriceDelta,
+    this.manualPrice,
+    this.manualStockStatus,
+    this.overrideNote,
   });
 
   factory ProductStoreSummary.fromJson(Map<String, dynamic> j) =>
@@ -47,8 +53,12 @@ class ProductStoreSummary {
             : null,
         latestChangeType: j['latest_change_type'],
         latestPriceDelta: (j['latest_price_delta'] as num?)?.toDouble(),
+        manualPrice: (j['manual_price'] as num?)?.toDouble(),
+        manualStockStatus: j['manual_stock_status'],
+        overrideNote: j['override_note'],
       );
 
+  bool get hasOverride => manualPrice != null || manualStockStatus != null;
   bool get inStock => latestStockStatus == 'in_stock';
   bool get outOfStock => latestStockStatus == 'out_of_stock';
   bool get limited => latestStockStatus == 'limited';
