@@ -53,9 +53,20 @@ async def init_db():
                 title TEXT,
                 price REAL,
                 discounted_price REAL,
+                dealer_price REAL,
                 stock_status TEXT DEFAULT 'unknown',
                 raw_price TEXT,
-                raw_discounted TEXT
+                raw_discounted TEXT,
+                raw_dealer TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS product_store_overrides (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_store_id INTEGER NOT NULL REFERENCES product_stores(id) ON DELETE CASCADE UNIQUE,
+                manual_price REAL,
+                manual_stock_status TEXT,
+                override_note TEXT,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE INDEX IF NOT EXISTS idx_price_logs_product_store ON price_logs(product_store_id);
@@ -75,6 +86,8 @@ async def init_db():
             "ALTER TABLE price_logs ADD COLUMN price_delta REAL",
             "ALTER TABLE price_logs ADD COLUMN previous_price REAL",
             "ALTER TABLE price_logs ADD COLUMN previous_stock_status TEXT",
+            "ALTER TABLE price_logs ADD COLUMN dealer_price REAL",
+            "ALTER TABLE price_logs ADD COLUMN raw_dealer TEXT",
         ]:
             try:
                 await db.execute(col_sql)

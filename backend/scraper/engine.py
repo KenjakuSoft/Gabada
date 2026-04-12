@@ -2,6 +2,12 @@
 Smart scraper engine — no CSS selector config required.
 Extraction order: JSON-LD → Schema microdata → common patterns → custom selectors.
 One shared Playwright browser for the app lifetime.
+
+Price filtering:
+- Installment / EMI / monthly-payment candidates are suppressed at both the
+  JS smart-scan stage and in Python before any price is accepted.
+- Dealer / wholesale prices are surfaced separately via dedicated selectors
+  and stored in the dealer_price field.
 """
 import json
 import re
@@ -38,10 +44,30 @@ async def stop_browser():
     logger.info("Playwright browser stopped")
 
 
+# ── Installment / payment-method filter ──────────────────────────────────────
+
+_INSTALLMENT_RE = re.compile(
+    r"\b(emi|easy[\s-]?pay|flexi[\s-]?pay|instalment|installment|"
+    r"monthly|per[\s-]?month|per[\s-]?week|weekly|"
+    r"interest[\s-]?free|payment[\s-]?plan|hire[\s-]?purchase|"
+    r"credit[\s-]?card[\s-]?price|card[\s-]?price|"
+    r"visa[\s-]?offer|master[\s-]?offer)\b"
+    r"|[×x]\s*\d+\s*(?:month|week|year|mo\b)"  # e.g. ×12 months
+    r"|/\s*(?:month|week|mo|yr)\b",             # e.g. /month
+    re.IGNORECASE,
+)
+
+def _is_installment_price(raw: Optional[str]) -> bool:
+    """Return True if this raw string looks like an installment / payment-method price."""
+    return bool(raw and _INSTALLMENT_RE.search(raw))
+
+
 # ── Price & stock parsers ─────────────────────────────────────────────────────
 
 def _parse_price(raw: Optional[str]) -> Optional[float]:
     if not raw:
+        return None
+    if _is_installment_price(raw):
         return None
     cleaned = re.sub(r"[^\d.,]", "", raw.strip())
     if not cleaned:
@@ -101,7 +127,6 @@ async def _try_json_ld(page) -> ScrapeResult:
 
                 name = item.get("name")
 
-                # Offers
                 offers = item.get("offers", {})
                 if isinstance(offers, list):
                     offers = offers[0] if offers else {}
@@ -140,6 +165,8 @@ async def _try_microdata(page) -> ScrapeResult:
             el = await page.query_selector(sel)
             if el:
                 raw = await el.get_attribute("content") or await el.inner_text()
+                if _is_installment_price(raw):
+                    continue
                 p = _parse_price(raw)
                 if p:
                     result.price = p
@@ -199,6 +226,18 @@ _ORIG_PRICE_SELECTORS = [
     ".a-price.a-text-price .a-offscreen",
 ]
 
+_DEALER_PRICE_SELECTORS = [
+    ".ty-price-dealer",
+    "[class*='dealer-price']",
+    "[class*='wholesale-price']",
+    "[class*='trade-price']",
+    "[data-dealer-price]",
+    ".dealer-price",
+    ".trade-price",
+    ".wholesale-price",
+    ".your-price",        # some B2B stores label it "Your Price"
+]
+
 _STOCK_SELECTORS = [
     # CS-Cart (nanotek.lk)
     ".ty-special-msg",
@@ -224,10 +263,6 @@ _TITLE_SELECTORS = [
     "h1",
 ]
 
-_IMAGE_SELECTORS = [
-    'meta[property="og:image"]',
-]
-
 
 async def _try_common(page) -> ScrapeResult:
     result = ScrapeResult()
@@ -236,6 +271,8 @@ async def _try_common(page) -> ScrapeResult:
             el = await page.query_selector(sel)
             if el:
                 raw = await el.get_attribute("content") or await el.inner_text()
+                if _is_installment_price(raw):
+                    continue
                 p = _parse_price(raw)
                 if p:
                     result.price = p
@@ -246,6 +283,8 @@ async def _try_common(page) -> ScrapeResult:
             el = await page.query_selector(sel)
             if el:
                 raw = await el.get_attribute("content") or await el.inner_text()
+                if _is_installment_price(raw):
+                    continue
                 p = _parse_price(raw)
                 if p and (result.price is None or p > result.price):
                     result.discounted_price = result.price
@@ -253,6 +292,17 @@ async def _try_common(page) -> ScrapeResult:
                     result.raw_discounted = result.raw_price
                     result.raw_price = raw.strip()
                     break
+
+        for sel in _DEALER_PRICE_SELECTORS:
+            el = await page.query_selector(sel)
+            if el:
+                raw = await el.get_attribute("content") or await el.inner_text()
+                if not _is_installment_price(raw):
+                    d = _parse_price(raw)
+                    if d:
+                        result.dealer_price = d
+                        result.raw_dealer = raw.strip()
+                        break
 
         for sel in _TITLE_SELECTORS:
             el = await page.query_selector(sel)
@@ -277,16 +327,11 @@ async def _try_common(page) -> ScrapeResult:
         logger.debug("Common pattern extraction error: %s", e)
 
     if result.price:
-        logger.info("Common pattern hit: name=%s price=%s", result.title, result.price)
+        logger.info("Common pattern hit: name=%s price=%s dealer=%s", result.title, result.price, result.dealer_price)
     return result
 
 
 # ── Strategy 3b: Universal JS smart scan ─────────────────────────────────────
-#
-# Works on ANY e-commerce site without configuration.
-# Scans every visible text node for price-like values and scores each by how
-# "price-adjacent" its DOM ancestors are (class/id keywords).
-# Also detects stock by inspecting add-to-cart button state and page text.
 
 _SMART_SCAN_JS = r"""() => {
     function visible(el) {
@@ -308,6 +353,9 @@ _SMART_SCAN_JS = r"""() => {
             if (/retail|was|compare|original|old/.test(info)) score -= 8;
             if (/related|similar|recommend|cross/.test(info)) score -= 20;
             if (/nav|menu|header|footer/.test(info))  score -= 15;
+            // Installment / payment-method penalty
+            if (/emi|monthly|instalment|installment|per.?month|easy.?pay|flexi|interest.?free|per.?week|weekly|payment.?plan/.test(info)) score -= 30;
+            if (/visa|mastercard|credit.?card|debit.?card|payment.?method|card.?offer/.test(info)) score -= 20;
         }
         return score;
     }
@@ -326,6 +374,15 @@ _SMART_SCAN_JS = r"""() => {
         if (!el || !visible(el)) continue;
         const num = parseFloat(m[1].replace(/,/g, ''));
         if (num <= 0 || num > 50000000) continue;
+
+        // Reject if ancestor text hints at installment context
+        let ancestorText = '';
+        let cur = el;
+        for (let i = 0; i < 3 && cur; i++, cur = cur.parentElement) {
+            ancestorText += ' ' + (cur.textContent || '');
+        }
+        if (/\bemi\b|per\s+month|\/month|monthly\s+pay|easy\s+pay|instalment|installment|\d\s*[x×]\s*\d+\s*(?:month|mo\b)/i.test(ancestorText.slice(0, 200))) continue;
+
         candidates.push({ text, num, score: contextScore(el) });
     }
     candidates.sort((a, b) => b.score - a.score || a.num - b.num);
@@ -376,15 +433,14 @@ async def _try_smart_scan(page) -> ScrapeResult:
         data = await page.evaluate(_SMART_SCAN_JS)
         candidates = data.get('candidates', [])
 
+        # Drop any remaining installment-like candidates on the Python side
+        candidates = [c for c in candidates if not _is_installment_price(c.get('text', ''))]
+
         if candidates:
             best = candidates[0]
             result.price = _parse_price(best['text']) or (best['num'] if best['num'] > 0 else None)
             result.raw_price = best['text']
 
-            # Look for an "original/retail" price: the highest-valued unique
-            # candidate that is greater than the sale price but less than 2.5×.
-            # Taking the max (not just the first) avoids picking colour-variant
-            # prices that fall between the sale and retail price.
             if result.price:
                 original = None
                 seen_nums = {best['num']}
@@ -413,7 +469,7 @@ async def _try_smart_scan(page) -> ScrapeResult:
     return result
 
 
-# ── Strategy 4: Custom selectors (user-configured override) ───────────────────
+# ── Strategy 4: Custom selectors (user-configured override) ──────────────────
 
 async def _apply_custom(page, config: ScrapeConfig, base: ScrapeResult) -> ScrapeResult:
     sel = config.selectors
@@ -427,27 +483,29 @@ async def _apply_custom(page, config: ScrapeConfig, base: ScrapeResult) -> Scrap
         except Exception:
             return None
 
-    async def get_attr(selector: Optional[str], attr: str) -> Optional[str]:
-        if not selector:
-            return None
-        try:
-            el = await page.query_selector(selector)
-            return await el.get_attribute(attr) if el else None
-        except Exception:
-            return None
-
     title = await get_text(sel.title)
     raw_price = await get_text(sel.price)
     raw_disc = await get_text(sel.discounted_price)
+    raw_dealer = await get_text(sel.dealer_price)
     stock_raw = await get_text(sel.stock_status)
+
+    # Guard custom selectors against installment prices too
+    if _is_installment_price(raw_price):
+        raw_price = None
+    if _is_installment_price(raw_disc):
+        raw_disc = None
+    if _is_installment_price(raw_dealer):
+        raw_dealer = None
 
     return ScrapeResult(
         title=title or base.title,
         price=_parse_price(raw_price) or base.price,
         discounted_price=_parse_price(raw_disc) or base.discounted_price,
+        dealer_price=_parse_price(raw_dealer) or base.dealer_price,
         stock_status=(_parse_stock(stock_raw) if stock_raw else None) or base.stock_status,
         raw_price=raw_price or base.raw_price,
         raw_discounted=raw_disc or base.raw_discounted,
+        raw_dealer=raw_dealer or base.raw_dealer,
     )
 
 
@@ -472,23 +530,17 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-        # Extra wait for JS-heavy SPAs
         if config.wait_for:
             try:
                 await page.wait_for_selector(config.wait_for, timeout=config.wait_timeout)
             except Exception:
                 logger.warning("wait_for '%s' timed out on %s", config.wait_for, url)
         else:
-            # Give SPAs a moment to render
             try:
                 await page.wait_for_load_state("networkidle", timeout=5000)
             except Exception:
                 pass
 
-        # Try strategies in order, pick first with a price.
-        # Smart scan runs whenever price or stock is still missing — it works
-        # on any site without configuration so there's no need to add selectors
-        # for new stores.
         result = await _try_json_ld(page)
         if not result.price:
             result = await _try_microdata(page)
@@ -496,25 +548,23 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
         if not result.price or result.stock_status == "unknown":
             smart = await _try_smart_scan(page)
             if not result.price and smart.price:
-                result = smart          # smart scan found the price
+                result = smart
             elif result.stock_status == "unknown" and smart.stock_status != "unknown":
-                result.stock_status = smart.stock_status   # fill in missing stock
+                result.stock_status = smart.stock_status
 
-        # Common CSS patterns as last-resort price fallback (known platforms)
         if not result.price:
             result = await _try_common(page)
 
-        # Apply custom selectors as overrides if any are set
         sel = config.selectors
-        has_custom = any([sel.title, sel.price, sel.discounted_price, sel.stock_status])
+        has_custom = any([sel.title, sel.price, sel.discounted_price, sel.dealer_price, sel.stock_status])
         if has_custom:
             result = await _apply_custom(page, config, result)
 
-        # Default stock to unknown if still not found
         if not result.stock_status:
             result.stock_status = "unknown"
 
-        logger.info("Scrape done: %s → price=%s stock=%s", url, result.price, result.stock_status)
+        logger.info("Scrape done: %s → price=%s dealer=%s stock=%s",
+                    url, result.price, result.dealer_price, result.stock_status)
         return result
 
     except Exception as e:

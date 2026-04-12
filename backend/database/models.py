@@ -24,7 +24,6 @@ class StoreCreate(BaseModel):
 class Store(StoreCreate):
     id: int
     created_at: datetime
-
     model_config = {"from_attributes": True}
 
 
@@ -34,14 +33,29 @@ class ScrapeSelectors(BaseModel):
     title: Optional[str] = None
     price: Optional[str] = None
     discounted_price: Optional[str] = None
+    dealer_price: Optional[str] = None
     stock_status: Optional[str] = None
     image: Optional[str] = None
 
 class ScrapeConfig(BaseModel):
     use_playwright: bool = True
-    wait_for: Optional[str] = None       # CSS selector to wait for (SPAs)
-    wait_timeout: int = 15000            # ms
+    wait_for: Optional[str] = None
+    wait_timeout: int = 15000
     selectors: ScrapeSelectors = ScrapeSelectors()
+
+
+# ── Manual override ───────────────────────────────────────────────────────────
+
+class ProductStoreOverrideUpsert(BaseModel):
+    manual_price: Optional[float] = None
+    manual_stock_status: Optional[str] = None
+    override_note: Optional[str] = None
+
+class ProductStoreOverride(ProductStoreOverrideUpsert):
+    id: int
+    product_store_id: int
+    updated_at: datetime
+    model_config = {"from_attributes": True}
 
 
 # ── Products ──────────────────────────────────────────────────────────────────
@@ -65,10 +79,14 @@ class ProductStoreSummary(BaseModel):
     is_active: bool
     latest_price: Optional[float] = None
     latest_discounted_price: Optional[float] = None
+    latest_dealer_price: Optional[float] = None
     latest_stock_status: Optional[str] = None
     latest_scraped_at: Optional[datetime] = None
     latest_change_type: Optional[str] = None
     latest_price_delta: Optional[float] = None
+    manual_price: Optional[float] = None
+    manual_stock_status: Optional[str] = None
+    override_note: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -94,6 +112,7 @@ class PriceLog(BaseModel):
     title: Optional[str] = None
     price: Optional[float] = None
     discounted_price: Optional[float] = None
+    dealer_price: Optional[float] = None
     stock_status: Optional[str] = None
     change_type: Optional[str] = None
     price_delta: Optional[float] = None
@@ -124,7 +143,56 @@ class ScrapeResult(BaseModel):
     title: Optional[str] = None
     price: Optional[float] = None
     discounted_price: Optional[float] = None
+    dealer_price: Optional[float] = None
     stock_status: str = "unknown"
     raw_price: Optional[str] = None
     raw_discounted: Optional[str] = None
+    raw_dealer: Optional[str] = None
     error: Optional[str] = None
+
+
+# ── WooCommerce import ────────────────────────────────────────────────────────
+
+class WooCredentials(BaseModel):
+    site_url: str
+    consumer_key: str
+    consumer_secret: str
+
+class WooProductPreview(BaseModel):
+    woo_id: int
+    name: str
+    permalink: str
+    regular_price: Optional[str] = None
+    sale_price: Optional[str] = None
+    stock_status: str = "unknown"
+    image_url: Optional[str] = None
+    categories: list[str] = []
+
+class WooPreviewRequest(BaseModel):
+    credentials: WooCredentials
+    per_page: int = 50
+    page: int = 1
+
+class WooImportRequest(BaseModel):
+    credentials: WooCredentials
+    store_id: int
+    product_ids: list[int]
+
+
+# ── File import ───────────────────────────────────────────────────────────────
+
+class FileImportPreviewResponse(BaseModel):
+    columns: list[str]
+    sample_rows: list[list[str]]
+    total_rows: int
+    file_format: str  # "csv", "excel", "pdf"
+
+class FileImportRow(BaseModel):
+    name: str
+    url: str
+    image_url: Optional[str] = None
+
+class FileImportCommitRequest(BaseModel):
+    rows: list[FileImportRow]
+    store_id: int
+    category_id: Optional[int] = None
