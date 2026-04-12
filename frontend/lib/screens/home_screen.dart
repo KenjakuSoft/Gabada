@@ -6,6 +6,7 @@ import '../providers/categories_provider.dart';
 import '../widgets/product_card.dart';
 import 'product_detail_screen.dart';
 import 'add_product_screen.dart';
+import 'import_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -84,6 +85,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     await products.load();
                   }
                 },
+              ),
+              IconButton(
+                icon: const Icon(Icons.upload_file_outlined),
+                tooltip: 'Import products',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ImportScreen()),
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.label_outline_rounded),

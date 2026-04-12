@@ -3,7 +3,8 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from database.db import get_db
 from database.models import (
-    Product, ProductCreate, ProductStoreCreate, ProductStoreSummary
+    Product, ProductCreate, ProductStoreCreate, ProductStoreSummary,
+    ProductStoreOverride, ProductStoreOverrideUpsert,
 )
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -144,10 +145,14 @@ async def _get_store_summaries(db, product_id: int) -> list[ProductStoreSummary]
             s.name AS store_name, s.base_url AS store_base_url,
             pl.price AS latest_price,
             pl.discounted_price AS latest_discounted_price,
+            pl.dealer_price AS latest_dealer_price,
             pl.stock_status AS latest_stock_status,
             pl.scraped_at AS latest_scraped_at,
             pl.change_type AS latest_change_type,
-            pl.price_delta AS latest_price_delta
+            pl.price_delta AS latest_price_delta,
+            pso.manual_price,
+            pso.manual_stock_status,
+            pso.override_note
         FROM product_stores ps
         JOIN stores s ON s.id = ps.store_id
         LEFT JOIN price_logs pl ON pl.id = (
@@ -155,6 +160,7 @@ async def _get_store_summaries(db, product_id: int) -> list[ProductStoreSummary]
             WHERE product_store_id = ps.id
             ORDER BY scraped_at DESC LIMIT 1
         )
+        LEFT JOIN product_store_overrides pso ON pso.product_store_id = ps.id
         WHERE ps.product_id = ?
         ORDER BY s.name
         """,
@@ -170,10 +176,77 @@ async def _get_store_summaries(db, product_id: int) -> list[ProductStoreSummary]
             is_active=bool(r["is_active"]),
             latest_price=r["latest_price"],
             latest_discounted_price=r["latest_discounted_price"],
+            latest_dealer_price=r["latest_dealer_price"],
             latest_stock_status=r["latest_stock_status"],
             latest_scraped_at=r["latest_scraped_at"],
             latest_change_type=r["latest_change_type"],
             latest_price_delta=r["latest_price_delta"],
+            manual_price=r["manual_price"],
+            manual_stock_status=r["manual_stock_status"],
+            override_note=r["override_note"],
         )
         for r in rows
     ]
+
+
+# ── Manual overrides ───────────────────────────────────────────────────────────
+
+@router.get("/{product_id}/stores/{product_store_id}/override",
+            response_model=ProductStoreOverride)
+async def get_override(product_id: int, product_store_id: int):
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            "SELECT * FROM product_store_overrides WHERE product_store_id=?",
+            (product_store_id,),
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="No override found")
+        r = rows[0]
+        return ProductStoreOverride(
+            id=r["id"],
+            product_store_id=r["product_store_id"],
+            manual_price=r["manual_price"],
+            manual_stock_status=r["manual_stock_status"],
+            override_note=r["override_note"],
+            updated_at=r["updated_at"],
+        )
+    finally:
+        await db.close()
+
+
+@router.put("/{product_id}/stores/{product_store_id}/override",
+            response_model=ProductStoreOverride)
+async def upsert_override(
+    product_id: int, product_store_id: int, body: ProductStoreOverrideUpsert
+):
+    db = await get_db()
+    try:
+        await db.execute(
+            """INSERT INTO product_store_overrides
+                   (product_store_id, manual_price, manual_stock_status, override_note)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(product_store_id) DO UPDATE SET
+                   manual_price=excluded.manual_price,
+                   manual_stock_status=excluded.manual_stock_status,
+                   override_note=excluded.override_note,
+                   updated_at=CURRENT_TIMESTAMP""",
+            (product_store_id, body.manual_price, body.manual_stock_status, body.override_note),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return await get_override(product_id, product_store_id)
+
+
+@router.delete("/{product_id}/stores/{product_store_id}/override", status_code=204)
+async def delete_override(product_id: int, product_store_id: int):
+    db = await get_db()
+    try:
+        await db.execute(
+            "DELETE FROM product_store_overrides WHERE product_store_id=?",
+            (product_store_id,),
+        )
+        await db.commit()
+    finally:
+        await db.close()
