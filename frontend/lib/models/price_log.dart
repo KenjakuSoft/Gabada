@@ -5,6 +5,7 @@ class PriceLog {
   final String? title;
   final double? price;
   final double? discountedPrice;
+  final double? dealerPrice;
   final String? stockStatus;
 
   const PriceLog({
@@ -14,6 +15,7 @@ class PriceLog {
     this.title,
     this.price,
     this.discountedPrice,
+    this.dealerPrice,
     this.stockStatus,
   });
 
@@ -24,6 +26,7 @@ class PriceLog {
         title: j['title'],
         price: (j['price'] as num?)?.toDouble(),
         discountedPrice: (j['discounted_price'] as num?)?.toDouble(),
+        dealerPrice: (j['dealer_price'] as num?)?.toDouble(),
         stockStatus: j['stock_status'],
       );
 

@@ -89,6 +89,24 @@ class StoreRow extends StatelessWidget {
                 )
               else
                 Text('—', style: TextStyle(color: cs.outline)),
+              if (summary.latestDealerPrice != null) ...[
+                const SizedBox(height: 3),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.storefront_outlined, size: 11, color: cs.tertiary),
+                    const SizedBox(width: 3),
+                    Text(
+                      _price(summary.latestDealerPrice!),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: cs.tertiary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
 
