@@ -76,6 +76,46 @@ automatically scraping, logging history, and surfacing every change.*
 
 </td>
 </tr>
+<tr>
+<td width="50%">
+
+**💰 Dealer & Wholesale Prices**
+- Extracts B2B / trade / dealer prices separately from retail prices
+- Dedicated `dealer_price` field stored per scrape log
+- `_DEALER_PRICE_SELECTORS` targets `.dealer-price`, `.trade-price`, `.your-price`, and more
+- Custom `selectors.dealer_price` override for any store
+
+</td>
+<td width="50%">
+
+**🚫 EMI / Instalment Filter**
+- Automatically suppresses payment-plan and EMI prices
+- Pattern matches: EMI, Easy Pay, Flexi Pay, `/month`, `×12 months`, Visa/Mastercard offers, and more
+- Applied at the JS smart-scan stage **and** in Python — no instalment price ever leaks into logs
+- Works transparently across all 4 scrape strategies
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**✏️ Manual Overrides**
+- Per-product-store `product_store_overrides` table
+- Override `manual_price`, `manual_stock_status`, and add a freeform `override_note`
+- Overrides surface in product summaries alongside scraped data
+- Useful for stores that can't be scraped (PDFs, logins, private portals)
+
+</td>
+<td width="50%">
+
+**📥 Bulk Import**
+- **WooCommerce import** — connect via REST API key, preview products, select and import
+- **File import** — drag-and-drop CSV, Excel (`.xlsx`), or PDF product lists
+- Preview columns and sample rows before committing
+- Powered by `openpyxl` (Excel) and `pdfplumber` (PDF)
+
+</td>
+</tr>
 </table>
 
 ---
@@ -297,6 +337,7 @@ Each product-store link accepts an optional `scrape_config` JSON object. All fie
     "title":             "h1.product-title",
     "price":             ".price-now",
     "discounted_price":  ".price-was",
+    "dealer_price":      ".ty-price-dealer",
     "stock_status":      ".availability"
   }
 }
@@ -310,9 +351,12 @@ Each product-store link accepts an optional `scrape_config` JSON object. All fie
 | `selectors.title` | `string` | `null` | CSS selector for product title |
 | `selectors.price` | `string` | `null` | CSS selector for current / sale price |
 | `selectors.discounted_price` | `string` | `null` | CSS selector for original / retail price |
+| `selectors.dealer_price` | `string` | `null` | CSS selector for B2B / trade / dealer price |
 | `selectors.stock_status` | `string` | `null` | CSS selector for stock availability element |
 
 > Custom selectors **override** auto-detected values for those fields only. Leave a field `null` to keep auto-detection for it.
+
+> **EMI / instalment prices are automatically filtered.** If a selector accidentally targets a payment-plan price, the engine discards it. You do not need to work around this manually.
 
 <details>
 <summary><strong>Example configs for common store types</strong></summary>
@@ -467,6 +511,58 @@ curl -X POST http://localhost:8000/scraper/scrape/9
 # {"status":"queued","product_store_id":9}
 ```
 
+### Manual Overrides
+
+Override scraped data for a specific product-store link — useful for stores that can't be scraped.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/products/{id}/stores/{ps_id}/override` | Get current override (404 if none) |
+| `PUT` | `/products/{id}/stores/{ps_id}/override` | Create or replace override |
+| `DELETE` | `/products/{id}/stores/{ps_id}/override` | Remove override |
+
+```bash
+# Set a manual price + note
+curl -X PUT http://localhost:8000/products/3/stores/7/override \
+  -H "Content-Type: application/json" \
+  -d '{"manual_price": 149900, "manual_stock_status": "in_stock", "override_note": "Checked PDF catalog 2026-04-13"}'
+```
+
+### WooCommerce Import
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/import/woo/preview` | List products from a WooCommerce store (no import yet) |
+| `POST` | `/import/woo/import` | Import selected products into Gabada |
+
+```bash
+# Preview first 50 products
+curl -X POST http://localhost:8000/import/woo/preview \
+  -H "Content-Type: application/json" \
+  -d '{
+    "credentials": {
+      "site_url": "https://myshop.example.com",
+      "consumer_key": "ck_xxxx",
+      "consumer_secret": "cs_xxxx"
+    },
+    "per_page": 50
+  }'
+```
+
+### File Import (CSV / Excel / PDF)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/import/file/preview` | Upload file, get column list + sample rows |
+| `POST` | `/import/file/commit` | Commit mapped rows as products |
+
+```bash
+# Preview a CSV
+curl -X POST http://localhost:8000/import/file/preview \
+  -F "file=@products.csv"
+# → {"columns": ["Name", "URL", "Image"], "sample_rows": [...], "total_rows": 120, "file_format": "csv"}
+```
+
 ### Categories
 
 | Method | Endpoint | Description |
@@ -510,23 +606,38 @@ color               image_url             base_url UNIQUE
 created_at          category_id ──▶ categories
                     created_at
 
-product_stores                price_logs
-──────────────                ──────────
-id PK                         id PK
-product_id ──▶ products       product_store_id ──▶ product_stores
-store_id   ──▶ stores         scraped_at
-product_url                   title
-scrape_config (JSON)          price              ← original/retail
-is_active                     discounted_price   ← sale/current
-created_at                    stock_status
-                              raw_price
-                              change_type
-                              price_delta
-                              previous_price
-                              previous_stock_status
+product_stores                      product_store_overrides
+──────────────                      ───────────────────────
+id PK                               id PK
+product_id ──▶ products             product_store_id ──▶ product_stores (UNIQUE)
+store_id   ──▶ stores               manual_price
+product_url                         manual_stock_status
+scrape_config (JSON)                override_note
+is_active                           updated_at
+created_at
+
+price_logs
+──────────
+id PK
+product_store_id ──▶ product_stores
+scraped_at
+title
+price              ← original/retail
+discounted_price   ← sale/current
+dealer_price       ← B2B / trade price
+stock_status
+raw_price
+raw_discounted
+raw_dealer
+change_type
+price_delta
+previous_price
+previous_stock_status
 ```
 
 > **Effective price:** `COALESCE(discounted_price, price)` gives the price the customer actually pays. When no discount is active, `discounted_price` is `NULL` and `price` holds the current price.
+
+> **Dealer price:** Stored separately in `dealer_price`. Never substituted for the retail price — kept as supplementary data for B2B comparison.
 
 ---
 
@@ -710,6 +821,23 @@ git commit -m "feat: describe your change"
 ---
 
 ## 📋 Changelog
+
+### `v0.3.0` — 2026-04-13
+
+> Dealer prices, EMI filtering, manual overrides, WooCommerce & file import
+
+**Added**
+- `dealer_price` / `raw_dealer` columns in `price_logs` — B2B / trade prices scraped separately
+- `_DEALER_PRICE_SELECTORS` list targeting `.dealer-price`, `.trade-price`, `.wholesale-price`, `.your-price`, and CS-Cart's `.ty-price-dealer`
+- `selectors.dealer_price` field in `ScrapeConfig` for custom dealer price override
+- `_INSTALLMENT_RE` regex filter — suppresses EMI, Easy Pay, Flexi Pay, `/month`, `×12 months`, card-offer prices across all 4 scrape strategies
+- `product_store_overrides` table — manual `manual_price`, `manual_stock_status`, `override_note` per product-store
+- `ProductStoreOverride` / `ProductStoreOverrideUpsert` Pydantic models
+- WooCommerce import models: `WooCredentials`, `WooProductPreview`, `WooPreviewRequest`, `WooImportRequest`
+- File import models: `FileImportPreviewResponse`, `FileImportRow`, `FileImportCommitRequest`
+- `openpyxl` and `pdfplumber` dependencies (Excel + PDF file import)
+
+---
 
 ### `v0.2.0` — 2026-04-13
 
