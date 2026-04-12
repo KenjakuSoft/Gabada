@@ -7,6 +7,7 @@ class ProductStoreSummary {
   final bool isActive;
   final double? latestPrice;
   final double? latestDiscountedPrice;
+  final double? latestDealerPrice;
   final String? latestStockStatus;
   final DateTime? latestScrapedAt;
   final String? latestChangeType;
@@ -21,6 +22,7 @@ class ProductStoreSummary {
     required this.isActive,
     this.latestPrice,
     this.latestDiscountedPrice,
+    this.latestDealerPrice,
     this.latestStockStatus,
     this.latestScrapedAt,
     this.latestChangeType,
@@ -38,6 +40,7 @@ class ProductStoreSummary {
         latestPrice: (j['latest_price'] as num?)?.toDouble(),
         latestDiscountedPrice:
             (j['latest_discounted_price'] as num?)?.toDouble(),
+        latestDealerPrice: (j['latest_dealer_price'] as num?)?.toDouble(),
         latestStockStatus: j['latest_stock_status'],
         latestScrapedAt: j['latest_scraped_at'] != null
             ? DateTime.parse(j['latest_scraped_at'])
