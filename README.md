@@ -1,386 +1,292 @@
-# Gabada
+<div align="center">
 
-**Gabada** is a desktop application for tracking product prices and stock availability across multiple online stores. Add any product, link it to one or more store URLs, and Gabada will automatically scrape price and stock data daily — storing a full history you can visualise as a chart, filter by date range, and monitor through an activity feed.
+```
+ ██████╗  █████╗ ██████╗  █████╗ ██████╗  █████╗
+██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗
+██║  ███╗███████║██████╔╝███████║██║  ██║███████║
+██║   ██║██╔══██║██╔══██╗██╔══██║██║  ██║██╔══██║
+╚██████╔╝██║  ██║██████╔╝██║  ██║██████╔╝██║  ██║
+ ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝
+```
 
-> Built for Windows. Backend: Python + FastAPI. Frontend: Flutter desktop.
+### Track prices. Catch drops. Never overpay.
 
----
+<br/>
 
-## Table of Contents
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Flutter](https://img.shields.io/badge/Flutter-3.41%2B-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Playwright](https://img.shields.io/badge/Playwright-1.44%2B-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)]()
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Running the App](#running-the-app)
-- [Usage Guide](#usage-guide)
-  - [Adding a Product](#adding-a-product)
-  - [Linking a Store](#linking-a-store)
-  - [Triggering a Scrape](#triggering-a-scrape)
-  - [Viewing Price History](#viewing-price-history)
-  - [Activity Feed](#activity-feed)
-  - [Categories](#categories)
-- [Scraper Engine](#scraper-engine)
-  - [Extraction Strategies](#extraction-strategies)
-  - [Scrape Config Reference](#scrape-config-reference)
-- [REST API Reference](#rest-api-reference)
-  - [Products](#products-api)
-  - [Stores](#stores-api)
-  - [Logs](#logs-api)
-  - [Scraper](#scraper-api)
-  - [Categories](#categories-api)
-  - [Activity](#activity-api)
-- [Database Schema](#database-schema)
-- [Common Errors & Solutions](#common-errors--solutions)
-- [Contributing](#contributing)
-- [Changelog](#changelog)
+<br/>
+
+*A desktop app that watches product prices across any online store —
+automatically scraping, logging history, and surfacing every change.*
+
+<br/>
+
+[**Quick Start**](#-quick-start) · [**Features**](#-features) · [**API Docs**](#-rest-api-reference) · [**Contributing**](#-contributing)
+
+</div>
 
 ---
 
-## Overview
+## ✨ Features
 
-| Feature | Detail |
+<table>
+<tr>
+<td width="50%">
+
+**🔍 Smart Scraping**
+- Works on any e-commerce site — no CSS selectors required
+- 4-strategy extraction: JSON-LD → Schema.org → JS Smart Scan → CSS patterns
+- Handles SPAs, lazy-loaded content, and JS-heavy stores
+- One shared Playwright browser — fast and memory-efficient
+
+</td>
+<td width="50%">
+
+**📊 Price Intelligence**
+- Full price history stored per product per store
+- Interactive line chart with date-range filtering
+- Detects price-up, price-down, stock-in, stock-out events
+- Activity feed shows only meaningful changes — no noise
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**🏷️ Organisation**
+- Colour-coded categories for grouping products
+- Track the same product across multiple stores side-by-side
+- Lowest-price badge on every product card
+- Stock status badges: In Stock · Limited · Out of Stock
+
+</td>
+<td width="50%">
+
+**⚡ Automation**
+- Daily auto-scrape at 08:00 via APScheduler
+- Manual scrape from UI with live polling until results arrive
+- REST API for scripting and integrations
+- Zero config — drop in a URL and go
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Flutter Desktop App                   │
+│   HomeScreen · ProductDetail · ActivityFeed · AddProduct │
+│          Provider state · Dio HTTP · fl_chart            │
+└──────────────────────┬──────────────────────────────────┘
+                       │  HTTP  localhost:8000
+┌──────────────────────▼──────────────────────────────────┐
+│                   FastAPI Backend                        │
+│  /products  /stores  /logs  /scraper  /categories        │
+│              /activity  /health                          │
+│                     │                     │              │
+│           aiosqlite  │          APScheduler│              │
+│           gabada.db  │          08:00 daily│              │
+└──────────────────────┼─────────────────────┼────────────┘
+                       │                     │
+┌──────────────────────▼─────────────────────▼────────────┐
+│                 Playwright Engine                        │
+│  Strategy 1: JSON-LD structured data                     │
+│  Strategy 2: Schema.org microdata                        │
+│  Strategy 3: Universal JS smart scan  ← works anywhere  │
+│  Strategy 4: CSS pattern library (Amazon/Shopify/etc.)   │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Stack at a glance:**
+
+| Layer | Technology |
 |---|---|
-| **Price tracking** | Stores full price history per product per store |
-| **Stock monitoring** | Normalises stock status to `in_stock`, `out_of_stock`, `limited`, `unknown` |
-| **Auto-scrape** | APScheduler fires a scrape of all active products at **08:00 daily** |
-| **Manual scrape** | Trigger an immediate scrape from the UI or via REST API |
-| **Price chart** | Interactive line chart per product with optional date-range filter |
-| **Activity feed** | Shows only meaningful changes (price up/down, stock in/out) |
-| **Categories** | Colour-coded labels for organising products |
-| **No-config scraping** | Works on most e-commerce sites without writing any CSS selectors |
+| Frontend | Flutter 3.41 · Dart · Provider · Dio · fl_chart · shimmer |
+| Backend | Python 3.11 · FastAPI · uvicorn · Pydantic v2 |
+| Database | SQLite via aiosqlite (WAL mode, foreign keys) |
+| Scraping | Playwright (Chromium) · APScheduler |
+| Platform | Windows 10/11 (Linux/macOS also work) |
 
 ---
 
-## Architecture
+## ⚡ Quick Start
 
-```
-Gabada/
-├── backend/                  ← Python 3.11+
-│   ├── main.py               ← FastAPI entry point (uvicorn, port 8000)
-│   ├── database/
-│   │   ├── db.py             ← aiosqlite connection, migrations
-│   │   └── models.py         ← Pydantic v2 models
-│   ├── scraper/
-│   │   └── engine.py         ← Playwright scraper, 4-strategy extraction
-│   ├── scheduler/
-│   │   └── jobs.py           ← APScheduler daily job
-│   └── api/
-│       ├── products.py       ← /products  endpoints
-│       ├── stores.py         ← /stores    endpoints
-│       ├── logs.py           ← /logs      endpoints
-│       ├── scraper_routes.py ← /scraper   endpoints
-│       ├── categories.py     ← /categories endpoints
-│       └── activity.py       ← /activity  endpoints
-│
-├── frontend/                 ← Flutter 3.41+ (Windows desktop)
-│   └── lib/
-│       ├── screens/          ← Home, ProductDetail, AddProduct, Activity
-│       ├── models/           ← Dart data classes
-│       ├── providers/        ← ChangeNotifier state management
-│       ├── services/         ← ApiService (Dio HTTP client)
-│       └── widgets/          ← ProductCard, StoreRow, PriceChart, etc.
-│
-├── start_gabada.bat          ← One-click launcher (Windows)
-└── README.md
-```
+### Prerequisites
 
-**Data flow:**
-
-```
-Flutter UI  ──HTTP──▶  FastAPI (port 8000)  ──async──▶  aiosqlite (gabada.db)
-                               │
-                        APScheduler / manual trigger
-                               │
-                        Playwright browser  ──▶  Target store page
-```
-
----
-
-## Prerequisites
-
-| Requirement | Minimum version | Notes |
+| Tool | Version | Install |
 |---|---|---|
-| Windows | 10 / 11 | Linux/macOS works too — skip the `.bat` launcher |
-| Python | 3.11 | 3.14 confirmed working |
-| Flutter | 3.24 | 3.41.6 recommended |
-| Dart SDK | 3.5 | Bundled with Flutter |
-| Git | any | For cloning |
-| Internet | required | Scraping fetches live pages |
+| Python | ≥ 3.11 | [python.org](https://python.org) |
+| Flutter | ≥ 3.24 | [flutter.dev](https://flutter.dev) |
+| Git | any | [git-scm.com](https://git-scm.com) |
 
-> **No browser installation needed.** Playwright downloads its own Chromium binary during setup.
+> **No browser install needed.** Playwright downloads its own Chromium binary.
 
----
-
-## Installation
-
-### 1. Clone the repository
+### 1 · Clone
 
 ```bash
 git clone https://github.com/XxOtakuXx/Gabada.git
 cd Gabada
 ```
 
-### 2. Set up the Python backend
+### 2 · Backend setup
 
 ```bash
 cd backend
 
-# Create and activate a virtual environment (recommended)
+# Create a virtual environment
 python -m venv .venv
 .venv\Scripts\activate          # Windows
-# source .venv/bin/activate     # macOS/Linux
+# source .venv/bin/activate     # macOS / Linux
 
-# Install dependencies
+# Install Python dependencies
 pip install -r requirements.txt
 
-# Download Playwright's Chromium browser
+# Download Playwright's Chromium
 playwright install chromium
 ```
 
-### 3. Set up the Flutter frontend
+### 3 · Frontend setup
 
 ```bash
 cd ../frontend
 flutter pub get
 ```
 
-### 4. Verify the setup
+### 4 · Launch
+
+**Windows — one click:**
+
+```
+Double-click  start_gabada.bat
+```
+
+Two terminals open: one for the backend, one for the Flutter app.
+
+**Manual (any OS):**
 
 ```bash
-# Backend — should print "ok"
-cd backend
-uvicorn main:app --port 8000 &
+# Terminal 1 — backend
+cd backend && uvicorn main:app --reload --port 8000
+
+# Terminal 2 — frontend
+cd frontend && flutter run -d windows
+```
+
+### 5 · Verify
+
+```bash
 curl http://localhost:8000/health
 # {"status":"ok"}
-
-# Frontend — should open a Windows window
-cd ../frontend
-flutter run -d windows
 ```
+
+Open `http://localhost:8000/docs` for the interactive API explorer.
 
 ---
 
-## Configuration
+## 📖 Usage Guide
 
-Gabada requires **no configuration files**. Everything is stored in `backend/gabada.db` (SQLite, auto-created on first run).
+### Adding a product
 
-### Changing the backend port
+1. Click **`+ Add Product`** (bottom-right floating button)
+2. Enter a **canonical name** — your label for the product
+3. Optionally add an **image URL** and assign a **category**
+4. Hit **Save**
 
-The frontend hard-codes `http://localhost:8000`. If you change the port:
+> Prices show `—` until the first scrape completes.
 
-1. Edit `backend/start_gabada.bat` — change `--port 8000`
-2. Edit `frontend/lib/services/api_service.dart` — change `_base`
-
-```dart
-// frontend/lib/services/api_service.dart
-static const _base = 'http://localhost:8000';   // ← change here
-```
-
-### Changing the daily scrape schedule
-
-Edit `backend/scheduler/jobs.py`:
-
-```python
-_scheduler.add_job(
-    scrape_all_active,
-    trigger=CronTrigger(hour=8, minute=0),   # ← 08:00 daily
-    ...
-)
-```
-
-Uses [APScheduler CronTrigger](https://apscheduler.readthedocs.io/en/stable/modules/triggers/cron.html) syntax. Examples:
-
-| Schedule | `hour` | `minute` |
-|---|---|---|
-| 08:00 daily (default) | `8` | `0` |
-| Every 6 hours | `*/6` | `0` |
-| Midnight | `0` | `0` |
-| Twice daily | `8,20` | `0` |
-
-### Environment variables
-
-None required. The database path is resolved relative to `backend/database/db.py`:
-
-```python
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "gabada.db")
-```
-
-To relocate the database, change `DB_PATH` in `backend/database/db.py`.
-
----
-
-## Running the App
-
-### Option A — One-click launcher (Windows)
-
-Double-click `start_gabada.bat`. It opens two terminal windows:
-
-- **Gabada Backend** — uvicorn on port 8000
-- **Gabada Frontend** — Flutter debug build
-
-Both windows show live logs. Close either window to shut down that process.
-
-### Option B — Manual (any OS)
-
-**Terminal 1 — backend:**
-
-```bash
-cd backend
-source .venv/bin/activate        # skip on Windows if using global Python
-uvicorn main:app --reload --port 8000
-```
-
-`--reload` enables hot-restart on code changes. Omit for production.
-
-**Terminal 2 — frontend:**
-
-```bash
-cd frontend
-flutter run -d windows           # or -d linux / -d macos
-```
-
-### Option C — Release build
-
-```bash
-cd frontend
-flutter build windows
-# Output: frontend/build/windows/x64/runner/Release/gabada.exe
-```
-
-Distribute the entire `Release/` folder — it contains the required DLLs.
-
----
-
-## Usage Guide
-
-### Adding a Product
-
-1. Click **+ Add Product** (floating button, bottom-right of home screen).
-2. Enter the product's **canonical name** — this is your label, not scraped.
-3. Optionally paste an **image URL** for the thumbnail.
-4. Optionally assign a **category**.
-5. Click **Save**.
-
-The product appears in the home list. Prices show `—` until the first scrape.
-
-### Linking a Store
+### Linking a store
 
 Each product can be tracked across multiple stores independently.
 
-1. Open a product → tap **Add Store**.
-2. Select an existing store from the dropdown, or click **Create new store** to add one inline.
-   - **Store name**: display label (e.g. `redacted-store`)
-   - **Base URL**: root domain (e.g. `https://www.redacted-store`)
-3. Paste the **product URL** — the exact URL of this product on that store.
-4. Click **Link**.
+1. Open a product → tap **Add Store**
+2. Select an existing store or click **Create new store** inline
+3. Paste the **exact product URL** on that store
+4. Click **Link**
 
-Gabada will scrape that URL automatically on the next scheduled run, or immediately if you trigger a manual scrape.
+### Triggering a scrape
 
-### Triggering a Scrape
-
-**Scrape a single store:**  
-In the product detail screen, tap the **↻ refresh icon** on any store row. The app polls every 5 seconds and updates the row automatically when the scrape completes (up to ~35 seconds).
-
-**Scrape all products:**  
-On the home screen, tap the **↻ refresh icon** in the top-right app bar. The app reloads the product list every 10 seconds for 60 seconds, picking up results as each store completes.
-
-**Via API:**
-
-```bash
-# Scrape one product_store
-curl -X POST http://localhost:8000/scraper/scrape/9
-
-# Scrape everything
-curl -X POST http://localhost:8000/scraper/scrape-all
-```
-
-Both return `202 Accepted` immediately. The scrape runs in the background.
-
-### Viewing Price History
-
-Open any product → the **Price History** chart appears at the top (once at least one log exists).
-
-- The Y-axis shows prices (Rs. format).
-- The X-axis shows dates.
-- The chart covers all stores for the product overlaid.
-- Use the **calendar icon** (top-right of detail screen) to filter a custom date range.
-
-### Activity Feed
-
-The activity feed shows only scrapes where something **changed** — price increases, price drops, stock going in or out. Unchanged scrapes are silently recorded but not shown here.
-
-Access via the **Activity** tab/screen (bottom navigation or side drawer depending on your build).
-
-**Filtering by change type:**
-
-```bash
-# API — show only price drops
-curl "http://localhost:8000/activity/?change_type=price_down&limit=50"
-```
-
-| `change_type` value | Meaning |
+| Action | How |
 |---|---|
-| `new` | First scrape ever for this product-store |
-| `price_up` | Price increased |
-| `price_down` | Price decreased |
-| `price_and_stock` | Both price and stock changed in one scrape |
-| `stock_in` | Stock became `in_stock` or `limited` |
-| `stock_out` | Stock became `out_of_stock` |
-| `stock_change` | Stock changed to an unclassified state |
-| `no_change` | No change detected (recorded but filtered from activity) |
+| Scrape one store | Product detail screen → **↻** on any store row |
+| Scrape everything | Home screen → **↻** icon (top-right app bar) |
+| API — one store | `POST /scraper/scrape/{product_store_id}` |
+| API — all stores | `POST /scraper/scrape-all` |
 
-### Categories
+After triggering from the UI, the app polls automatically and updates when results arrive — no manual refresh needed.
 
-Categories are colour-coded labels for grouping products (e.g. *CPUs*, *GPUs*, *Storage*).
+### Reading the activity feed
 
-- **Create:** Home screen → label icon → *New Category* panel → pick a colour → enter name → **Add**.
-- **Filter:** Tap a category chip at the top of the home screen to show only products in that category.
-- **Delete:** Home screen → label icon → trash icon next to any category.
+The activity feed filters out unchanged scrapes and shows only events that matter:
 
-Deleting a category sets all products in that category to uncategorised (no cascade delete on products).
+| Icon | Event | `change_type` |
+|---|---|---|
+| 🆕 | First scrape ever | `new` |
+| 📈 | Price went up | `price_up` |
+| 📉 | Price dropped | `price_down` |
+| 📈📦 | Price + stock both changed | `price_and_stock` |
+| ✅ | Back in stock | `stock_in` |
+| ❌ | Out of stock | `stock_out` |
+| 🔄 | Other stock change | `stock_change` |
+
+### Managing categories
+
+**Home screen → label icon (top-right) → Category Manager**
+
+- Pick a colour from the palette
+- Type a name → **Add**
+- Filter the home list by tapping any category chip
+- Delete via the trash icon
 
 ---
 
-## Scraper Engine
+## 🕷️ Scraper Engine
 
-The scraper engine (`backend/scraper/engine.py`) uses a shared Playwright Chromium instance (started once at app launch, reused across all scrapes to save memory and startup time).
-
-### Extraction Strategies
-
-Strategies run in order. The first strategy to return a price wins. Stock status gaps are filled by later strategies.
+### Extraction strategy waterfall
 
 ```
-Request URL
-    │
-    ▼
-1. JSON-LD  ──────────────────── <script type="application/ld+json">
-    │ miss
-    ▼
-2. Schema.org microdata  ──────── [itemprop="price"], [itemprop="availability"]
-    │ miss / no stock
-    ▼
-3. Universal JS smart scan  ───── Scores all visible price-like text nodes by
-    │                              DOM context; inspects cart/buy buttons for stock
-    │ miss
-    ▼
-4. Common CSS patterns  ──────── Known selectors for Amazon, Shopify, WooCommerce,
-    │                             CS-Cart, plain PHP stores, etc.
-    │
-    ▼
-5. Custom selectors (optional) ── Per-product-store overrides defined in scrape_config
+ Navigate to URL (Playwright, headless Chromium)
+           │
+           ▼
+ ┌─────────────────────┐
+ │  1. JSON-LD         │  <script type="application/ld+json"> → Product schema
+ └──────────┬──────────┘
+      miss  │
+            ▼
+ ┌─────────────────────┐
+ │  2. Schema microdata│  [itemprop="price"], [itemprop="availability"]
+ └──────────┬──────────┘
+      miss  │ or stock missing
+            ▼
+ ┌─────────────────────┐
+ │  3. JS Smart Scan   │  Scores ALL visible text nodes by DOM context;
+ │  (universal)        │  inspects cart/buy button state for stock
+ └──────────┬──────────┘
+      miss  │
+            ▼
+ ┌─────────────────────┐
+ │  4. CSS Patterns    │  Known selectors: Amazon, Shopify, WooCommerce,
+ │                     │  CS-Cart, plain PHP stores, and more
+ └──────────┬──────────┘
+            │
+            ▼
+ ┌─────────────────────┐
+ │  Custom selectors   │  Per-product-store overrides (optional, always last)
+ └─────────────────────┘
 ```
 
-**Strategy 3 (Smart Scan)** works on any site without configuration. It:
+### `scrape_config` reference
 
-- Walks all visible text nodes matching price-like patterns
-- Scores each by how "price-adjacent" its DOM ancestors are (class/id keywords like `price`, `amount`, `sale`, penalises `cart`, `related`, `footer`)
-- Detects stock by inspecting add-to-cart / buy button state and full-page text
-
-### Scrape Config Reference
-
-Each product-store link carries an optional `scrape_config` JSON object. All fields are optional — omit entirely to rely on the auto-detection strategies.
+Each product-store link accepts an optional `scrape_config` JSON object. All fields are optional.
 
 ```json
 {
@@ -388,28 +294,30 @@ Each product-store link carries an optional `scrape_config` JSON object. All fie
   "wait_for": ".product-price",
   "wait_timeout": 15000,
   "selectors": {
-    "title": "h1.product-title",
-    "price": ".price-now",
-    "discounted_price": ".price-was",
-    "stock_status": ".availability"
+    "title":             "h1.product-title",
+    "price":             ".price-now",
+    "discounted_price":  ".price-was",
+    "stock_status":      ".availability"
   }
 }
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `use_playwright` | `bool` | `true` | Set `false` only for plain static HTML pages (faster, no JS execution) |
-| `wait_for` | `string \| null` | `null` | CSS selector Playwright waits for before extracting. Critical for SPAs that render content asynchronously |
-| `wait_timeout` | `int` (ms) | `15000` | How long to wait for `wait_for` before giving up and extracting anyway |
-| `selectors.title` | `string \| null` | `null` | CSS selector for the product title |
-| `selectors.price` | `string \| null` | `null` | CSS selector for the current/sale price |
-| `selectors.discounted_price` | `string \| null` | `null` | CSS selector for the original/retail price (when a discount is shown) |
-| `selectors.stock_status` | `string \| null` | `null` | CSS selector for a stock availability element |
+| `use_playwright` | `bool` | `true` | Set `false` for plain static HTML — skips JS execution for speed |
+| `wait_for` | `string` | `null` | CSS selector Playwright waits for before extracting — critical for SPAs |
+| `wait_timeout` | `int` (ms) | `15000` | Max wait time for `wait_for` |
+| `selectors.title` | `string` | `null` | CSS selector for product title |
+| `selectors.price` | `string` | `null` | CSS selector for current / sale price |
+| `selectors.discounted_price` | `string` | `null` | CSS selector for original / retail price |
+| `selectors.stock_status` | `string` | `null` | CSS selector for stock availability element |
 
-Custom selectors act as **overrides** — they are applied last and replace any auto-detected values for the fields specified. Leave a selector `null` to keep the auto-detected value for that field.
+> Custom selectors **override** auto-detected values for those fields only. Leave a field `null` to keep auto-detection for it.
 
-**Example — CS-Cart store (redacted-store):**
+<details>
+<summary><strong>Example configs for common store types</strong></summary>
 
+**CS-Cart** (e.g. redacted-store):
 ```json
 {
   "use_playwright": true,
@@ -421,8 +329,7 @@ Custom selectors act as **overrides** — they are applied last and replace any 
 }
 ```
 
-**Example — Plain PHP store (redacted-store):**
-
+**Plain PHP store** (e.g. redacted-store):
 ```json
 {
   "use_playwright": false,
@@ -432,302 +339,244 @@ Custom selectors act as **overrides** — they are applied last and replace any 
 }
 ```
 
-**Price normalisation rules:**
+**Shopify:**
+```json
+{
+  "use_playwright": true,
+  "wait_for": ".product__price",
+  "selectors": {
+    "price": ".product__price"
+  }
+}
+```
 
-- Currency symbols (`Rs.`, `LKR`, `$`, `€`, `£`, etc.) are stripped before parsing
-- European format (`1.299,99`) and US format (`1,299.99`) are both handled
+**WooCommerce:**
+```json
+{
+  "use_playwright": true,
+  "selectors": {
+    "price": ".price .amount",
+    "discounted_price": ".price del .amount"
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Price & stock normalisation rules</strong></summary>
+
+**Price parsing:**
+- Currency symbols (`Rs.`, `LKR`, `$`, `€`, `£`, `¥`, etc.) are stripped
+- European format `1.299,99` and US format `1,299.99` both handled
 - Values ≤ 0 are discarded
-- If a `discounted_price` selector is provided, the two prices are interpreted as *sale price* and *original price*
+- `discounted_price` = sale/current price; `price` = original/strikethrough
 
-**Stock normalisation — text to enum:**
+**Stock text → enum mapping:**
 
 | Detected text (case-insensitive) | Stored value |
 |---|---|
 | `out of stock`, `sold out`, `unavailable`, `not available` | `out_of_stock` |
 | `limited`, `low stock`, `only X left`, `hurry`, `few left` | `limited` |
 | `in stock`, `available`, `add to cart`, `buy now` | `in_stock` |
-| Schema.org `availability` URL contains `InStock` | `in_stock` |
-| Schema.org `availability` URL contains `OutOfStock` | `out_of_stock` |
-| Anything else | `unknown` |
+| Schema.org URL contains `InStock` | `in_stock` |
+| Schema.org URL contains `OutOfStock` | `out_of_stock` |
+| Anything else / not found | `unknown` |
+
+</details>
 
 ---
 
-## REST API Reference
+## 🌐 REST API Reference
 
-The API is available at `http://localhost:8000`. Interactive docs: `http://localhost:8000/docs`.
+Base URL: `http://localhost:8000`  
+Interactive explorer: `http://localhost:8000/docs`
 
-### Products API
+### Products
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/products/` | List all products. Optional `?category_id=` filter |
-| `GET` | `/products/{id}` | Get one product with all store summaries |
-| `POST` | `/products/` | Create a product |
-| `PATCH` | `/products/{id}` | Update a product |
-| `DELETE` | `/products/{id}` | Delete product and all its logs |
-| `POST` | `/products/{id}/stores` | Link a store URL to a product |
+| `GET` | `/products/` | List all products · `?category_id=` filter |
+| `GET` | `/products/{id}` | Single product with store summaries |
+| `POST` | `/products/` | Create product |
+| `PATCH` | `/products/{id}` | Update product |
+| `DELETE` | `/products/{id}` | Delete product + all its logs |
+| `POST` | `/products/{id}/stores` | Link a store URL |
 | `DELETE` | `/products/{id}/stores/{ps_id}` | Unlink a store |
 
-**Create product — request body:**
+<details>
+<summary>Request/response examples</summary>
 
-```json
-{
-  "canonical_name": "AMD Ryzen 7 9800X3D",
-  "image_url": "https://example.com/image.jpg",
-  "category_id": 2
-}
+```bash
+# Create a product
+curl -X POST http://localhost:8000/products/ \
+  -H "Content-Type: application/json" \
+  -d '{"canonical_name": "AMD Ryzen 7 9800X3D", "category_id": 1}'
+
+# Link a store
+curl -X POST http://localhost:8000/products/8/stores \
+  -H "Content-Type: application/json" \
+  -d '{
+    "store_id": 1,
+    "product_url": "https://store.example.com/product/9800x3d",
+    "scrape_config": {"use_playwright": true, "wait_for": ".price"}
+  }'
 ```
 
-**Link store — request body:**
+</details>
 
-```json
-{
-  "store_id": 1,
-  "product_url": "https://store.example.com/product/amd-9800x3d",
-  "scrape_config": {
-    "use_playwright": true,
-    "wait_for": ".price"
-  }
-}
-```
-
-### Stores API
+### Stores
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/stores/` | List all stores |
-| `POST` | `/stores/` | Create a store |
-| `DELETE` | `/stores/{id}` | Delete a store |
+| `POST` | `/stores/` | Create store — `base_url` must be unique |
+| `DELETE` | `/stores/{id}` | Delete store |
 
-**Create store — request body:**
-
-```json
-{
-  "name": "redacted-store",
-  "base_url": "https://www.redacted-store"
-}
-```
-
-> `base_url` must be unique. Duplicate attempts return `409 Conflict`.
-
-### Logs API
+### Price Logs
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/logs/` | Logs for a single product-store link |
-| `GET` | `/logs/product/{product_id}` | All logs for all stores of a product |
+| `GET` | `/logs/` | Logs for one product-store · requires `?product_store_id=` |
+| `GET` | `/logs/product/{id}` | All logs for every store of a product |
 
 **Query parameters:**
 
-| Parameter | Type | Default | Description |
+| Param | Type | Default | Description |
 |---|---|---|---|
-| `product_store_id` | `int` | required (for `/logs/`) | ID of the product-store link |
-| `from` | `date` (YYYY-MM-DD) | none | Start date filter |
-| `to` | `date` (YYYY-MM-DD) | none | End date filter |
-| `limit` | `int` | 365 / 1000 | Maximum rows returned |
-
-**Example:**
+| `from` | `YYYY-MM-DD` | — | Start date |
+| `to` | `YYYY-MM-DD` | — | End date |
+| `limit` | `int` | 365 | Max rows (cap 1000 / 5000) |
 
 ```bash
-# Price history for product 8, last 30 days
+# Last 30 days for product 8
 curl "http://localhost:8000/logs/product/8?from=2026-03-13&to=2026-04-13"
 ```
 
-### Scraper API
+### Scraper
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/scraper/scrape/{product_store_id}` | Scrape one product-store immediately |
-| `POST` | `/scraper/scrape-all` | Scrape all active product-stores |
+| `POST` | `/scraper/scrape/{ps_id}` | Scrape one product-store (202 Accepted) |
+| `POST` | `/scraper/scrape-all` | Scrape all active product-stores (202 Accepted) |
 
-Both return `202 Accepted`. Scraping runs in a background task and does **not** block the HTTP response. Poll `/products/{id}` or `/logs/` to see when new data appears.
+Both return immediately. Scraping runs in a background task.
 
 ```bash
 curl -X POST http://localhost:8000/scraper/scrape/9
 # {"status":"queued","product_store_id":9}
-
-curl -X POST http://localhost:8000/scraper/scrape-all
-# {"status":"queued"}
 ```
 
-### Categories API
+### Categories
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/categories/` | List all categories |
-| `POST` | `/categories/` | Create a category |
-| `PATCH` | `/categories/{id}` | Update a category |
-| `DELETE` | `/categories/{id}` | Delete a category |
+| `POST` | `/categories/` | Create · `{"name": "CPUs", "color": "#6C63FF"}` |
+| `PATCH` | `/categories/{id}` | Update name / color |
+| `DELETE` | `/categories/{id}` | Delete (products become uncategorised) |
 
-**Create category — request body:**
-
-```json
-{
-  "name": "Processors",
-  "color": "#6C63FF"
-}
-```
-
-`color` must be a valid hex string (`#RRGGBB`). Duplicate names return `409 Conflict`.
-
-### Activity API
+### Activity
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/activity/` | Recent price and stock change events |
+| `GET` | `/activity/` | Recent change events, newest first |
 
 **Query parameters:**
 
-| Parameter | Type | Default | Description |
+| Param | Type | Default | Description |
 |---|---|---|---|
-| `limit` | `int` | `100` | Max results (maximum `500`) |
-| `offset` | `int` | `0` | Pagination offset |
-| `change_type` | `string` | none | Filter to a specific change type |
+| `limit` | `int` | 100 | Max results (cap 500) |
+| `offset` | `int` | 0 | Pagination offset |
+| `change_type` | `string` | — | Filter: `price_down`, `stock_out`, etc. |
 
 ```bash
 # Latest 20 price drops
 curl "http://localhost:8000/activity/?change_type=price_down&limit=20"
-
-# Page 2
-curl "http://localhost:8000/activity/?limit=100&offset=100"
 ```
 
 ---
 
-## Database Schema
+## 🗄️ Database Schema
 
-`backend/gabada.db` — SQLite, WAL mode, foreign keys enabled.
+`backend/gabada.db` — SQLite, WAL mode, foreign keys ON.
 
-```sql
--- Product grouping labels
-CREATE TABLE categories (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT    NOT NULL UNIQUE,
-    color      TEXT    NOT NULL DEFAULT '#6C63FF',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+```
+categories          products              stores
+──────────          ────────              ──────
+id PK               id PK                 id PK
+name UNIQUE         canonical_name        name
+color               image_url             base_url UNIQUE
+created_at          category_id ──▶ categories
+                    created_at
 
--- A product you want to track (your label, not scraped)
-CREATE TABLE products (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    canonical_name TEXT    NOT NULL,
-    image_url      TEXT,
-    category_id    INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- A store / online shop
-CREATE TABLE stores (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT NOT NULL,
-    base_url   TEXT NOT NULL UNIQUE,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Link: one product as sold on one specific store
-CREATE TABLE product_stores (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id   INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-    store_id     INTEGER NOT NULL REFERENCES stores(id)   ON DELETE CASCADE,
-    product_url  TEXT    NOT NULL,
-    scrape_config TEXT   NOT NULL DEFAULT '{}',  -- JSON: ScrapeConfig
-    is_active    INTEGER NOT NULL DEFAULT 1,
-    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(product_id, store_id)
-);
-
--- One row per scrape run
-CREATE TABLE price_logs (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_store_id      INTEGER NOT NULL REFERENCES product_stores(id) ON DELETE CASCADE,
-    scraped_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
-    title                 TEXT,
-    price                 REAL,         -- original/retail price
-    discounted_price      REAL,         -- sale price (if discounted)
-    stock_status          TEXT DEFAULT 'unknown',
-    raw_price             TEXT,         -- unparsed string from the page
-    raw_discounted        TEXT,
-    change_type           TEXT,         -- see activity change types
-    price_delta           REAL,         -- new_price - prev_price (signed)
-    previous_price        REAL,
-    previous_stock_status TEXT
-);
+product_stores                price_logs
+──────────────                ──────────
+id PK                         id PK
+product_id ──▶ products       product_store_id ──▶ product_stores
+store_id   ──▶ stores         scraped_at
+product_url                   title
+scrape_config (JSON)          price              ← original/retail
+is_active                     discounted_price   ← sale/current
+created_at                    stock_status
+                              raw_price
+                              change_type
+                              price_delta
+                              previous_price
+                              previous_stock_status
 ```
 
-**Indexes:**
-
-```sql
-CREATE INDEX idx_price_logs_product_store ON price_logs(product_store_id);
-CREATE INDEX idx_price_logs_scraped_at    ON price_logs(scraped_at);
-CREATE INDEX idx_price_logs_change        ON price_logs(change_type, scraped_at);
-```
-
-**Effective price logic:**  
-`discounted_price` holds the **current/sale** price when a discount is active; `price` holds the original/strikethrough price. When no discount exists, `price` holds the current price and `discounted_price` is `NULL`. Use `COALESCE(discounted_price, price)` to get the price a customer would actually pay.
+> **Effective price:** `COALESCE(discounted_price, price)` gives the price the customer actually pays. When no discount is active, `discounted_price` is `NULL` and `price` holds the current price.
 
 ---
 
-## Common Errors & Solutions
+## 🚨 Common Errors & Solutions
 
-### Backend won't start
+<details>
+<summary><strong>ModuleNotFoundError: No module named 'fastapi'</strong></summary>
 
-**Error:**
-```
-ModuleNotFoundError: No module named 'fastapi'
-```
-**Solution:** Dependencies not installed. Run:
+Dependencies not installed, or the virtualenv is not activated.
+
 ```bash
+# Activate the venv first, then:
 pip install -r requirements.txt
 ```
 
----
+</details>
 
-**Error:**
-```
-playwright._impl._errors.Error: Executable doesn't exist at ...
-```
-**Solution:** Playwright's Chromium binary is missing. Run:
+<details>
+<summary><strong>Playwright: Executable doesn't exist</strong></summary>
+
+Chromium binary was never downloaded.
+
 ```bash
 playwright install chromium
 ```
 
----
+</details>
 
-**Error (Windows):**
-```
-NotImplementedError: ...ProactorEventLoop...
-```
-**Solution:** Already fixed in `main.py` via `WindowsProactorEventLoopPolicy`. If you see this, ensure you are running `python -m uvicorn main:app` from the `backend/` directory, not the repo root.
+<details>
+<summary><strong>"Cannot reach backend" in the Flutter UI</strong></summary>
 
----
+1. Confirm backend is running: `curl http://localhost:8000/health` → `{"status":"ok"}`
+2. Confirm port 8000 is not blocked by Windows Firewall
+3. Ensure you launched from the `backend/` directory, not the repo root
+4. Try running the backend terminal as Administrator
 
-### Frontend can't reach the backend
+</details>
 
-**Symptom:** Home screen shows "Cannot reach backend" with a wifi-off icon.
+<details>
+<summary><strong>Scrape returns no price (price = —)</strong></summary>
 
-**Solutions:**
-1. Confirm the backend is running: `curl http://localhost:8000/health` should return `{"status":"ok"}`
-2. Confirm uvicorn is bound to port 8000, not another port
-3. Check Windows Firewall is not blocking localhost connections
-4. On Windows, try running the backend terminal as Administrator
-
----
-
-### Scrape returns no price
-
-**Symptom:** `price=None` in logs, `—` shown in UI.
-
-**Causes and solutions:**
-
-| Cause | Solution |
+| Cause | Fix |
 |---|---|
-| Page requires JavaScript and `use_playwright` is `false` | Set `"use_playwright": true` in `scrape_config` |
-| SPA renders content after page load | Add `"wait_for": "<selector-that-appears-when-loaded>"` |
-| Site uses an unusual price format | Add a custom `selectors.price` CSS selector |
-| Site blocks headless browsers | The smart scanner still attempts extraction; some bot-protected sites (Cloudflare, etc.) cannot be scraped |
-| Timeout too short | Increase `"wait_timeout"` from `15000` to `30000` (ms) |
+| Site uses JS and `use_playwright` is `false` | Set `"use_playwright": true` |
+| SPA renders price after load | Add `"wait_for": "<price-selector>"` |
+| Unusual price format or layout | Add `"selectors": {"price": "..."}` |
+| `wait_timeout` too short | Increase to `30000` (30 s) |
+| Site behind Cloudflare / bot protection | Some sites cannot be scraped headlessly |
 
-To debug, run a one-off scrape with logging and inspect output:
+**Debug a URL directly:**
 
 ```bash
 cd backend
@@ -738,7 +587,7 @@ from database.models import ScrapeConfig
 
 async def main():
     await start_browser()
-    result = await scrape('https://your-product-url.com', ScrapeConfig())
+    result = await scrape('https://your-url.com', ScrapeConfig())
     print(result)
     await stop_browser()
 
@@ -746,167 +595,170 @@ asyncio.run(main())
 "
 ```
 
----
+</details>
 
-### Store already exists (409)
+<details>
+<summary><strong>409 Conflict on store creation</strong></summary>
 
-**Error:**
-```json
-{"detail": "Store with this base_url already exists"}
-```
-**Solution:** Each store `base_url` must be unique. If you want to track a product on an already-registered store, use the existing store's `id` when adding a product-store link.
+`base_url` must be unique. Use the existing store's `id` when linking a product.
 
----
-
-### Database locked
-
-**Error:**
-```
-aiosqlite.OperationalError: database is locked
-```
-**Solution:** SQLite WAL mode is already enabled. This error usually means two separate processes have the database open simultaneously with conflicting writes. Ensure only one uvicorn instance is running:
 ```bash
-# Windows
+curl http://localhost:8000/stores/
+# Find the existing store's id, then use it in the product-store link
+```
+
+</details>
+
+<details>
+<summary><strong>aiosqlite.OperationalError: database is locked</strong></summary>
+
+Multiple uvicorn instances running simultaneously.
+
+```bash
+# Windows — find and kill extra instances
 tasklist | findstr uvicorn
 taskkill /IM uvicorn.exe /F
 ```
 
----
+</details>
 
-### Flutter build errors
+<details>
+<summary><strong>Flutter: Package not found / build errors</strong></summary>
 
-**Error:**
-```
-Error: Cannot run with sound null safety
-```
-**Solution:** Ensure Flutter SDK ≥ 3.0 and Dart SDK ≥ 3.0 are active:
-```bash
-flutter --version
-dart --version
-```
-
-**Error:**
-```
-Package X not found
-```
-**Solution:**
 ```bash
 cd frontend
 flutter pub get
+flutter analyze        # shows any remaining issues
 ```
+
+</details>
 
 ---
 
-## Contributing
+## 🏗️ Contributing
 
-Contributions are welcome. Please follow these guidelines:
+Contributions are welcome! Here's how to get started.
 
-### Development workflow
+### Workflow
 
-1. **Fork** the repository and create a feature branch:
-   ```bash
-   git checkout -b feat/your-feature-name
-   ```
+```bash
+# 1. Fork & clone
+git clone https://github.com/YOUR_USERNAME/Gabada.git
 
-2. **Backend changes** — run the dev server with reload:
-   ```bash
-   cd backend
-   uvicorn main:app --reload --port 8000
-   ```
+# 2. Create a feature branch
+git checkout -b feat/your-feature
 
-3. **Frontend changes** — Flutter hot-reload is active during `flutter run`:
-   Press `r` in the terminal to hot-reload, `R` for a full restart.
+# 3. Develop — backend hot-reload
+cd backend && uvicorn main:app --reload --port 8000
 
-4. **Lint before committing:**
-   ```bash
-   # Backend
-   pip install ruff
-   ruff check backend/
+# 4. Develop — frontend hot-reload
+cd frontend && flutter run -d windows
+# Press 'r' to hot-reload, 'R' for full restart
 
-   # Frontend
-   cd frontend && dart analyze
-   ```
+# 5. Lint
+pip install ruff && ruff check backend/
+cd frontend && dart analyze
 
-5. **Commit message format:**
-   ```
-   <type>: <short description>
+# 6. Commit
+git commit -m "feat: describe your change"
 
-   <optional body>
-   ```
-   Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`
+# 7. Open a pull request
+```
 
-   Examples:
-   ```
-   feat: add price alert notifications
-   fix: handle EUR comma-decimal price format
-   docs: update scrape_config reference table
-   ```
+### Commit message format
 
-6. **Pull request checklist:**
-   - [ ] `dart analyze` reports no issues
-   - [ ] `ruff check backend/` reports no issues
-   - [ ] New scraper logic tested against at least one real URL
-   - [ ] No `gabada.db`, `__pycache__/`, or `.claude/` files staged
+```
+<type>: <short description>
+
+<optional body explaining the why>
+```
+
+| Type | When to use |
+|---|---|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `refactor` | Code restructure, no behaviour change |
+| `perf` | Performance improvement |
+| `docs` | Documentation only |
+| `test` | Tests only |
+| `chore` | Tooling, deps, CI |
+
+### Pull request checklist
+
+- [ ] `dart analyze` — no issues
+- [ ] `ruff check backend/` — no issues
+- [ ] New scraper logic tested against a real URL
+- [ ] `gabada.db`, `__pycache__/`, and `.claude/` not staged
 
 ### Adding support for a new store type
 
-1. Test the auto-detection first — run the debug scrape snippet above
-2. If auto-detection works: no code change needed, just use `ScrapeConfig()` defaults
-3. If auto-detection misses the price: add CSS selectors to `_PRICE_SELECTORS` / `_STOCK_SELECTORS` in `backend/scraper/engine.py`, or document a `scrape_config` example in this README
-4. If the site has an unusual structure: add a new strategy function `_try_<sitename>` and call it from `scrape()`
+1. Run the debug scrape snippet above — check if auto-detection already works
+2. **If it works:** document a `scrape_config` example in this README
+3. **If it misses price:** add selectors to `_PRICE_SELECTORS` in `backend/scraper/engine.py`
+4. **If the site is unusual:** add a `_try_<sitename>` strategy function and call it from `scrape()`
 
-### Project structure decisions
+### Design decisions
 
 | Decision | Rationale |
 |---|---|
-| Single shared Playwright browser | Saves ~200 MB RAM and 3–5 s startup time per scrape |
-| Scraping always in background tasks | API responses stay fast; scraping blocks for 5–30 s |
-| Sequential `scrape_all_active` | Avoids overwhelming target servers; polite scraping |
-| SQLite over Postgres | Zero-config, single file, sufficient for personal/small-team use |
-| No authentication | Local desktop app; backend binds to localhost only |
+| Single shared Playwright browser | Saves ~200 MB RAM and 3–5 s startup per scrape |
+| Scraping always in background tasks | API stays responsive; scraping blocks for 5–30 s |
+| Sequential `scrape_all_active` | Polite scraping — avoids hammering target servers |
+| SQLite over Postgres | Zero-config, single file, sufficient for personal use |
+| No authentication | Local-only desktop app; backend binds to localhost |
 
 ---
 
-## Changelog
+## 📋 Changelog
 
-### [0.2.0] — 2026-04-13
+### `v0.2.0` — 2026-04-13
 
-#### Added
-- Activity feed: shows price and stock change events with `change_type` classification (`price_up`, `price_down`, `stock_in`, `stock_out`, `new`, etc.)
-- Categories: colour-coded product labels with chip filter on home screen
-- Category manager bottom sheet with colour palette picker
+> UI refresh, LKR currency, activity feed, categories
+
+**Added**
+- Activity feed with `change_type` classification (`price_up`, `price_down`, `stock_in`, `stock_out`, `new`, …)
+- Categories with colour picker and chip filter on home screen
 - `change_type`, `price_delta`, `previous_price`, `previous_stock_status` columns in `price_logs`
 - `start_gabada.bat` — one-click Windows launcher
 
-#### Changed
-- Home screen scrape-all now auto-reloads every 10 s for 60 s instead of never refreshing
-- Per-store scrape now polls every 5 s (up to 35 s) and dismisses snackbar when new log arrives
-- All price displays changed from `$` to `Rs.` with comma-formatted integers
+**Changed**
+- Home scrape-all: auto-reloads every 10 s for 60 s — prices now update without manual refresh
+- Per-store scrape: polls every 5 s (up to 35 s), dismisses snackbar when new data arrives
+- All price displays: `$` → `Rs.` with comma-formatted integers
 
-#### Fixed
-- `WindowsProactorEventLoopPolicy` set before FastAPI import to prevent Playwright subprocess errors on Windows
-- `BuildContext` captured before first `await` in scrape callbacks to resolve `use_build_context_synchronously` lint warning
+**Fixed**
+- `WindowsProactorEventLoopPolicy` set before FastAPI import — Playwright subprocess errors on Windows resolved
+- `BuildContext` captured before first `await` — `use_build_context_synchronously` lint resolved
 
 ---
 
-### [0.1.0] — 2026-04-12
+### `v0.1.0` — 2026-04-12
 
-#### Added
-- Initial scaffold: FastAPI backend + Flutter desktop frontend
+> Initial release
+
+**Added**
+- FastAPI backend + Flutter Windows desktop frontend
 - SQLite schema: `products`, `stores`, `product_stores`, `price_logs`
-- Playwright scraper engine with 4-strategy extraction:
-  - JSON-LD structured data
-  - Schema.org microdata
-  - Universal JS smart scan (works on any site, no config)
-  - Common CSS pattern library (Amazon, Shopify, WooCommerce, CS-Cart, etc.)
+- 4-strategy Playwright scraper engine (JSON-LD · microdata · JS smart scan · CSS patterns)
 - Custom `scrape_config` per product-store for manual selector overrides
 - APScheduler daily auto-scrape at 08:00
-- REST API: products, stores, logs, scraper trigger endpoints
-- Flutter screens: Home (product list), ProductDetail (chart + stores), AddProduct
+- REST API: products, stores, logs, scraper, categories, activity, health
+- Flutter screens: Home · ProductDetail · AddProduct · Activity
 - Price history line chart with date-range filter
-- Stock status badges (`in_stock`, `out_of_stock`, `limited`, `unknown`)
-- Price change indicator icons on product cards
+- Stock status badges and price change indicator icons
 
 ---
 
-*Made with Flutter and FastAPI.*
+<div align="center">
+
+<br/>
+
+**[⬆ Back to top](#gabada)**
+
+<br/>
+
+Made with ❤️ using Flutter & FastAPI
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+</div>
