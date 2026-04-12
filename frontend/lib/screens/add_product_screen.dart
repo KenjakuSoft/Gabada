@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/products_provider.dart';
+import '../providers/categories_provider.dart';
 
 class AddProductScreen extends StatefulWidget {
   const AddProductScreen({super.key});
-
   @override
   State<AddProductScreen> createState() => _AddProductScreenState();
 }
@@ -13,6 +13,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _imageCtrl = TextEditingController();
+  int? _selectedCategoryId;
   bool _saving = false;
 
   @override
@@ -24,6 +25,8 @@ class _AddProductScreenState extends State<AddProductScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cats = context.watch<CategoriesProvider>().categories;
+
     return Scaffold(
       appBar: AppBar(title: const Text('New Product')),
       body: Padding(
@@ -43,6 +46,31 @@ class _AddProductScreenState extends State<AddProductScreen> {
                     v == null || v.trim().isEmpty ? 'Required' : null,
               ),
               const SizedBox(height: 16),
+
+              // Category picker
+              DropdownButtonFormField<int>(
+                initialValue: _selectedCategoryId,
+                decoration: const InputDecoration(labelText: 'Category (optional)'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('No category')),
+                  ...cats.map((c) => DropdownMenuItem(
+                        value: c.id,
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: c.flutterColor,
+                              radius: 6,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(c.name),
+                          ],
+                        ),
+                      )),
+                ],
+                onChanged: (v) => setState(() => _selectedCategoryId = v),
+              ),
+              const SizedBox(height: 16),
+
               TextFormField(
                 controller: _imageCtrl,
                 decoration: const InputDecoration(
@@ -51,6 +79,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
                 ),
               ),
               const SizedBox(height: 32),
+
               FilledButton(
                 onPressed: _saving ? null : _submit,
                 child: _saving
@@ -62,7 +91,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                'After creating, open the product to link stores and configure scraping.',
+                'After creating, open the product to link stores.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.outline,
@@ -82,13 +111,18 @@ class _AddProductScreenState extends State<AddProductScreen> {
     try {
       await context.read<ProductsProvider>().createProduct(
             _nameCtrl.text.trim(),
-            imageUrl: _imageCtrl.text.trim().isEmpty ? null : _imageCtrl.text.trim(),
+            imageUrl: _imageCtrl.text.trim().isEmpty
+                ? null
+                : _imageCtrl.text.trim(),
+            categoryId: _selectedCategoryId,
           );
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), behavior: SnackBarBehavior.floating),
+          SnackBar(
+              content: Text('Error: $e'),
+              behavior: SnackBarBehavior.floating),
         );
       }
     } finally {

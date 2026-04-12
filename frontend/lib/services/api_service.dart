@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import '../models/product.dart';
 import '../models/store.dart';
 import '../models/price_log.dart';
+import '../models/category.dart';
+import '../models/activity_entry.dart';
 
 class ApiService {
   static const _base = 'http://localhost:8000';
@@ -12,10 +14,26 @@ class ApiService {
     receiveTimeout: const Duration(seconds: 30),
   ));
 
-  // ── Products ────────────────────────────────────────────────────────────────
+  // ── Categories ───────────────────────────────────────────────────────────────
 
-  Future<List<Product>> getProducts() async {
-    final res = await _dio.get('/products/');
+  Future<List<Category>> getCategories() async {
+    final res = await _dio.get('/categories/');
+    return (res.data as List).map((j) => Category.fromJson(j)).toList();
+  }
+
+  Future<Category> createCategory(String name, String color) async {
+    final res = await _dio.post('/categories/', data: {'name': name, 'color': color});
+    return Category.fromJson(res.data);
+  }
+
+  Future<void> deleteCategory(int id) => _dio.delete('/categories/$id');
+
+  // ── Products ─────────────────────────────────────────────────────────────────
+
+  Future<List<Product>> getProducts({int? categoryId}) async {
+    final res = await _dio.get('/products/', queryParameters: {
+      'category_id': ?categoryId,
+    });
     return (res.data as List).map((j) => Product.fromJson(j)).toList();
   }
 
@@ -24,42 +42,45 @@ class ApiService {
     return Product.fromJson(res.data);
   }
 
-  Future<Product> createProduct(String canonicalName, {String? imageUrl}) async {
+  Future<Product> createProduct(String canonicalName,
+      {String? imageUrl, int? categoryId}) async {
     final res = await _dio.post('/products/', data: {
       'canonical_name': canonicalName,
       'image_url': imageUrl,
+      'category_id': categoryId,
     });
     return Product.fromJson(res.data);
   }
 
-  Future<Product> updateProduct(int id, String canonicalName, {String? imageUrl}) async {
+  Future<Product> updateProduct(int id, String canonicalName,
+      {String? imageUrl, int? categoryId}) async {
     final res = await _dio.patch('/products/$id', data: {
       'canonical_name': canonicalName,
       'image_url': imageUrl,
+      'category_id': categoryId,
     });
     return Product.fromJson(res.data);
   }
 
   Future<void> deleteProduct(int id) => _dio.delete('/products/$id');
 
-  Future<ProductStoreSummary> addStoreLink(
-    int productId, {
-    required int storeId,
-    required String productUrl,
-    Map<String, dynamic>? scrapeConfig,
-  }) async {
-    final res = await _dio.post('/products/$productId/stores', data: {
+  Future<ProductStoreSummary> addStoreLink(int productId,
+      {required int storeId,
+      required String productUrl,
+      Map<String, dynamic>? scrapeConfig}) async {
+    final body = <String, dynamic>{
       'store_id': storeId,
       'product_url': productUrl,
-      'scrape_config': scrapeConfig,
-    });
+    };
+    if (scrapeConfig != null) body['scrape_config'] = scrapeConfig;
+    final res = await _dio.post('/products/$productId/stores', data: body);
     return ProductStoreSummary.fromJson(res.data);
   }
 
   Future<void> removeStoreLink(int productId, int productStoreId) =>
       _dio.delete('/products/$productId/stores/$productStoreId');
 
-  // ── Stores ──────────────────────────────────────────────────────────────────
+  // ── Stores ───────────────────────────────────────────────────────────────────
 
   Future<List<Store>> getStores() async {
     final res = await _dio.get('/stores/');
@@ -67,35 +88,16 @@ class ApiService {
   }
 
   Future<Store> createStore(String name, String baseUrl) async {
-    final res = await _dio.post('/stores/', data: {
-      'name': name,
-      'base_url': baseUrl,
-    });
+    final res = await _dio.post('/stores/', data: {'name': name, 'base_url': baseUrl});
     return Store.fromJson(res.data);
   }
 
   Future<void> deleteStore(int id) => _dio.delete('/stores/$id');
 
-  // ── Logs ────────────────────────────────────────────────────────────────────
+  // ── Logs ─────────────────────────────────────────────────────────────────────
 
-  Future<List<PriceLog>> getLogs(
-    int productStoreId, {
-    DateTime? from,
-    DateTime? to,
-  }) async {
-    final res = await _dio.get('/logs/', queryParameters: {
-      'product_store_id': productStoreId,
-      if (from != null) 'from': from.toIso8601String().substring(0, 10),
-      if (to != null) 'to': to.toIso8601String().substring(0, 10),
-    });
-    return (res.data as List).map((j) => PriceLog.fromJson(j)).toList();
-  }
-
-  Future<List<PriceLog>> getProductLogs(
-    int productId, {
-    DateTime? from,
-    DateTime? to,
-  }) async {
+  Future<List<PriceLog>> getProductLogs(int productId,
+      {DateTime? from, DateTime? to}) async {
     final res = await _dio.get('/logs/product/$productId', queryParameters: {
       if (from != null) 'from': from.toIso8601String().substring(0, 10),
       if (to != null) 'to': to.toIso8601String().substring(0, 10),
@@ -103,12 +105,27 @@ class ApiService {
     return (res.data as List).map((j) => PriceLog.fromJson(j)).toList();
   }
 
-  // ── Scraper ─────────────────────────────────────────────────────────────────
+  // ── Scraper ──────────────────────────────────────────────────────────────────
 
   Future<void> triggerScrape(int productStoreId) =>
       _dio.post('/scraper/scrape/$productStoreId');
 
   Future<void> triggerScrapeAll() => _dio.post('/scraper/scrape-all');
+
+  // ── Activity ─────────────────────────────────────────────────────────────────
+
+  Future<List<ActivityEntry>> getActivity({
+    int limit = 100,
+    int offset = 0,
+    String? changeType,
+  }) async {
+    final res = await _dio.get('/activity/', queryParameters: {
+      'limit': limit,
+      'offset': offset,
+      'change_type': ?changeType,
+    });
+    return (res.data as List).map((j) => ActivityEntry.fromJson(j)).toList();
+  }
 
   // ── Health ───────────────────────────────────────────────────────────────────
 

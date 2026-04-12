@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../models/product.dart';
 import 'stock_badge.dart';
 
@@ -13,6 +14,10 @@ class StoreRow extends StatelessWidget {
     this.onScrape,
     this.onRemove,
   });
+
+  static final _fmt = NumberFormat('#,##0', 'en_US');
+
+  String _price(double v) => 'Rs. ${_fmt.format(v)}';
 
   @override
   Widget build(BuildContext context) {
@@ -62,7 +67,7 @@ class StoreRow extends StatelessWidget {
             children: [
               if (summary.latestDiscountedPrice != null) ...[
                 Text(
-                  '\$${summary.latestDiscountedPrice!.toStringAsFixed(2)}',
+                  _price(summary.latestDiscountedPrice!),
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
@@ -70,7 +75,7 @@ class StoreRow extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '\$${summary.latestPrice!.toStringAsFixed(2)}',
+                  _price(summary.latestPrice!),
                   style: TextStyle(
                     fontSize: 12,
                     color: cs.outline,
@@ -79,7 +84,7 @@ class StoreRow extends StatelessWidget {
                 ),
               ] else if (summary.latestPrice != null)
                 Text(
-                  '\$${summary.latestPrice!.toStringAsFixed(2)}',
+                  _price(summary.latestPrice!),
                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
                 )
               else
