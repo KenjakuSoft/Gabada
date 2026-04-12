@@ -4,6 +4,7 @@ import '../models/store.dart';
 import '../models/price_log.dart';
 import '../models/category.dart';
 import '../models/activity_entry.dart';
+import '../models/import_models.dart';
 
 class ApiService {
   static const _base = 'http://localhost:8000';
@@ -141,6 +142,67 @@ class ApiService {
       'change_type': ?changeType,
     });
     return (res.data as List).map((j) => ActivityEntry.fromJson(j)).toList();
+  }
+
+  // ── Import ───────────────────────────────────────────────────────────────────
+
+  Future<List<WooProductPreview>> wooPreview({
+    required String siteUrl,
+    required String consumerKey,
+    required String consumerSecret,
+    int perPage = 50,
+    int page = 1,
+  }) async {
+    final res = await _dio.post('/import/woo/preview', data: {
+      'credentials': {
+        'site_url': siteUrl,
+        'consumer_key': consumerKey,
+        'consumer_secret': consumerSecret,
+      },
+      'per_page': perPage,
+      'page': page,
+    });
+    return (res.data as List).map((j) => WooProductPreview.fromJson(j)).toList();
+  }
+
+  Future<int> wooImport({
+    required String siteUrl,
+    required String consumerKey,
+    required String consumerSecret,
+    required int storeId,
+    required List<int> productIds,
+  }) async {
+    final res = await _dio.post('/import/woo/import', data: {
+      'credentials': {
+        'site_url': siteUrl,
+        'consumer_key': consumerKey,
+        'consumer_secret': consumerSecret,
+      },
+      'store_id': storeId,
+      'product_ids': productIds,
+    });
+    return res.data['imported'] as int;
+  }
+
+  Future<FileImportPreview> filePreview(String filePath, String fileName) async {
+    final formData = FormData.fromMap({
+      'file': await MultipartFile.fromFile(filePath, filename: fileName),
+    });
+    final res = await _dio.post('/import/file/preview', data: formData);
+    return FileImportPreview.fromJson(res.data);
+  }
+
+  Future<int> fileCommit({
+    required List<Map<String, dynamic>> rows,
+    required int storeId,
+    int? categoryId,
+  }) async {
+    final res = await _dio.post('/import/file/commit', data: {
+      'rows': rows,
+      'store_id': storeId,
+      'category_id': categoryId,
+    });
+    return res.data['imported'] as int;
   }
 
   // ── Health ───────────────────────────────────────────────────────────────────
