@@ -12,7 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from database.db import init_db
 from scraper.engine import start_browser, stop_browser
 from scheduler.jobs import start_scheduler, stop_scheduler
-from api import products, stores, logs, scraper_routes, categories, activity, import_routes
+from api import (
+    products, stores, logs, scraper_routes, categories, activity,
+    import_routes, settings,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +27,7 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     await init_db()
     await start_browser()
-    start_scheduler()
+    await start_scheduler()
     yield
     stop_scheduler()
     await stop_browser()
@@ -46,6 +49,7 @@ app.include_router(logs.router)
 app.include_router(scraper_routes.router)
 app.include_router(activity.router)
 app.include_router(import_routes.router)
+app.include_router(settings.router)
 
 
 @app.get("/health")
