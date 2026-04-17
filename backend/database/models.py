@@ -250,3 +250,30 @@ class LoginSessionRequest(BaseModel):
     save_path: str  # absolute or relative path where storage_state.json will be written
     headless: bool = False
     wait_seconds: int = 180  # how long to keep browser open for manual login
+
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+
+class Settings(BaseModel):
+    currency_code: str = "USD"
+    currency_symbol: str = "$"
+    country_code: str = "US"
+    timezone: str = "UTC"
+    scrape_cron: str = "0 8 * * *"
+    scrape_enabled: bool = True
+    locale: str = "en-US"
+    theme: str = "system"  # "light" | "dark" | "system"
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class SettingsUpdate(BaseModel):
+    currency_code: Optional[str] = None
+    currency_symbol: Optional[str] = None
+    country_code: Optional[str] = None
+    timezone: Optional[str] = None
+    scrape_cron: Optional[str] = None
+    scrape_enabled: Optional[bool] = None
+    locale: Optional[str] = None
+    theme: Optional[str] = None

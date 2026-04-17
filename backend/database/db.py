@@ -71,6 +71,21 @@ async def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_price_logs_product_store ON price_logs(product_store_id);
             CREATE INDEX IF NOT EXISTS idx_price_logs_scraped_at ON price_logs(scraped_at);
+
+            CREATE TABLE IF NOT EXISTS settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                currency_code TEXT NOT NULL DEFAULT 'USD',
+                currency_symbol TEXT NOT NULL DEFAULT '$',
+                country_code TEXT NOT NULL DEFAULT 'US',
+                timezone TEXT NOT NULL DEFAULT 'UTC',
+                scrape_cron TEXT NOT NULL DEFAULT '0 8 * * *',
+                scrape_enabled INTEGER NOT NULL DEFAULT 1,
+                locale TEXT NOT NULL DEFAULT 'en-US',
+                theme TEXT NOT NULL DEFAULT 'system',
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            INSERT OR IGNORE INTO settings (id) VALUES (1);
         """)
         await db.commit()
 
