@@ -188,6 +188,51 @@ async def probe_url(request: ProbeRequest) -> ProbeResponse:
         raise HTTPException(status_code=500, detail=f"Probe failed: {e}")
 
 
+@router.post("/reprobe/{product_store_id}")
+async def reprobe_store(product_store_id: int) -> dict:
+    """
+    Re-run probe on an existing product_store and patch its scrape_config
+    with fresh platform-detected selectors. Preserves cookies,
+    storage_state_path, and any custom selectors the user has set. Use this
+    after a site redesign or when scrapes start returning nulls.
+    """
+    # Local imports to avoid circular deps with api.products at module load.
+    from api.products import _apply_platform_defaults, _selectors_are_empty
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            "SELECT product_url, scrape_config FROM product_stores WHERE id=?",
+            (product_store_id,),
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="product_store not found")
+        row = rows[0]
+        config = ScrapeConfig(**json.loads(row["scrape_config"] or "{}"))
+        try:
+            report = await probe(row["product_url"], config)
+        except Exception as e:
+            logger.error("Reprobe failed for ps_id=%d: %s", product_store_id, e)
+            raise HTTPException(status_code=500, detail=f"Probe failed: {e}")
+
+        merged = _apply_platform_defaults(config, report.platform or "generic")
+        await db.execute(
+            "UPDATE product_stores SET scrape_config=? WHERE id=?",
+            (merged.model_dump_json(), product_store_id),
+        )
+        await db.commit()
+        return {
+            "status": "ok",
+            "product_store_id": product_store_id,
+            "platform": report.platform,
+            "wait_for": merged.wait_for,
+            "selectors": merged.selectors.model_dump(),
+            "extracted": report.extracted.model_dump(),
+            "notes": report.notes,
+        }
+    finally:
+        await db.close()
+
+
 @router.post("/login-session")
 async def create_login_session(request: LoginSessionRequest) -> dict:
     """
