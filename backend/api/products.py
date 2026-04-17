@@ -1,13 +1,65 @@
 import json
+import logging
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from database.db import get_db
 from database.models import (
     Product, ProductCreate, ProductStoreCreate, ProductStoreSummary,
     ProductStoreOverride, ProductStoreOverrideUpsert,
+    ScrapeConfig, ScrapeSelectors,
 )
+from scraper.engine import probe as probe_url, _PLATFORM_SELECTORS, _PLATFORM_WAIT_FOR
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/products", tags=["products"])
+
+
+def _selectors_are_empty(sel: ScrapeSelectors) -> bool:
+    return not any([
+        sel.title, sel.price, sel.discounted_price,
+        sel.dealer_price, sel.stock_status, sel.image,
+    ])
+
+
+def _apply_platform_defaults(config: ScrapeConfig, platform: str) -> ScrapeConfig:
+    """Fill wait_for + selectors from platform defaults, preserving any
+    fields the caller already set."""
+    plat = platform if platform in _PLATFORM_SELECTORS else "generic"
+    defaults = _PLATFORM_SELECTORS[plat]
+    sel = config.selectors
+    merged_selectors = ScrapeSelectors(
+        title=sel.title or defaults.get("title"),
+        price=sel.price or defaults.get("price"),
+        discounted_price=sel.discounted_price or defaults.get("discounted_price"),
+        dealer_price=sel.dealer_price or defaults.get("dealer_price"),
+        stock_status=sel.stock_status or defaults.get("stock_status"),
+        image=sel.image,
+    )
+    wait_for = config.wait_for or _PLATFORM_WAIT_FOR.get(plat) or None
+    return ScrapeConfig(
+        use_playwright=config.use_playwright,
+        wait_for=wait_for,
+        wait_timeout=config.wait_timeout,
+        selectors=merged_selectors,
+        cookies=config.cookies,
+        headers=config.headers,
+        storage_state_path=config.storage_state_path,
+        platform=plat,
+    )
+
+
+async def _auto_detect_config(url: str, config: ScrapeConfig) -> ScrapeConfig:
+    """Run a probe on `url` and merge detected platform defaults into
+    `config`. Probe failures fall back to the original config unchanged."""
+    try:
+        report = await probe_url(url, config)
+        platform = report.platform or "generic"
+        logger.info("Auto-detected platform %s for %s", platform, url)
+        return _apply_platform_defaults(config, platform)
+    except Exception as e:
+        logger.warning("Auto-detect probe failed for %s: %s", url, e)
+        return config
 
 _PRODUCT_QUERY = """
     SELECT p.id, p.canonical_name, p.image_url, p.created_at,
@@ -106,12 +158,18 @@ async def delete_product(product_id: int):
 
 @router.post("/{product_id}/stores", response_model=ProductStoreSummary, status_code=201)
 async def add_store_link(product_id: int, body: ProductStoreCreate):
+    config = body.scrape_config
+    # Auto-detect only when the caller hasn't supplied custom selectors
+    # or a wait_for. Cookies/storage_state are preserved either way.
+    if body.auto_detect and not config.wait_for and _selectors_are_empty(config.selectors):
+        config = await _auto_detect_config(body.product_url, config)
+
     db = await get_db()
     try:
         cur = await db.execute(
             """INSERT INTO product_stores (product_id, store_id, product_url, scrape_config)
                VALUES (?, ?, ?, ?)""",
-            (product_id, body.store_id, body.product_url, body.scrape_config.model_dump_json()),
+            (product_id, body.store_id, body.product_url, config.model_dump_json()),
         )
         await db.commit()
         ps_id = cur.lastrowid

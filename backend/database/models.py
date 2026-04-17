@@ -75,6 +75,9 @@ class ProductStoreCreate(BaseModel):
     store_id: int
     product_url: str
     scrape_config: ScrapeConfig = ScrapeConfig()
+    # Probe the URL and auto-fill wait_for + selectors based on detected
+    # platform. Any fields already set in scrape_config are preserved.
+    auto_detect: bool = True
 
 class ProductStoreSummary(BaseModel):
     id: int
