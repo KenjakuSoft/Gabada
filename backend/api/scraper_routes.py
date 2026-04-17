@@ -1,10 +1,16 @@
 import json
 import logging
 from typing import Optional, Tuple
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from database.db import get_db
-from database.models import ScrapeConfig, ScrapeResult
-from scraper.engine import scrape
+from database.models import (
+    ScrapeConfig,
+    ScrapeResult,
+    ProbeRequest,
+    ProbeResponse,
+    LoginSessionRequest,
+)
+from scraper.engine import scrape, probe, save_login_state
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/scraper", tags=["scraper"])
@@ -96,18 +102,20 @@ async def _do_scrape(product_store_id: int):
 
         await db.execute(
             """INSERT INTO price_logs
-               (product_store_id, title, price, discounted_price, stock_status,
-                raw_price, raw_discounted,
+               (product_store_id, title, price, discounted_price, dealer_price,
+                stock_status, raw_price, raw_discounted, raw_dealer,
                 change_type, price_delta, previous_price, previous_stock_status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 product_store_id,
                 result.title,
                 result.price,
                 result.discounted_price,
+                result.dealer_price,
                 result.stock_status,
                 result.raw_price,
                 result.raw_discounted,
+                result.raw_dealer,
                 change_type,
                 price_delta,
                 previous_price,
@@ -153,3 +161,50 @@ async def manual_scrape_all(background_tasks: BackgroundTasks):
     """Trigger an immediate scrape for all active product_stores."""
     background_tasks.add_task(scrape_all_active)
     return {"status": "queued"}
+
+
+@router.post("/probe", response_model=ProbeResponse)
+async def probe_url(request: ProbeRequest) -> ProbeResponse:
+    """
+    Deep-dive diagnostics for an arbitrary URL.
+
+    Runs the full scraper waterfall and returns the detected platform,
+    raw candidates, suggested selectors, and a snapshot of what would be
+    extracted right now. Use this to debug why a site scrapes incorrectly
+    before wiring it up as a product_store.
+    """
+    config = ScrapeConfig(
+        use_playwright=request.use_playwright,
+        wait_for=request.wait_for,
+        wait_timeout=request.wait_timeout,
+        cookies=request.cookies,
+        headers=request.headers,
+        storage_state_path=request.storage_state_path,
+    )
+    try:
+        return await probe(request.url, config)
+    except Exception as e:
+        logger.error("Probe endpoint failed for %s: %s", request.url, e)
+        raise HTTPException(status_code=500, detail=f"Probe failed: {e}")
+
+
+@router.post("/login-session")
+async def create_login_session(request: LoginSessionRequest) -> dict:
+    """
+    Open a non-headless Chromium window so the user can log in manually,
+    then persist the session (cookies + localStorage) to disk as a
+    Playwright `storage_state.json`. Point a product_store's
+    `scrape_config.storage_state_path` at the saved file to scrape
+    behind-login prices (e.g. dealer pricing).
+    """
+    try:
+        result = await save_login_state(
+            url=request.url,
+            save_path=request.save_path,
+            headless=request.headless,
+            wait_seconds=request.wait_seconds,
+        )
+        return {"status": "ok", **result}
+    except Exception as e:
+        logger.error("login-session failed for %s: %s", request.url, e)
+        raise HTTPException(status_code=500, detail=f"Login session failed: {e}")

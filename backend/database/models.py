@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, Any
 from datetime import datetime
 
 
@@ -42,6 +42,12 @@ class ScrapeConfig(BaseModel):
     wait_for: Optional[str] = None
     wait_timeout: int = 15000
     selectors: ScrapeSelectors = ScrapeSelectors()
+    # Authenticated / customised scraping
+    cookies: list[dict[str, Any]] = Field(default_factory=list)
+    headers: dict[str, str] = Field(default_factory=dict)
+    storage_state_path: Optional[str] = None
+    # Hint from platform auto-detection, e.g. "cs-cart", "woocommerce", "shopify"
+    platform: Optional[str] = None
 
 
 # ── Manual override ───────────────────────────────────────────────────────────
@@ -196,3 +202,48 @@ class FileImportCommitRequest(BaseModel):
     rows: list[FileImportRow]
     store_id: int
     category_id: Optional[int] = None
+
+
+# ── Probe / diagnostics ───────────────────────────────────────────────────────
+
+class ProbeCandidate(BaseModel):
+    text: str
+    value: Optional[float] = None
+    score: int = 0
+    font_size: Optional[float] = None
+    font_weight: Optional[int] = None
+    struck: bool = False
+    dealer: bool = False
+    dom_path: Optional[str] = None
+
+
+class ProbeResponse(BaseModel):
+    url: str
+    final_url: Optional[str] = None
+    platform: str = "generic"
+    suggested_wait_for: Optional[str] = None
+    suggested_selectors: dict[str, Optional[str]] = Field(default_factory=dict)
+    json_ld_found: bool = False
+    json_ld_name: Optional[str] = None
+    json_ld_price: Optional[float] = None
+    json_ld_availability: Optional[str] = None
+    extracted: ScrapeResult = ScrapeResult()
+    candidates: list[ProbeCandidate] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class ProbeRequest(BaseModel):
+    url: str
+    use_playwright: bool = True
+    wait_for: Optional[str] = None
+    wait_timeout: int = 15000
+    cookies: list[dict[str, Any]] = Field(default_factory=list)
+    headers: dict[str, str] = Field(default_factory=dict)
+    storage_state_path: Optional[str] = None
+
+
+class LoginSessionRequest(BaseModel):
+    url: str
+    save_path: str  # absolute or relative path where storage_state.json will be written
+    headless: bool = False
+    wait_seconds: int = 180  # how long to keep browser open for manual login
