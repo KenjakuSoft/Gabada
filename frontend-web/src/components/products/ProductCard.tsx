@@ -120,7 +120,12 @@ export function ProductCard({
       {open && count > 0 ? (
         <div className="space-y-1.5 border-t border-border bg-muted/30 p-3">
           {product.stores.map((store) => (
-            <StoreRow key={store.id} store={store} symbol={symbol} />
+            <StoreRow
+              key={store.id}
+              store={store}
+              symbol={symbol}
+              productId={product.id}
+            />
           ))}
         </div>
       ) : null}

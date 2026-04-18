@@ -1,4 +1,10 @@
-export type StockStatus = 'in_stock' | 'out_of_stock' | 'limited' | 'unknown'
+export type StockStatus =
+  | 'in_stock'
+  | 'out_of_stock'
+  | 'limited'
+  | 'preorder'
+  | 'backorder'
+  | 'unknown'
 
 export interface Category {
   id: number

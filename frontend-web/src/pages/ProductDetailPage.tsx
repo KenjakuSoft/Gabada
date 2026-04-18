@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   ImageOff,
+  Pencil,
   RefreshCw,
   Trash2,
 } from 'lucide-react'
@@ -17,6 +19,7 @@ import {
 } from '@/components/ui/card'
 import { StoreRow } from '@/components/products/StoreRow'
 import { AddStoreCard } from '@/components/products/AddStoreCard'
+import { EditProductCard } from '@/components/products/EditProductCard'
 import { PriceChart } from '@/components/products/PriceChart'
 import { LogsTable } from '@/components/products/LogsTable'
 import { logsApi, productsApi, scraperApi } from '@/api'
@@ -29,6 +32,7 @@ export function ProductDetailPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const symbol = useCurrencySymbol()
+  const [editing, setEditing] = useState(false)
 
   const product = useQuery<Product>({
     queryKey: ['product', productId],
@@ -112,6 +116,14 @@ export function ProductDetailPage() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => setEditing((v) => !v)}
+              >
+                <Pencil className="h-4 w-4" />
+                {editing ? 'Close edit' : 'Edit'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => scrapeAll.mutate()}
                 disabled={scrapeAll.isPending || p.stores.length === 0}
               >
@@ -137,6 +149,10 @@ export function ProductDetailPage() {
           }
         />
       </div>
+
+      {editing ? (
+        <EditProductCard product={p} onClose={() => setEditing(false)} />
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
         <Card>
@@ -189,7 +205,12 @@ export function ProductDetailPage() {
               </div>
             ) : (
               p.stores.map((s) => (
-                <StoreRow key={s.id} store={s} symbol={symbol} />
+                <StoreRow
+                  key={s.id}
+                  store={s}
+                  symbol={symbol}
+                  productId={p.id}
+                />
               ))
             )}
             <div className="pt-2">
