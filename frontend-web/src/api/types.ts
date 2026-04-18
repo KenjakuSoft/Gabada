@@ -90,26 +90,6 @@ export interface Settings {
   updated_at: string | null
 }
 
-export interface ScrapeSelectors {
-  title: string | null
-  price: string | null
-  discounted_price: string | null
-  dealer_price: string | null
-  stock_status: string | null
-  image: string | null
-}
-
-export interface ScrapeConfig {
-  use_playwright: boolean
-  wait_for: string | null
-  wait_timeout: number
-  selectors: ScrapeSelectors
-  cookies: unknown[]
-  headers: Record<string, string>
-  storage_state_path: string | null
-  platform: string | null
-}
-
 export interface ProbeCandidate {
   text: string
   value: number | null
