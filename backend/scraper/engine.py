@@ -274,8 +274,13 @@ _PRICE_SELECTORS = [
     ".price ins .amount",
     ".price .amount",
     # CS-Cart (nanotek.lk, barclayscomputers.lk, and similar B2B-enabled stores)
-    # Prefer selectors scoped to the main product block so we don't pick up
-    # variant-option prices, "you may also like", or cart-sidebar prices.
+    # Scoped to the main product block first so we don't pick up variant-option,
+    # "you may also like", cart-sidebar, or payment-method variant prices.
+    # Newer CS-Cart templates (nanotek 2026+) put the price as raw text directly
+    # inside `.ty-price-now`, with no `.ty-price-num` child — selectors here
+    # cover both layouts.
+    ".ty-productPage-price .ty-price-now .ty-price-num",
+    ".ty-productPage-price .ty-price-now",
     ".ty-product-block .ty-price-now .ty-price-num",
     ".ty-product-block .ty-price .ty-price-num",
     ".ty-product-block .ty-price-now",
@@ -470,7 +475,7 @@ _SMART_SCAN_JS = r"""() => {
     // color/size/config) that are NOT the main displayed price. Candidates
     // inside these containers get deprioritized unless they also sit inside
     // a "selected/active/checked" marker.
-    const VARIANT_ALT = /variant-option|swatch-option|variant-item|option-value|product-options|ty-product-options|ty-product-variant-image-item(?!-checked)|configurable_option|product-form__input|variant-selector|product-variants|attributes-selector/i;
+    const VARIANT_ALT = /variant-option|swatch-option|variant-item|option-value|product-options|ty-product-options|ty-product-variant-image-item(?!-checked)|configurable_option|product-form__input|variant-selector|product-variants|attributes-selector|ty-pay-price|payment-method|ty-payment-method|ty-payment-options/i;
     const SELECTED = /selected|is-active|is-selected|is-checked|active|checked|current[\s-]?variant|ty-product-variant-image-item-checked|aria-selected/i;
 
     function isStruck(el) {
@@ -705,7 +710,7 @@ _SMART_SCAN_JS = r"""() => {
     // Platform fingerprint
     let platform = 'generic';
     try {
-        if (document.querySelector('.ty-price, .ty-price-num, [class*="ty-product-block"]')) {
+        if (document.querySelector('.ty-price, .ty-price-num, .ty-price-now, .ty-productPage-price, [class*="ty-product-block"]')) {
             platform = 'cs-cart';
         } else if (document.querySelector('.woocommerce, body[class*="woocommerce"]')) {
             platform = 'woocommerce';
@@ -872,6 +877,13 @@ async def _open_context(config: ScrapeConfig) -> BrowserContext:
     if not _browser:
         raise RuntimeError("Browser not started")
 
+    # Note: keep `extra_http_headers` minimal. Chromium already sends correct
+    # `Accept`, `Upgrade-Insecure-Requests`, `sec-ch-ua*` etc. based on its
+    # real UA. Overriding those values (or adding them when Chromium already
+    # sent them) causes a mismatch that some CDNs / WAFs (nanotek.lk and
+    # similar CS-Cart B2B stores) read as bot, responding with a stripped
+    # page that's missing the product block. Only `Accept-Language` — paired
+    # with locale — is safe to set explicitly.
     options: dict = dict(
         user_agent=(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -883,15 +895,6 @@ async def _open_context(config: ScrapeConfig) -> BrowserContext:
         timezone_id="Asia/Colombo",
         extra_http_headers={
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept": (
-                "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                "image/avif,image/webp,image/apng,*/*;q=0.8,"
-                "application/signed-exchange;v=b3;q=0.7"
-            ),
-            "sec-ch-ua": '"Chromium";v="124", "Not-A.Brand";v="99", "Google Chrome";v="124"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-            "Upgrade-Insecure-Requests": "1",
         },
     )
 
@@ -1083,7 +1086,7 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
 # ── Probe (diagnostics) ──────────────────────────────────────────────────────
 
 _PLATFORM_WAIT_FOR: dict[str, str] = {
-    "cs-cart":     ".ty-price-num, .ty-price",
+    "cs-cart":     ".ty-productPage-price, .ty-price-now, .ty-price-num, .ty-price",
     "woocommerce": ".price .amount",
     "shopify":     ".price, [data-product-price]",
     "magento":     "[data-price-type='finalPrice'] .price, .price-box .price",
@@ -1094,9 +1097,9 @@ _PLATFORM_WAIT_FOR: dict[str, str] = {
 _PLATFORM_SELECTORS: dict[str, dict[str, Optional[str]]] = {
     "cs-cart": {
         "title": ".ty-product-block-title",
-        "price": ".ty-price-now .ty-price-num",
-        "discounted_price": ".ty-price-retail-price .ty-price-num",
-        "dealer_price": ".ty-price-dealer .ty-price-num",
+        "price": ".ty-productPage-price .ty-price-now, .ty-price-now .ty-price-num, .ty-price-now",
+        "discounted_price": ".ty-price-retail-price .ty-price-num, .ty-price-retail-price",
+        "dealer_price": ".ty-price-dealer .ty-price-num, .ty-price-dealer",
         "stock_status": ".ty-qty-in-stock, .ty-qty-out-of-stock, .ty-special-msg",
     },
     "woocommerce": {
