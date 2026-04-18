@@ -10,19 +10,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```
 Gabada/
-├── backend/        ← Python: scraping, storage, REST API
-│   ├── main.py     ← FastAPI entry point (uvicorn)
-│   ├── database/   ← SQLite schema + async queries (aiosqlite)
-│   ├── scraper/    ← Playwright-based scraper engine
-│   ├── api/        ← Route handlers (products, stores, logs, scraper)
-│   └── scheduler/  ← APScheduler daily auto-scrape jobs
-└── frontend/       ← Flutter desktop app
-    └── lib/
-        ├── screens/   ← Home, ProductDetail, AddProduct
-        ├── models/    ← Dart data classes (Product, Store, PriceLog)
-        ├── services/  ← ApiService (calls FastAPI on localhost:8000)
-        ├── widgets/   ← ProductCard, PriceChart, StoreRow
-        └── theme/     ← AppTheme (Material 3, dark/light)
+├── backend/           ← Python: scraping, storage, REST API, static UI host
+│   ├── main.py        ← FastAPI entry (uvicorn) + StaticFiles mount of built UI
+│   ├── database/      ← SQLite schema + async queries (aiosqlite)
+│   ├── scraper/       ← Playwright-based scraper engine
+│   ├── api/           ← Route handlers (products, stores, logs, scraper, import, settings)
+│   └── scheduler/     ← APScheduler auto-scrape jobs
+└── frontend-web/      ← React + Vite SPA (served by backend from dist/)
+    └── src/
+        ├── pages/     ← Home, ProductDetail, AddProduct, Stores, Import, Probe, Activity, Settings
+        ├── components/← ui/ primitives, layout/, products/, import/
+        ├── api/       ← axios client + typed endpoint modules
+        ├── hooks/     ← useSettings, useApplyTheme, etc.
+        ├── store/     ← Zustand theme store
+        └── lib/       ← formatters and utilities
 ```
 
 ## Backend
@@ -42,20 +43,22 @@ playwright install chromium
 ```
 
 **API base:** `http://localhost:8000`
+**UI:** served at `http://localhost:8000/` when `frontend-web/dist` exists.
 
 ## Frontend
 
-**Stack:** Flutter 3.41.6 · Dart · provider · dio · fl_chart · table_calendar · cached_network_image
+**Stack:** React 19 · Vite 8 · TypeScript · Tailwind v4 (CSS-first) · TanStack Query · Zustand · React Router v7 · Recharts · axios
 
-**Run:**
+**Run dev server (hot reload, proxies `/api` → backend):**
 ```bash
-cd ~/Desktop/Gabada/frontend
-flutter run -d windows
+cd ~/Desktop/Gabada/frontend-web
+npm install
+npm run dev
 ```
 
-**Build release:**
+**Build production bundle (served by backend):**
 ```bash
-flutter build windows
+npm run build   # → frontend-web/dist
 ```
 
 ## Database Schema
@@ -97,5 +100,5 @@ Each `product_store` row carries a `scrape_config` JSON that tells the engine wh
 - **Never scrape in the API request cycle** — scraping is always dispatched to background tasks or the scheduler
 - **Price parsing** strips currency symbols, spaces, commas before casting to float
 - **Stock status** normalizes to: `in_stock` | `out_of_stock` | `limited` | `unknown`
-- Flutter calls the backend only via `ApiService` — never raw http calls in widgets
-- All Flutter state lives in `Provider` notifiers, not in widget `setState`
+- Frontend calls the backend only through `src/api/` modules — never raw axios/fetch in components
+- Server state lives in TanStack Query; UI-only state in Zustand or local `useState` — never duplicate server state into a store

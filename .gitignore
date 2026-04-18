@@ -14,20 +14,9 @@ venv/
 # Database
 backend/gabada.db
 
-# Flutter/Dart
-frontend/.dart_tool/
-frontend/.flutter-plugins
-frontend/.flutter-plugins-dependencies
-frontend/build/
-frontend/.packages
-frontend/pubspec.lock
-frontend/android/
-frontend/ios/
-frontend/linux/
-frontend/macos/
-frontend/web/
-# Keep windows build target tracked for desktop app
-# frontend/windows/
+# Frontend (Vite/React)
+frontend-web/node_modules/
+frontend-web/dist/
 
 # IDE / tools
 .vscode/

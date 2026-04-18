@@ -14,15 +14,15 @@
 <br/>
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![Flutter](https://img.shields.io/badge/Flutter-3.41%2B-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vite.dev)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Playwright](https://img.shields.io/badge/Playwright-1.44%2B-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)]()
 
 <br/>
 
-*A desktop app that watches product prices across any online store —
+*A local web app that watches product prices across any online store —
 automatically scraping, logging history, and surfacing every change.*
 
 <br/>
@@ -124,25 +124,27 @@ automatically scraping, logging history, and surfacing every change.*
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Flutter Desktop App                   │
-│   HomeScreen · ProductDetail · ActivityFeed · AddProduct │
-│          Provider state · Dio HTTP · fl_chart            │
+│                React + Vite SPA  (browser)               │
+│   Home · ProductDetail · Activity · Add · Stores         │
+│   Import · Probe · Settings                              │
+│   TanStack Query · Tailwind v4 · Recharts · axios        │
 └──────────────────────┬──────────────────────────────────┘
                        │  HTTP  localhost:8000
 ┌──────────────────────▼──────────────────────────────────┐
 │                   FastAPI Backend                        │
 │  /products  /stores  /logs  /scraper  /categories        │
-│              /activity  /health                          │
+│  /activity  /import  /settings  /health                  │
+│  Static mount: frontend-web/dist  →  /                   │
 │                     │                     │              │
-│           aiosqlite  │          APScheduler│              │
-│           gabada.db  │          08:00 daily│              │
+│           aiosqlite │          APScheduler│              │
+│           gabada.db │          cron-driven│              │
 └──────────────────────┼─────────────────────┼────────────┘
                        │                     │
 ┌──────────────────────▼─────────────────────▼────────────┐
 │                 Playwright Engine                        │
 │  Strategy 1: JSON-LD structured data                     │
 │  Strategy 2: Schema.org microdata                        │
-│  Strategy 3: Universal JS smart scan  ← works anywhere  │
+│  Strategy 3: Universal JS smart scan  ← works anywhere   │
 │  Strategy 4: CSS pattern library (Amazon/Shopify/etc.)   │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -151,11 +153,11 @@ automatically scraping, logging history, and surfacing every change.*
 
 | Layer | Technology |
 |---|---|
-| Frontend | Flutter 3.41 · Dart · Provider · Dio · fl_chart · shimmer |
+| Frontend | React 19 · Vite 8 · TypeScript · Tailwind v4 · TanStack Query · Zustand · React Router v7 · Recharts · axios |
 | Backend | Python 3.11 · FastAPI · uvicorn · Pydantic v2 |
 | Database | SQLite via aiosqlite (WAL mode, foreign keys) |
 | Scraping | Playwright (Chromium) · APScheduler |
-| Platform | Windows 10/11 (Linux/macOS also work) |
+| Platform | Runs anywhere Python runs; UI is a browser SPA |
 
 ---
 
@@ -166,7 +168,7 @@ automatically scraping, logging history, and surfacing every change.*
 | Tool | Version | Install |
 |---|---|---|
 | Python | ≥ 3.11 | [python.org](https://python.org) |
-| Flutter | ≥ 3.24 | [flutter.dev](https://flutter.dev) |
+| Node.js | ≥ 20 | [nodejs.org](https://nodejs.org) |
 | Git | any | [git-scm.com](https://git-scm.com) |
 
 > **No browser install needed.** Playwright downloads its own Chromium binary.
@@ -198,9 +200,13 @@ playwright install chromium
 ### 3 · Frontend setup
 
 ```bash
-cd ../frontend
-flutter pub get
+cd ../frontend-web
+npm install
+npm run build          # produces frontend-web/dist — served by the backend
 ```
+
+> Prefer hot-reload during development? Run `npm run dev` in a second terminal;
+> Vite proxies `/api` to the FastAPI backend on port 8000.
 
 ### 4 · Launch
 
@@ -210,16 +216,13 @@ flutter pub get
 Double-click  start_gabada.bat
 ```
 
-Two terminals open: one for the backend, one for the Flutter app.
+The backend starts and your browser opens at `http://localhost:8000/`.
 
 **Manual (any OS):**
 
 ```bash
-# Terminal 1 — backend
 cd backend && uvicorn main:app --reload --port 8000
-
-# Terminal 2 — frontend
-cd frontend && flutter run -d windows
+# then open http://localhost:8000/
 ```
 
 ### 5 · Verify
@@ -229,7 +232,8 @@ curl http://localhost:8000/health
 # {"status":"ok"}
 ```
 
-Open `http://localhost:8000/docs` for the interactive API explorer.
+Open `http://localhost:8000/docs` for the interactive API explorer,
+or just `http://localhost:8000/` for the UI.
 
 ---
 
@@ -704,12 +708,12 @@ playwright install chromium
 </details>
 
 <details>
-<summary><strong>"Cannot reach backend" in the Flutter UI</strong></summary>
+<summary><strong>"Cannot reach backend" in the UI</strong></summary>
 
 1. Confirm backend is running: `curl http://localhost:8000/health` → `{"status":"ok"}`
-2. Confirm port 8000 is not blocked by Windows Firewall
+2. Confirm port 8000 is not blocked by your firewall
 3. Ensure you launched from the `backend/` directory, not the repo root
-4. Try running the backend terminal as Administrator
+4. In dev mode, confirm the Vite proxy is targeting `http://localhost:8000`
 
 </details>
 
@@ -771,12 +775,13 @@ taskkill /IM uvicorn.exe /F
 </details>
 
 <details>
-<summary><strong>Flutter: Package not found / build errors</strong></summary>
+<summary><strong>Frontend: build or type errors</strong></summary>
 
 ```bash
-cd frontend
-flutter pub get
-flutter analyze        # shows any remaining issues
+cd frontend-web
+npm install
+npx tsc -b --pretty false   # shows any remaining type issues
+npm run build
 ```
 
 </details>
@@ -799,13 +804,13 @@ git checkout -b feat/your-feature
 # 3. Develop — backend hot-reload
 cd backend && uvicorn main:app --reload --port 8000
 
-# 4. Develop — frontend hot-reload
-cd frontend && flutter run -d windows
-# Press 'r' to hot-reload, 'R' for full restart
+# 4. Develop — frontend hot-reload (second terminal)
+cd frontend-web && npm run dev
+# Vite serves at http://localhost:5173 and proxies /api to port 8000
 
 # 5. Lint
 pip install ruff && ruff check backend/
-cd frontend && dart analyze
+cd frontend-web && npx tsc -b --pretty false
 
 # 6. Commit
 git commit -m "feat: describe your change"
@@ -853,7 +858,7 @@ git commit -m "feat: describe your change"
 | Scraping always in background tasks | API stays responsive; scraping blocks for 5–30 s |
 | Sequential `scrape_all_active` | Polite scraping — avoids hammering target servers |
 | SQLite over Postgres | Zero-config, single file, sufficient for personal use |
-| No authentication | Local-only desktop app; backend binds to localhost |
+| No authentication | Designed to run locally; backend binds to localhost |
 
 ---
 
@@ -941,7 +946,7 @@ git commit -m "feat: describe your change"
 
 <br/>
 
-Made with ❤️ using Flutter & FastAPI
+Made with ❤️ using React & FastAPI
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
