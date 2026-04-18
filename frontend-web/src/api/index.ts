@@ -2,10 +2,14 @@ import { http } from './client'
 import type {
   ActivityEntry,
   Category,
+  FileImportPreviewResponse,
+  FileImportRow,
   PriceLog,
   ProbeResponse,
   Settings,
   Store,
+  WooCredentials,
+  WooProductPreview,
 } from './types'
 
 export { productsApi } from './products'
@@ -122,6 +126,46 @@ export const scraperApi = {
     wait_seconds?: number
   }) => {
     const { data } = await http.post('/scraper/login-session', body)
+    return data
+  },
+}
+
+export const importApi = {
+  wooPreview: async (body: {
+    credentials: WooCredentials
+    per_page?: number
+    page?: number
+  }): Promise<WooProductPreview[]> => {
+    const { data } = await http.post<WooProductPreview[]>(
+      '/import/woo/preview',
+      body,
+    )
+    return data
+  },
+  wooImport: async (body: {
+    credentials: WooCredentials
+    store_id: number
+    product_ids: number[]
+  }): Promise<{ imported: number }> => {
+    const { data } = await http.post('/import/woo/import', body)
+    return data
+  },
+  filePreview: async (file: File): Promise<FileImportPreviewResponse> => {
+    const form = new FormData()
+    form.append('file', file)
+    const { data } = await http.post<FileImportPreviewResponse>(
+      '/import/file/preview',
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    )
+    return data
+  },
+  fileCommit: async (body: {
+    rows: FileImportRow[]
+    store_id: number
+    category_id?: number | null
+  }): Promise<{ imported: number }> => {
+    const { data } = await http.post('/import/file/commit', body)
     return data
   },
 }

@@ -141,3 +141,33 @@ export interface ProbeResponse {
   candidates: ProbeCandidate[]
   notes: string[]
 }
+
+export interface WooCredentials {
+  site_url: string
+  consumer_key: string
+  consumer_secret: string
+}
+
+export interface WooProductPreview {
+  woo_id: number
+  name: string
+  permalink: string
+  regular_price: string | null
+  sale_price: string | null
+  stock_status: string
+  image_url: string | null
+  categories: string[]
+}
+
+export interface FileImportPreviewResponse {
+  columns: string[]
+  sample_rows: string[][]
+  total_rows: number
+  file_format: 'csv' | 'excel' | 'pdf'
+}
+
+export interface FileImportRow {
+  name: string
+  url: string
+  image_url?: string | null
+}
