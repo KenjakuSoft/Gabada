@@ -217,6 +217,7 @@ class ProbeCandidate(BaseModel):
     font_weight: Optional[int] = None
     struck: bool = False
     dealer: bool = False
+    variant_alt: bool = False
     dom_path: Optional[str] = None
 
 
