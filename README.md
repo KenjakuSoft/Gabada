@@ -909,6 +909,24 @@ git commit -m "feat: describe your change"
 
 ## 📋 Changelog
 
+### `v0.5.1` — 2026-04-19
+
+> redacted-store / CS-Cart WAF fix, variant-alt prices, full ISO 4217 currency set
+
+**Fixed**
+- **redacted-store & similar CS-Cart B2B stores returning a stripped shell page** — `_open_context` was setting `Accept`, `Upgrade-Insecure-Requests`, and `sec-ch-ua*` as `extra_http_headers`, which duplicated / conflicted with Chromium's own client hints and tripped WAF bot detection. Chromium already sends correct values based on its real UA; dropped the overrides and kept only `Accept-Language`
+- CS-Cart selectors updated for the newer redacted-store template (price is raw text directly inside `.ty-price-now`, wrapped by `.ty-productPage-price`, with no `.ty-price-num` child); legacy `.ty-product-block` wrappers still supported as fallbacks
+- `_parse_stock` switched from substring to **word-boundary regex** matching — phrases like "Expected delivery 2-3 days", "ETA 5 days", or "Ships in 24h" no longer misclassify in-stock items as `preorder`
+- TypeScript deprecation warning — removed redundant `baseUrl`/`paths` from root `tsconfig.json` (sub-configs own paths)
+
+**Added**
+- **Variant-alt deprioritization** in the smart scan — `.ty-pay-price`, `payment-method`, `variant-option`, `swatch-option`, `product-options`, `configurable_option`, `variant-selector`, `product-variants`, and similar containers are walked up 6 ancestors; their candidates lose to the main displayed price unless sitting inside a `selected` / `active` / `checked` / `aria-selected` marker. Probe UI shows a `variant` badge for these candidates
+- **Full ISO 4217 currency list** in Settings — 155 entries (every actively-circulating national currency plus widely-used dependent-territory currencies like GGP/JEP/IMP), alphabetized by code for type-to-jump in the select
+- Platform detection recognises `.ty-price-now` and `.ty-productPage-price` as CS-Cart markers
+- `ProbeCandidate.variant_alt: bool` exposed on the `ProbeResponse` API and surfaced in the Probe page
+
+---
+
 ### `v0.5.0` — 2026-04-18
 
 > Bot-check bypass, pre-order / back-order, reverse-price fix, edit UI
