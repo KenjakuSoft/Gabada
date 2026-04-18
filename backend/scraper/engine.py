@@ -107,6 +107,19 @@ def _parse_stock(raw: Optional[str]) -> str:
     if not raw:
         return "unknown"
     t = raw.lower().strip()
+    # Pre-order / back-order checked FIRST — these often co-occur with
+    # "available" / "add to cart" phrasing that would otherwise mask them.
+    if any(w in t for w in [
+        "pre-order", "pre order", "preorder", "pre-sale", "presale",
+        "coming soon", "notify me", "notify when available",
+        "expected", "eta", "ships on", "ships in",
+    ]):
+        return "preorder"
+    if any(w in t for w in [
+        "back-order", "back order", "backorder", "on backorder",
+        "onbackorder",
+    ]):
+        return "backorder"
     if any(w in t for w in [
         "out of stock", "unavailable", "sold out", "no stock",
         "not available", "outofstock", "discontinued",
@@ -126,6 +139,10 @@ def _parse_stock(raw: Optional[str]) -> str:
 
 def _stock_from_schema_url(url: str) -> str:
     url = url.lower()
+    if "preorder" in url or "presale" in url:
+        return "preorder"
+    if "backorder" in url:
+        return "backorder"
     if "instock" in url:
         return "in_stock"
     if "outofstock" in url:
@@ -418,10 +435,11 @@ _SMART_SCAN_JS = r"""() => {
     }
 
     const BAD = /cart|basket|total|order|ship|emi|monthly|instalment|installment|per[\s-]?month|easy[\s-]?pay|flexi|interest[\s-]?free|per[\s-]?week|payment[\s-]?plan|visa|mastercard|credit[\s-]?card|debit[\s-]?card|card[\s-]?offer|related|similar|recommend|cross[\s-]?sell|upsell|nav|menu|header|footer/i;
-    const STRIKE = /\b(retail|was|compare|original|old|regular|strike|crossed|del-price|list-price|ty-list-price|ty-price-retail)\b/i;
+    const STRIKE = /\b(retail|was|compare|original|old|regular|strike|crossed|del-price|list-price|ty-list-price|ty-price-retail|mrp|rrp|old-price|price-old|was-price|price-was|sale-was|line-through|strikethrough|previous-price|msrp|rrp-price|price-old-amount)\b/i;
     const DEALER = /dealer|wholesale|trade|b2b|your[\s-]?price|distributor|reseller/i;
     const PRICE_CONTEXT = /\bprice\b|\bcost\b|\bamount\b/i;
     const PROD_CONTEXT = /product|summary|detail|info|offer|sale|now|current|item-main|ty-product-block|prod-main/i;
+    const SALE_SIGNAL = /\b(save|was|regular|originally|compare|rrp|mrp|msrp|list[\s-]?price|retail[\s-]?price|you[\s-]?save|off)\b|\d+\s*%\s*off|−\s*\d|-\s*\d+\s*%/i;
 
     function isStruck(el) {
         let cur = el;
@@ -505,6 +523,16 @@ _SMART_SCAN_JS = r"""() => {
             fontWeight = parseInt(style.fontWeight, 10) || 400;
         } catch (_) {}
 
+        // Scan up to 4 ancestors for any sale-signal text ("was", "save",
+        // "%", "rrp", "mrp", etc.). This lets us recognize original prices
+        // that aren't visually struck but sit near a discount hint.
+        let nearSaleSignal = false;
+        let ancestor = el;
+        for (let i = 0; i < 4 && ancestor; i++, ancestor = ancestor.parentElement) {
+            const txt = (ancestor.textContent || '').slice(0, 400);
+            if (SALE_SIGNAL.test(txt)) { nearSaleSignal = true; break; }
+        }
+
         candidates.push({
             text,
             value: num,
@@ -513,6 +541,7 @@ _SMART_SCAN_JS = r"""() => {
             font_weight: fontWeight,
             struck: isStruck(el),
             dealer: isDealer(el),
+            near_sale_signal: nearSaleSignal,
             dom_path: domPath(el),
         });
     }
@@ -534,31 +563,55 @@ _SMART_SCAN_JS = r"""() => {
 
     let original = null;
     if (main) {
+        // Preferred: an explicitly struck candidate greater than main.
         original = candidates
             .filter(c => c.struck && !c.dealer && c.value > main.value)
             .sort((a, b) => b.value - a.value)[0] || null;
+        // Fallback: when no strike was detected (sites that style "was" price
+        // via color/size instead of line-through — e.g. MD store), pick the
+        // largest non-dealer candidate that sits near a sale signal AND is
+        // meaningfully greater than the main price (≥5% higher).
+        if (!original) {
+            original = candidates
+                .filter(c =>
+                    !c.dealer
+                    && c.near_sale_signal
+                    && c.value > main.value * 1.05
+                    && c.value <= main.value * 10)
+                .sort((a, b) => b.value - a.value)[0] || null;
+        }
     }
 
     const dealer = candidates
         .filter(c => c.dealer)
         .sort((a, b) => b.score - a.score || b.font_size - a.font_size)[0] || null;
 
-    // Stock detection
+    // Stock detection (order matters: pre-order/back-order before in-stock,
+    // because preorder buttons often also say "Order now").
     let stock = 'unknown';
     const btnSelectors = [
         'button[name*="cart"]', 'button[class*="cart"]', 'button[id*="cart"]',
         'button[class*="buy"]', 'button[id*="buy"]',
+        'button[class*="preorder"]', 'button[class*="pre-order"]',
         'input[type="submit"][value*="cart" i]',
         'input[type="submit"][value*="buy" i]',
+        'input[type="submit"][value*="pre-order" i]',
         '.add-to-cart', '.buy-now', '#add-to-cart-button',
         '[data-action="add-to-cart"]', 'button[class*="add"]',
         'a[class*="add-to-cart"]',
+        '.preorder-button', '.pre-order-button', '.notify-me',
     ];
     outer: for (const sel of btnSelectors) {
         for (const btn of document.querySelectorAll(sel)) {
             if (!visible(btn)) continue;
             const t = ((btn.textContent || btn.value || '') + '').toLowerCase();
-            if (/out.?of.?stock|sold.?out|unavailable|notify.?me|coming.?soon/.test(t)) {
+            if (/pre[\s-]?order|pre[\s-]?sale|coming[\s-]?soon|notify[\s-]?me|notify[\s-]?when/.test(t)) {
+                stock = 'preorder'; break outer;
+            }
+            if (/back[\s-]?order|on[\s-]?backorder/.test(t)) {
+                stock = 'backorder'; break outer;
+            }
+            if (/out.?of.?stock|sold.?out|unavailable/.test(t)) {
                 stock = 'out_of_stock'; break outer;
             }
             if (btn.disabled || btn.getAttribute('disabled') !== null) {
@@ -571,7 +624,11 @@ _SMART_SCAN_JS = r"""() => {
     }
     if (stock === 'unknown') {
         const text = (document.body.innerText || '').toLowerCase();
-        if (/\bout[\s-]of[\s-]stock\b|\bsold[\s-]out\b|\bnot available\b/.test(text))
+        if (/\bpre[\s-]?order\b|\bpre[\s-]?sale\b|\bcoming[\s-]soon\b|\bnotify[\s-]when[\s-]available\b/.test(text))
+            stock = 'preorder';
+        else if (/\bback[\s-]?order\b|\bon[\s-]?backorder\b/.test(text))
+            stock = 'backorder';
+        else if (/\bout[\s-]of[\s-]stock\b|\bsold[\s-]out\b|\bnot available\b/.test(text))
             stock = 'out_of_stock';
         else if (/\bin[\s-]stock\b/.test(text))
             stock = 'in_stock';
@@ -695,10 +752,56 @@ async def _apply_custom(
 
 # ── Context factory (shared by scrape() and probe()) ─────────────────────────
 
+# Stealth init script: mask the most obvious headless-Chromium fingerprints
+# before any site script runs. Needed to get past Cloudflare, DataDome,
+# PerimeterX, and similar bot walls that gate products behind a challenge page.
+_STEALTH_INIT_JS = r"""
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+Object.defineProperty(navigator, 'plugins', {
+    get: () => [
+        { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    ],
+});
+Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+try {
+    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+} catch (_) {}
+window.chrome = window.chrome || {
+    app: { isInstalled: false, InstallState: {}, RunningState: {} },
+    runtime: { OnInstalledReason: {}, OnRestartRequiredReason: {}, PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {} },
+    csi: function () {},
+    loadTimes: function () {},
+};
+try {
+    const _origQuery = window.navigator.permissions && window.navigator.permissions.query;
+    if (_origQuery) {
+        window.navigator.permissions.query = (parameters) =>
+            parameters.name === 'notifications'
+                ? Promise.resolve({ state: Notification.permission })
+                : _origQuery(parameters);
+    }
+} catch (_) {}
+try {
+    const getParameter = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function (parameter) {
+        if (parameter === 37445) return 'Intel Inc.';
+        if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+        return getParameter.apply(this, [parameter]);
+    };
+} catch (_) {}
+"""
+
+
 async def _open_context(config: ScrapeConfig) -> BrowserContext:
     """
     Create a new Playwright context pre-configured with cookies, headers,
-    and an optional saved storage_state (for logged-in scraping).
+    and an optional saved storage_state (for logged-in scraping). Installs
+    stealth init scripts so bot walls (Cloudflare, DataDome) are less likely
+    to challenge the request.
     """
     if not _browser:
         raise RuntimeError("Browser not started")
@@ -711,6 +814,19 @@ async def _open_context(config: ScrapeConfig) -> BrowserContext:
         ),
         viewport={"width": 1280, "height": 900},
         locale="en-US",
+        timezone_id="Asia/Colombo",
+        extra_http_headers={
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,image/apng,*/*;q=0.8,"
+                "application/signed-exchange;v=b3;q=0.7"
+            ),
+            "sec-ch-ua": '"Chromium";v="124", "Not-A.Brand";v="99", "Google Chrome";v="124"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "Upgrade-Insecure-Requests": "1",
+        },
     )
 
     if config.storage_state_path and os.path.exists(config.storage_state_path):
@@ -718,6 +834,10 @@ async def _open_context(config: ScrapeConfig) -> BrowserContext:
         logger.info("Using storage_state from %s", config.storage_state_path)
 
     context = await _browser.new_context(**options)
+    try:
+        await context.add_init_script(_STEALTH_INIT_JS)
+    except Exception as e:
+        logger.debug("Could not attach stealth init script: %s", e)
 
     if config.cookies:
         try:
@@ -734,8 +854,73 @@ async def _open_context(config: ScrapeConfig) -> BrowserContext:
     return context
 
 
+_CLOUDFLARE_HINTS = (
+    "just a moment",
+    "checking your browser",
+    "verify you are human",
+    "verifying you are human",
+    "needs to review the security of your connection",
+    "enable javascript and cookies to continue",
+    "please wait while we check your browser",
+    "ddos protection by",
+)
+
+
+async def _detected_challenge(page: Page) -> bool:
+    try:
+        for sel in (
+            "#challenge-running",
+            "#challenge-form",
+            "#cf-challenge-running",
+            'iframe[src*="challenges.cloudflare.com"]',
+            'div[class*="cf-browser-verification"]',
+            'div[id*="px-captcha"]',
+        ):
+            el = await page.query_selector(sel)
+            if el:
+                return True
+        title = (await page.title()) or ""
+        if title.strip().lower() in {"just a moment...", "just a moment…"}:
+            return True
+        # Only read a slice of innerText to keep this cheap.
+        text = await page.evaluate(
+            "() => (document.body && document.body.innerText || '').slice(0, 600).toLowerCase()"
+        )
+        return any(h in text for h in _CLOUDFLARE_HINTS)
+    except Exception:
+        return False
+
+
+async def _wait_for_challenge_clear(page: Page, timeout_ms: int = 25000) -> bool:
+    """
+    If Cloudflare / similar is running, wait up to timeout_ms for it to clear.
+    Returns True when the page no longer looks like a challenge.
+    """
+    import time as _time
+
+    deadline = _time.monotonic() + (timeout_ms / 1000.0)
+    while _time.monotonic() < deadline:
+        if not await _detected_challenge(page):
+            return True
+        try:
+            # Let the challenge script run and optionally auto-navigate.
+            await page.wait_for_load_state("networkidle", timeout=3000)
+        except Exception:
+            await asyncio.sleep(0.8)
+    return not await _detected_challenge(page)
+
+
 async def _navigate(page: Page, url: str, config: ScrapeConfig) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+    # Bot-wall handling: if the landing page is a challenge, give it a
+    # chance to auto-resolve before we look for product selectors.
+    if await _detected_challenge(page):
+        logger.info("Bot-check challenge detected on %s — waiting for clear", url)
+        cleared = await _wait_for_challenge_clear(page)
+        if not cleared:
+            logger.warning("Bot-check challenge did not clear on %s", url)
+
     if config.wait_for:
         try:
             await page.wait_for_selector(

@@ -10,6 +10,7 @@ if sys.platform == "win32":
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Scope
 
 from database.db import init_db
 from scraper.engine import start_browser, stop_browser
@@ -18,6 +19,24 @@ from api import (
     products, stores, logs, scraper_routes, categories, activity,
     import_routes, settings,
 )
+
+
+class NoCacheHTMLStaticFiles(StaticFiles):
+    """Serve the Vite SPA but tell browsers never to cache index.html.
+
+    Hashed assets under /assets/* keep their long-lived cache; the entry HTML
+    always revalidates so newly built bundles are picked up immediately.
+    """
+
+    async def get_response(self, path: str, scope: Scope):  # type: ignore[override]
+        response = await super().get_response(path, scope)
+        if path in ("", "index.html") or path.endswith(".html"):
+            response.headers["Cache-Control"] = (
+                "no-store, no-cache, must-revalidate, max-age=0"
+            )
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,7 +80,11 @@ async def health():
 
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend-web" / "dist"
 if _FRONTEND_DIST.is_dir():
-    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
+    app.mount(
+        "/",
+        NoCacheHTMLStaticFiles(directory=_FRONTEND_DIST, html=True),
+        name="frontend",
+    )
 else:
     logging.getLogger(__name__).info(
         "frontend-web/dist not found — skipping static mount (run `npm run build` in frontend-web)"

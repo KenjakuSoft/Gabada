@@ -5,13 +5,19 @@ const LABEL: Record<StockStatus, string> = {
   in_stock: 'In stock',
   out_of_stock: 'Out of stock',
   limited: 'Limited',
+  preorder: 'Pre-order',
+  backorder: 'Backorder',
   unknown: 'Unknown',
 }
 
-const VARIANT: Record<StockStatus, 'success' | 'destructive' | 'warning' | 'muted'> = {
+type BadgeVariant = 'success' | 'destructive' | 'warning' | 'info' | 'muted'
+
+const VARIANT: Record<StockStatus, BadgeVariant> = {
   in_stock: 'success',
   out_of_stock: 'destructive',
   limited: 'warning',
+  preorder: 'info',
+  backorder: 'warning',
   unknown: 'muted',
 }
 
