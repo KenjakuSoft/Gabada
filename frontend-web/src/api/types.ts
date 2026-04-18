@@ -98,6 +98,7 @@ export interface ProbeCandidate {
   font_weight: number | null
   struck: boolean
   dealer: boolean
+  variant_alt: boolean
   dom_path: string | null
 }
 

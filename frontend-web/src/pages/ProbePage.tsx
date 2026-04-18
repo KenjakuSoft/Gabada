@@ -242,6 +242,11 @@ function ProbeResults({
                           <Badge variant="outline" className="text-xs">
                             dealer
                           </Badge>
+                        ) : null}{' '}
+                        {c.variant_alt ? (
+                          <Badge variant="warning" className="text-xs">
+                            variant
+                          </Badge>
                         ) : null}
                       </td>
                       <td className="truncate px-2 py-1.5 font-mono text-[10px] text-muted-foreground">

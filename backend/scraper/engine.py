@@ -103,36 +103,55 @@ def _parse_price(raw: Optional[str]) -> Optional[float]:
         return None
 
 
+# Word-boundary regexes — substring matching on words like "expected" / "eta"
+# causes false positives (e.g. "Expected delivery 2-3 days" on in-stock items).
+_STOCK_PREORDER_RE = re.compile(
+    r"\b(pre[\s-]?order(?:ing)?|pre[\s-]?sale|coming\s+soon|"
+    r"available\s+for\s+pre[\s-]?order|will\s+be\s+available|"
+    r"release(?:s|d)?\s+(?:on|in))\b",
+    re.IGNORECASE,
+)
+_STOCK_BACKORDER_RE = re.compile(
+    r"\b(back[\s-]?order(?:ed)?|on\s+back\s*order|onbackorder)\b",
+    re.IGNORECASE,
+)
+_STOCK_OUT_RE = re.compile(
+    r"\b(out[\s-]?of[\s-]?stock|sold[\s-]?out|no\s+stock|not\s+available|"
+    r"unavailable|discontinued|outofstock|notify\s+me\s+when|"
+    r"email\s+me\s+when)\b",
+    re.IGNORECASE,
+)
+_STOCK_LIMITED_RE = re.compile(
+    r"\b(limited\s+stock|limited\s+availability|limitedavailability|"
+    r"low\s+stock|few\s+left|hurry|only\s+\d+\s+left)\b",
+    re.IGNORECASE,
+)
+_STOCK_IN_RE = re.compile(
+    r"\b(in[\s-]?stock|instock|available\s+now|ready\s+to\s+ship|"
+    r"add\s+to\s+cart|buy\s+now)\b",
+    re.IGNORECASE,
+)
+
+
 def _parse_stock(raw: Optional[str]) -> str:
     if not raw:
         return "unknown"
-    t = raw.lower().strip()
-    # Pre-order / back-order checked FIRST — these often co-occur with
-    # "available" / "add to cart" phrasing that would otherwise mask them.
-    if any(w in t for w in [
-        "pre-order", "pre order", "preorder", "pre-sale", "presale",
-        "coming soon", "notify me", "notify when available",
-        "expected", "eta", "ships on", "ships in",
-    ]):
+    t = raw.strip()
+    # Order matters: preorder / backorder BEFORE in-stock, because those pages
+    # often also show "available" / "add to cart" copy.
+    if _STOCK_PREORDER_RE.search(t):
         return "preorder"
-    if any(w in t for w in [
-        "back-order", "back order", "backorder", "on backorder",
-        "onbackorder",
-    ]):
+    if _STOCK_BACKORDER_RE.search(t):
         return "backorder"
-    if any(w in t for w in [
-        "out of stock", "unavailable", "sold out", "no stock",
-        "not available", "outofstock", "discontinued",
-    ]):
+    if _STOCK_OUT_RE.search(t):
         return "out_of_stock"
-    if any(w in t for w in [
-        "limited", "low stock", "only", "hurry", "few left",
-        "limitedavailability",
-    ]):
+    if _STOCK_LIMITED_RE.search(t):
         return "limited"
-    if any(w in t for w in [
-        "in stock", "available", "add to cart", "buy now", "instock",
-    ]):
+    if _STOCK_IN_RE.search(t):
+        return "in_stock"
+    # Bare "available" as a fallback — kept last to avoid stomping on
+    # negative phrases like "not available" matched above.
+    if re.search(r"\bavailable\b", t, re.IGNORECASE):
         return "in_stock"
     return "unknown"
 
@@ -255,9 +274,16 @@ _PRICE_SELECTORS = [
     ".price ins .amount",
     ".price .amount",
     # CS-Cart (redacted-store, redacted-store.example, and similar B2B-enabled stores)
+    # Prefer selectors scoped to the main product block so we don't pick up
+    # variant-option prices, "you may also like", or cart-sidebar prices.
+    ".ty-product-block .ty-price-now .ty-price-num",
+    ".ty-product-block .ty-price .ty-price-num",
+    ".ty-product-block .ty-price-now",
     ".ty-price-now .ty-price-num",
     ".ty-price-now",
     ".ty-price .ty-price-num",
+    "[id^='line_discounted_price_'] .ty-price-num",
+    "[id^='line_discounted_price_']",
     # Magento
     "[data-price-type='finalPrice'] .price",
     ".price-box .price",
@@ -440,6 +466,12 @@ _SMART_SCAN_JS = r"""() => {
     const PRICE_CONTEXT = /\bprice\b|\bcost\b|\bamount\b/i;
     const PROD_CONTEXT = /product|summary|detail|info|offer|sale|now|current|item-main|ty-product-block|prod-main/i;
     const SALE_SIGNAL = /\b(save|was|regular|originally|compare|rrp|mrp|msrp|list[\s-]?price|retail[\s-]?price|you[\s-]?save|off)\b|\d+\s*%\s*off|−\s*\d|-\s*\d+\s*%/i;
+    // A variant-option container holds several alternative prices (one per
+    // color/size/config) that are NOT the main displayed price. Candidates
+    // inside these containers get deprioritized unless they also sit inside
+    // a "selected/active/checked" marker.
+    const VARIANT_ALT = /variant-option|swatch-option|variant-item|option-value|product-options|ty-product-options|ty-product-variant-image-item(?!-checked)|configurable_option|product-form__input|variant-selector|product-variants|attributes-selector/i;
+    const SELECTED = /selected|is-active|is-selected|is-checked|active|checked|current[\s-]?variant|ty-product-variant-image-item-checked|aria-selected/i;
 
     function isStruck(el) {
         let cur = el;
@@ -475,6 +507,30 @@ _SMART_SCAN_JS = r"""() => {
             if (BAD.test(info)) return true;
         }
         return false;
+    }
+
+    // Variant-alt detection: walk up to 6 ancestors. If any ancestor is a
+    // known variant-option container AND no ancestor within that scope is
+    // marked as "selected/active/checked", treat the candidate as an
+    // alternate variant price (deprioritize it).
+    function variantAlt(el) {
+        let cur = el;
+        let inVariant = false;
+        let selected = false;
+        for (let i = 0; i < 6 && cur; i++, cur = cur.parentElement) {
+            const info = ((cur.className || '') + ' ' + (cur.id || '')).toString();
+            if (!inVariant && VARIANT_ALT.test(info)) inVariant = true;
+            if (SELECTED.test(info)) selected = true;
+            try {
+                if (cur.getAttribute &&
+                    (cur.getAttribute('aria-selected') === 'true' ||
+                     cur.getAttribute('data-selected') === 'true' ||
+                     cur.getAttribute('aria-checked') === 'true')) {
+                    selected = true;
+                }
+            } catch (_) {}
+        }
+        return inVariant && !selected;
     }
 
     function contextScore(el) {
@@ -541,18 +597,25 @@ _SMART_SCAN_JS = r"""() => {
             font_weight: fontWeight,
             struck: isStruck(el),
             dealer: isDealer(el),
+            variant_alt: variantAlt(el),
             near_sale_signal: nearSaleSignal,
             dom_path: domPath(el),
         });
     }
 
     // Deterministic main-price selection.
-    // Prefer: not struck, not dealer, highest score, largest font,
-    //         then heaviest weight, then smallest value, then earliest DOM order.
-    const mains = candidates
+    // Prefer non-variant-alt candidates; only fall back to variant-alt
+    // candidates when there are no other options (common on pages where
+    // the main price is inside the variant-options container).
+    const eligible = candidates
         .map((c, i) => ({ ...c, _i: i }))
-        .filter(c => !c.struck && !c.dealer)
-        .sort((a, b) =>
+        .filter(c => !c.struck && !c.dealer);
+    let primary = eligible.filter(c => !c.variant_alt);
+    if (primary.length === 0) primary = eligible;
+    // Rank: highest score, largest font, heaviest weight, smallest value,
+    // then earliest DOM order. "Smallest value" biases toward the sale
+    // price when two equally-scored mains exist.
+    const mains = primary.sort((a, b) =>
               b.score - a.score
            || b.font_size - a.font_size
            || b.font_weight - a.font_weight
@@ -565,7 +628,7 @@ _SMART_SCAN_JS = r"""() => {
     if (main) {
         // Preferred: an explicitly struck candidate greater than main.
         original = candidates
-            .filter(c => c.struck && !c.dealer && c.value > main.value)
+            .filter(c => c.struck && !c.dealer && !c.variant_alt && c.value > main.value)
             .sort((a, b) => b.value - a.value)[0] || null;
         // Fallback: when no strike was detected (sites that style "was" price
         // via color/size instead of line-through — e.g. MD store), pick the
@@ -575,6 +638,7 @@ _SMART_SCAN_JS = r"""() => {
             original = candidates
                 .filter(c =>
                     !c.dealer
+                    && !c.variant_alt
                     && c.near_sale_signal
                     && c.value > main.value * 1.05
                     && c.value <= main.value * 10)
@@ -624,16 +688,18 @@ _SMART_SCAN_JS = r"""() => {
     }
     if (stock === 'unknown') {
         const text = (document.body.innerText || '').toLowerCase();
-        if (/\bpre[\s-]?order\b|\bpre[\s-]?sale\b|\bcoming[\s-]soon\b|\bnotify[\s-]when[\s-]available\b/.test(text))
+        // Order: explicit out-of-stock / preorder signals before "in stock",
+        // because many preorder / back-order pages also advertise "available".
+        if (/\bout[\s-]of[\s-]stock\b|\bsold[\s-]out\b|\bnot available\b/.test(text))
+            stock = 'out_of_stock';
+        else if (/\bpre[\s-]?order\b|\bpre[\s-]?sale\b|\bcoming[\s-]soon\b|\bnotify[\s-]me[\s-]when\b/.test(text))
             stock = 'preorder';
         else if (/\bback[\s-]?order\b|\bon[\s-]?backorder\b/.test(text))
             stock = 'backorder';
-        else if (/\bout[\s-]of[\s-]stock\b|\bsold[\s-]out\b|\bnot available\b/.test(text))
-            stock = 'out_of_stock';
-        else if (/\bin[\s-]stock\b/.test(text))
-            stock = 'in_stock';
         else if (/\blimited[\s-]stock\b|\blow[\s-]stock\b/.test(text))
             stock = 'limited';
+        else if (/\bin[\s-]stock\b/.test(text))
+            stock = 'in_stock';
     }
 
     // Platform fingerprint
@@ -1104,6 +1170,7 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
                 font_weight=c.get("font_weight"),
                 struck=bool(c.get("struck", False)),
                 dealer=bool(c.get("dealer", False)),
+                variant_alt=bool(c.get("variant_alt", False)),
                 dom_path=c.get("dom_path"),
             ))
 
