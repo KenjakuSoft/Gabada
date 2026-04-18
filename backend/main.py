@@ -2,12 +2,14 @@ import asyncio
 import sys
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 # Playwright requires ProactorEventLoop on Windows to spawn subprocesses
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from database.db import init_db
 from scraper.engine import start_browser, stop_browser
@@ -55,3 +57,12 @@ app.include_router(settings.router)
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend-web" / "dist"
+if _FRONTEND_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
+else:
+    logging.getLogger(__name__).info(
+        "frontend-web/dist not found — skipping static mount (run `npm run build` in frontend-web)"
+    )
