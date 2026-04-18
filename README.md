@@ -43,6 +43,7 @@ automatically scraping, logging history, and surfacing every change.*
 - Works on any e-commerce site — no CSS selectors required
 - 4-strategy extraction: JSON-LD → Schema.org → JS Smart Scan → CSS patterns
 - Handles SPAs, lazy-loaded content, and JS-heavy stores
+- Stealth Playwright context bypasses most Cloudflare / DataDome / bot-check walls
 - One shared Playwright browser — fast and memory-efficient
 
 </td>
@@ -63,7 +64,9 @@ automatically scraping, logging history, and surfacing every change.*
 - Colour-coded categories for grouping products
 - Track the same product across multiple stores side-by-side
 - Lowest-price badge on every product card
-- Stock status badges: In Stock · Limited · Out of Stock
+- Stock badges: In Stock · Limited · Pre-order · Backorder · Out of Stock
+- Inline edit of product name / image / category from the detail screen
+- One-click unlink of a store without deleting the product
 
 </td>
 <td width="50%">
@@ -298,9 +301,14 @@ The activity feed filters out unchanged scrapes and shows only events that matte
 ### Extraction strategy waterfall
 
 ```
- Navigate to URL (Playwright, headless Chromium)
+ Navigate to URL (Playwright, headless Chromium, stealth context)
            │
            ▼
+ ┌─────────────────────┐
+ │  Bot-check wait     │  Detect Cloudflare / DataDome / PerimeterX challenge
+ │                     │  pages and wait up to 25 s for auto-resolve
+ └──────────┬──────────┘
+            ▼
  ┌─────────────────────┐
  │  1. JSON-LD         │  <script type="application/ld+json"> → Product schema
  └──────────┬──────────┘
@@ -424,12 +432,48 @@ Each product-store link accepts an optional `scrape_config` JSON object. All fie
 
 | Detected text (case-insensitive) | Stored value |
 |---|---|
+| `pre-order`, `preorder`, `pre-sale`, `coming soon`, `notify me` | `preorder` |
+| `back-order`, `backorder`, `on backorder` | `backorder` |
 | `out of stock`, `sold out`, `unavailable`, `not available` | `out_of_stock` |
 | `limited`, `low stock`, `only X left`, `hurry`, `few left` | `limited` |
 | `in stock`, `available`, `add to cart`, `buy now` | `in_stock` |
+| Schema.org URL contains `PreOrder` / `PreSale` | `preorder` |
+| Schema.org URL contains `BackOrder` | `backorder` |
 | Schema.org URL contains `InStock` | `in_stock` |
 | Schema.org URL contains `OutOfStock` | `out_of_stock` |
 | Anything else / not found | `unknown` |
+
+> Pre-order / back-order checks run **first** so sites that say "Available for pre-order / Add to cart" don't get misclassified as `in_stock`.
+
+</details>
+
+<details>
+<summary><strong>Anti-bot / Cloudflare handling</strong></summary>
+
+Every Playwright context is launched with a stealth init script plus realistic HTTP headers so fewer sites throw a challenge in the first place:
+
+- `navigator.webdriver` returns `undefined`
+- Spoofed `window.chrome`, `navigator.plugins`, `navigator.languages`, `hardwareConcurrency`, `deviceMemory`
+- WebGL vendor / renderer spoofed to Intel
+- Patched `Notification.permission` leak in `navigator.permissions.query`
+- Realistic `Accept-Language`, `sec-ch-ua`, `sec-ch-ua-platform`, `Upgrade-Insecure-Requests` headers
+- Timezone pinned to `Asia/Colombo`
+
+On navigation, the engine detects running challenge pages (`#challenge-running`, `cf-challenge`, `iframe[src*="challenges.cloudflare.com"]`, `px-captcha`, or body text like "Just a moment", "Verifying you are human", "Checking your browser") and waits up to 25 s for the challenge to auto-resolve before extracting.
+
+Sites that require human-solved CAPTCHAs (Turnstile interactive, hCaptcha, etc.) still cannot be scraped headlessly. For logged-in scraping, use the `/scraper/login-session` endpoint to save `storage_state.json` and reference it via `scrape_config.storage_state_path`.
+
+</details>
+
+<details>
+<summary><strong>Reverse-price / "was" price detection</strong></summary>
+
+Sites that show two prices (original + discounted) don't always mark the original with `<del>`, `<s>`, or `line-through`. The smart scan uses two signals to pick which value is the retail and which is the sale price:
+
+1. **STRIKE regex** — matches on class names/IDs like `retail`, `was`, `original`, `old-price`, `price-old`, `was-price`, `price-was`, `sale-was`, `mrp`, `rrp`, `msrp`, `list-price`, `compare-price`, `line-through`, `strikethrough`, `previous-price`.
+2. **Sale-signal proximity fallback** — when no candidate is marked struck, the scanner picks the largest non-dealer, non-installment price that is ≥5% higher than the main and sits near visible text like `was`, `save`, `regular`, `rrp`, `mrp`, `you save`, or a `% off` badge within 4 ancestor elements.
+
+Convention across the codebase: `price` = original / retail (higher), `discounted_price` = current sale (lower). The UI shows the discounted price in bold when present and the original struck through.
 
 </details>
 
@@ -726,7 +770,8 @@ playwright install chromium
 | SPA renders price after load | Add `"wait_for": "<price-selector>"` |
 | Unusual price format or layout | Add `"selectors": {"price": "..."}` |
 | `wait_timeout` too short | Increase to `30000` (30 s) |
-| Site behind Cloudflare / bot protection | Some sites cannot be scraped headlessly |
+| Interactive CAPTCHA (Turnstile / hCaptcha) | Use `/scraper/login-session` to save a logged-in `storage_state.json`, then set `scrape_config.storage_state_path` |
+| Cloudflare / DataDome auto-challenge | Handled automatically — if it still fails, bump `wait_timeout` or try again later |
 
 **Debug a URL directly:**
 
@@ -863,6 +908,27 @@ git commit -m "feat: describe your change"
 ---
 
 ## 📋 Changelog
+
+### `v0.5.0` — 2026-04-18
+
+> Bot-check bypass, pre-order / back-order, reverse-price fix, edit UI
+
+**Added**
+- **Playwright stealth init script** on every context — masks `navigator.webdriver`, spoofs `chrome`, `plugins`, `languages`, `hardwareConcurrency`, WebGL vendor/renderer; sends realistic `Accept-Language` and `sec-ch-ua` headers
+- **Cloudflare / DataDome challenge handler** — detects `#challenge-running`, `cf-challenge`, `iframe[src*="challenges.cloudflare.com"]`, `px-captcha`, and body phrases like "Just a moment" / "Verifying you are human"; waits up to 25 s for auto-resolve
+- `preorder` and `backorder` recognised by `_parse_stock`, Schema.org availability URLs, and the smart-scan JS (button text + body text)
+- `info` badge variant (sky/tint); `StockPill` now labels Pre-order and Backorder
+- **Edit product** button + inline form on the detail screen — updates `canonical_name`, `image_url`, `category_id` via `PATCH /products/{id}`
+- **Unlink store** trash icon on every `StoreRow` — calls `DELETE /products/{id}/stores/{ps_id}`
+- `NoCacheHTMLStaticFiles` mount sends `Cache-Control: no-store` for the SPA entry HTML so newly built bundles load without a hard refresh
+
+**Fixed**
+- **Reverse-price bug** (e.g. MD store showing 144 000 sale from 206 000 retail):
+  - STRIKE regex in the smart scan now also matches `mrp`, `rrp`, `msrp`, `old-price`, `price-old`, `was-price`, `price-was`, `sale-was`, `line-through`, `strikethrough`, `previous-price`
+  - New sale-signal proximity fallback picks a non-dealer price ≥5 % higher than the main when it sits near `was`, `save`, `regular`, `rrp`, `mrp`, `you save`, or a `% off` badge within 4 ancestor elements
+- Pre-order / back-order checks run before `in_stock` so "Available for pre-order" pages no longer fall through to `in_stock`
+
+---
 
 ### `v0.4.0` — 2026-04-13
 
