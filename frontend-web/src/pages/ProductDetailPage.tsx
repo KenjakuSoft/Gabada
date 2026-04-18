@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { StoreRow } from '@/components/products/StoreRow'
+import { AddStoreCard } from '@/components/products/AddStoreCard'
 import { PriceChart } from '@/components/products/PriceChart'
 import { LogsTable } from '@/components/products/LogsTable'
 import { logsApi, productsApi, scraperApi } from '@/api'
@@ -191,6 +192,9 @@ export function ProductDetailPage() {
                 <StoreRow key={s.id} store={s} symbol={symbol} />
               ))
             )}
+            <div className="pt-2">
+              <AddStoreCard productId={p.id} />
+            </div>
           </CardContent>
         </Card>
       </div>
