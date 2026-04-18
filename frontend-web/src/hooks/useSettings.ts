@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { settingsApi } from '@/api'
 import type { Settings } from '@/api'
 
-export function useSettings() {
+function useSettings() {
   return useQuery<Settings>({
     queryKey: ['settings'],
     queryFn: () => settingsApi.get(),

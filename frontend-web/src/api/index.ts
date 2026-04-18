@@ -13,7 +13,6 @@ import type {
 } from './types'
 
 export { productsApi } from './products'
-export { http }
 export type * from './types'
 
 export const storesApi = {
