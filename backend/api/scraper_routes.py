@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Optional, Tuple
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import BaseModel
 from database.db import get_db
 from database.models import (
     ScrapeConfig,
@@ -11,6 +12,7 @@ from database.models import (
     LoginSessionRequest,
 )
 from scraper.engine import scrape, probe, save_login_state
+from scraper import site_profiles
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/scraper", tags=["scraper"])
@@ -231,6 +233,45 @@ async def reprobe_store(product_store_id: int) -> dict:
         }
     finally:
         await db.close()
+
+
+class SiteProfilesPayload(BaseModel):
+    content: str
+
+
+class SiteProfilesResponse(BaseModel):
+    content: str
+    path: str
+    hostnames: list[str]
+
+
+@router.get("/sites-config", response_model=SiteProfilesResponse)
+async def get_sites_config() -> SiteProfilesResponse:
+    """Return the raw text of ``sites.toml`` plus the active hostnames."""
+    return SiteProfilesResponse(
+        content=site_profiles.read_file(),
+        path=site_profiles.SITES_TOML_PATH,
+        hostnames=site_profiles.list_hostnames(),
+    )
+
+
+@router.put("/sites-config", response_model=SiteProfilesResponse)
+async def put_sites_config(body: SiteProfilesPayload) -> SiteProfilesResponse:
+    """
+    Overwrite ``sites.toml`` with new content. Rejects invalid TOML so a bad
+    edit never silently breaks scraping. The file lives on disk, so you can
+    also edit it in Notepad — this endpoint just exists for the web UI.
+    """
+    try:
+        site_profiles.write_file(body.content)
+    except Exception as e:
+        logger.warning("Rejected invalid sites.toml: %s", e)
+        raise HTTPException(status_code=400, detail=f"Invalid TOML: {e}")
+    return SiteProfilesResponse(
+        content=site_profiles.read_file(),
+        path=site_profiles.SITES_TOML_PATH,
+        hostnames=site_profiles.list_hostnames(),
+    )
 
 
 @router.post("/login-session")

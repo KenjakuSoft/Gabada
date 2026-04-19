@@ -35,6 +35,11 @@ from database.models import (
     ScrapeConfig,
     ScrapeResult,
 )
+from scraper.site_profiles import (
+    PLATFORM_SELECTORS as _PLATFORM_SELECTORS,
+    PLATFORM_WAIT_FOR as _PLATFORM_WAIT_FOR,
+    apply_profile as _apply_site_profile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1011,6 +1016,10 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
         if not _browser:
             raise RuntimeError("Browser not started")
 
+    # Let sites.toml pin a platform / override selectors for this hostname
+    # before we touch the network. Unknown hosts pass through untouched.
+    config = _apply_site_profile(url, config)
+
     context = await _open_context(config)
     page = await context.new_page()
 
@@ -1084,60 +1093,9 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
 
 
 # ── Probe (diagnostics) ──────────────────────────────────────────────────────
-
-_PLATFORM_WAIT_FOR: dict[str, str] = {
-    "cs-cart":     ".ty-productPage-price, .ty-price-now, .ty-price-num, .ty-price",
-    "woocommerce": ".price .amount",
-    "shopify":     ".price, [data-product-price]",
-    "magento":     "[data-price-type='finalPrice'] .price, .price-box .price",
-    "prestashop":  "#our_price_display, .current-price",
-    "generic":     "",
-}
-
-_PLATFORM_SELECTORS: dict[str, dict[str, Optional[str]]] = {
-    "cs-cart": {
-        "title": ".ty-product-block-title",
-        "price": ".ty-productPage-price .ty-price-now, .ty-price-now .ty-price-num, .ty-price-now",
-        "discounted_price": ".ty-price-retail-price .ty-price-num, .ty-price-retail-price",
-        "dealer_price": ".ty-price-dealer .ty-price-num, .ty-price-dealer",
-        "stock_status": ".ty-qty-in-stock, .ty-qty-out-of-stock, .ty-special-msg",
-    },
-    "woocommerce": {
-        "title": ".product_title",
-        "price": ".price ins .amount, .price .amount",
-        "discounted_price": ".price del .amount",
-        "dealer_price": None,
-        "stock_status": ".stock",
-    },
-    "shopify": {
-        "title": ".product__title, h1[class*='product']",
-        "price": ".price-item--sale, .price__regular .price-item",
-        "discounted_price": ".price-item--regular, .price__compare",
-        "dealer_price": None,
-        "stock_status": ".product-form__inventory, [class*='inventory']",
-    },
-    "magento": {
-        "title": ".page-title .base",
-        "price": "[data-price-type='finalPrice'] .price, .price-box .price",
-        "discounted_price": "[data-price-type='oldPrice'] .price",
-        "dealer_price": None,
-        "stock_status": ".stock.available, .stock.unavailable",
-    },
-    "prestashop": {
-        "title": ".product_name, h1.product-name",
-        "price": "#our_price_display, .current-price",
-        "discounted_price": ".regular-price",
-        "dealer_price": None,
-        "stock_status": "#stock_availability, .availability",
-    },
-    "generic": {
-        "title": None,
-        "price": None,
-        "discounted_price": None,
-        "dealer_price": None,
-        "stock_status": None,
-    },
-}
+# Platform defaults now live in ``scraper.site_profiles`` so they can be
+# resolved both by the engine and by the ``sites.toml`` loader without a
+# circular import.
 
 
 async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
@@ -1147,6 +1105,9 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
     Useful for debugging why a site scrapes incorrectly.
     """
     response = ProbeResponse(url=url)
+    # Apply any matching entry from sites.toml so probes reflect the real
+    # scraper behaviour that ``scrape()`` will use.
+    config = _apply_site_profile(url, config)
     context = await _open_context(config)
     page = await context.new_page()
 

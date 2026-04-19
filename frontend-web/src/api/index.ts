@@ -127,6 +127,22 @@ export const scraperApi = {
     const { data } = await http.post('/scraper/login-session', body)
     return data
   },
+  getSitesConfig: async (): Promise<SitesConfigResponse> => {
+    const { data } = await http.get<SitesConfigResponse>('/scraper/sites-config')
+    return data
+  },
+  putSitesConfig: async (content: string): Promise<SitesConfigResponse> => {
+    const { data } = await http.put<SitesConfigResponse>('/scraper/sites-config', {
+      content,
+    })
+    return data
+  },
+}
+
+export interface SitesConfigResponse {
+  content: string
+  path: string
+  hostnames: string[]
 }
 
 export const importApi = {

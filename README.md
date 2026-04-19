@@ -294,6 +294,86 @@ The activity feed filters out unchanged scrapes and shows only events that matte
 - Filter the home list by tapping any category chip
 - Delete via the trash icon
 
+### Registering a new shop (`sites.toml`)
+
+When auto-detection isn't enough for a given shop, you don't need to touch
+engine code — register the hostname in a plain-text TOML file instead.
+
+**Option A — edit the file in Notepad**
+
+1. Open `backend/scraper/sites.toml`
+2. Add an entry:
+
+   ```toml
+   ["mystore.com"]
+   platform = "shopify"
+   ```
+
+3. Save. The scraper hot-reloads on the next scrape — no server restart.
+
+**Option B — edit it from the web app**
+
+1. **Settings → Site profiles**
+2. Add or change entries in the textarea
+3. **Save profiles** (bad TOML is rejected with an inline error)
+
+**Known platforms**
+
+| Platform | When to use |
+|---|---|
+| `cs-cart` | Nanotek, Barclays Computers, many SL/IN B2B tech shops |
+| `shopify` | Any Shopify-hosted store (check footer or `/products/*.json` route) |
+| `woocommerce` | WordPress + WooCommerce |
+| `magento` | Magento 1/2 storefronts |
+| `prestashop` | PrestaShop |
+| `generic` | Unknown or custom — engine falls back to the 4-strategy waterfall |
+
+**Minimal entry** — just pin the platform:
+
+```toml
+["examplestore.com"]
+platform = "shopify"
+```
+
+**Full entry** — pin platform *and* override specific selectors:
+
+```toml
+["tricky.com"]
+platform = "generic"
+wait_for = "#product-price"
+[tricky.com.selectors]
+title = "h1.product-title"
+price = ".price-now"
+discounted_price = ".price-was"
+stock_status = ".availability"
+image = "img.product-main"
+```
+
+**Hostname matching rules**
+
+| You write | It matches |
+|---|---|
+| `["example.com"]` | `example.com`, `www.example.com`, `shop.example.com` |
+| `["shop.example.com"]` | only `shop.example.com` (and its `www.` variant) |
+| Nothing | Auto-detection runs at add-product time and guesses the platform |
+
+`www.` is stripped before matching. Subdomains walk up the domain suffix, so
+`["example.com"]` is the catch-all for the whole domain.
+
+**Merge priority** (highest → lowest)
+
+1. Explicit fields on the product-store's own `scrape_config` (what you set when you added the product)
+2. Explicit fields in the matched `sites.toml` entry
+3. Defaults pulled from the entry's `platform`
+4. Auto-detected platform (runs only at add-product time)
+
+**Verifying a new profile**
+
+- Probe the URL via **Probe** in the sidebar (or `POST /scraper/probe`)
+- Check that `platform` comes back as the one you pinned
+- Confirm `extracted.price`, `extracted.title`, and `extracted.stock_status` look right
+- If they don't — add selector overrides and probe again
+
 ---
 
 ## 🕷️ Scraper Engine
@@ -551,8 +631,10 @@ curl "http://localhost:8000/logs/product/8?from=2026-03-13&to=2026-04-13"
 |---|---|---|
 | `POST` | `/scraper/scrape/{ps_id}` | Scrape one product-store (202 Accepted) |
 | `POST` | `/scraper/scrape-all` | Scrape all active product-stores (202 Accepted) |
+| `GET` | `/scraper/sites-config` | Read the `sites.toml` profile registry |
+| `PUT` | `/scraper/sites-config` | Overwrite `sites.toml` (400 on invalid TOML) |
 
-Both return immediately. Scraping runs in a background task.
+Both scrape endpoints return immediately. Scraping runs in a background task.
 
 ```bash
 curl -X POST http://localhost:8000/scraper/scrape/9
@@ -890,10 +972,34 @@ git commit -m "feat: describe your change"
 
 ### Adding support for a new store type
 
-1. Run the debug scrape snippet above — check if auto-detection already works
-2. **If it works:** document a `scrape_config` example in this README
-3. **If it misses price:** add selectors to `_PRICE_SELECTORS` in `backend/scraper/engine.py`
-4. **If the site is unusual:** add a `_try_<sitename>` strategy function and call it from `scrape()`
+The fastest path is usually the **`sites.toml` registry** — a plain-text file
+you can open in Notepad.
+
+1. Edit `backend/scraper/sites.toml` (or open *Settings → Site profiles* in the
+   web UI) and add an entry:
+
+   ```toml
+   ["mystore.com"]
+   platform = "shopify"   # cs-cart | woocommerce | shopify | magento | prestashop | generic
+   ```
+
+2. Save. The scraper hot-reloads — no restart. `www.mystore.com` and
+   subdomains like `shop.mystore.com` inherit automatically.
+3. Need selector overrides? Add them inline:
+
+   ```toml
+   ["tricky.com"]
+   platform = "generic"
+   wait_for = "#product-price"
+   [tricky.com.selectors]
+   title = "h1.product-title"
+   price = ".price-now"
+   stock_status = ".availability"
+   ```
+
+4. Only touch engine code when the site needs something the registry can't
+   express — then add selectors to `_PRICE_SELECTORS` or introduce a
+   `_try_<sitename>` strategy in `backend/scraper/engine.py`.
 
 ### Design decisions
 
@@ -908,6 +1014,22 @@ git commit -m "feat: describe your change"
 ---
 
 ## 📋 Changelog
+
+### `v0.6.0` — 2026-04-19
+
+> Plain-text site registry — add shops without touching engine code
+
+**Added**
+- **`sites.toml` site-profile registry** at `backend/scraper/sites.toml` — a plain-text file you can edit in Notepad to pin a platform (`cs-cart`, `woocommerce`, `shopify`, `magento`, `prestashop`, `generic`) or override selectors per hostname. `www.` is stripped and subdomains walk up the domain suffix, so `["example.com"]` covers `example.com`, `www.example.com`, and `shop.example.com` in one line. The scraper hot-reloads the file on mtime change — no restart needed
+- `GET` / `PUT /scraper/sites-config` — read and write the registry from the app. Bad TOML is rejected with a 400 so a bad edit never silently breaks scraping
+- **Settings → Site profiles** panel in the web UI — textarea editor with the current hostnames shown as chips, Save/Revert buttons, and server-side validation errors surfaced inline
+- `apply_platform_defaults` extracted from `api/products.py` into the new `scraper.site_profiles` module so profile lookup, platform resolution, and auto-detect all share one implementation
+
+**Changed**
+- Platform constants (`PLATFORM_SELECTORS`, `PLATFORM_WAIT_FOR`) moved out of `engine.py` into `scraper.site_profiles` — `engine.py` re-imports them so existing consumers stay compatible
+- `scrape()` and `probe()` now call `apply_profile(url, config)` before opening a browser context — every run reflects the registry without needing a re-probe on existing DB entries
+
+---
 
 ### `v0.5.1` — 2026-04-19
 
