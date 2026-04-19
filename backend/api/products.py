@@ -8,7 +8,12 @@ from database.models import (
     ProductStoreOverride, ProductStoreOverrideUpsert,
     ScrapeConfig, ScrapeSelectors,
 )
-from scraper.engine import probe as probe_url, _PLATFORM_SELECTORS, _PLATFORM_WAIT_FOR
+from scraper.engine import probe as probe_url
+from scraper.site_profiles import (
+    PLATFORM_SELECTORS as _PLATFORM_SELECTORS,
+    PLATFORM_WAIT_FOR as _PLATFORM_WAIT_FOR,
+    apply_platform_defaults as _apply_platform_defaults_shared,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,31 +27,9 @@ def _selectors_are_empty(sel: ScrapeSelectors) -> bool:
     ])
 
 
-def _apply_platform_defaults(config: ScrapeConfig, platform: str) -> ScrapeConfig:
-    """Fill wait_for + selectors from platform defaults, preserving any
-    fields the caller already set."""
-    plat = platform if platform in _PLATFORM_SELECTORS else "generic"
-    defaults = _PLATFORM_SELECTORS[plat]
-    sel = config.selectors
-    merged_selectors = ScrapeSelectors(
-        title=sel.title or defaults.get("title"),
-        price=sel.price or defaults.get("price"),
-        discounted_price=sel.discounted_price or defaults.get("discounted_price"),
-        dealer_price=sel.dealer_price or defaults.get("dealer_price"),
-        stock_status=sel.stock_status or defaults.get("stock_status"),
-        image=sel.image,
-    )
-    wait_for = config.wait_for or _PLATFORM_WAIT_FOR.get(plat) or None
-    return ScrapeConfig(
-        use_playwright=config.use_playwright,
-        wait_for=wait_for,
-        wait_timeout=config.wait_timeout,
-        selectors=merged_selectors,
-        cookies=config.cookies,
-        headers=config.headers,
-        storage_state_path=config.storage_state_path,
-        platform=plat,
-    )
+# Re-exported here so existing callers (``scraper_routes.reprobe_store``) that
+# do ``from api.products import _apply_platform_defaults`` keep working.
+_apply_platform_defaults = _apply_platform_defaults_shared
 
 
 async def _auto_detect_config(url: str, config: ScrapeConfig) -> ScrapeConfig:

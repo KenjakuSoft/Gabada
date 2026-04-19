@@ -12,8 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { settingsApi } from '@/api'
-import type { Settings } from '@/api'
+import { scraperApi, settingsApi } from '@/api'
+import type { Settings, SitesConfigResponse } from '@/api'
 
 // Full ISO 4217 set of actively-circulating national currencies plus a few
 // widely-used dependent-territory currencies. Sorted alphabetically by code
@@ -428,6 +428,113 @@ export function SettingsPage() {
           Failed to save: invalid cron, timezone, or backend unreachable.
         </p>
       ) : null}
+
+      <SiteProfilesCard />
     </div>
+  )
+}
+
+function SiteProfilesCard() {
+  const qc = useQueryClient()
+  const config = useQuery<SitesConfigResponse>({
+    queryKey: ['scraper', 'sites-config'],
+    queryFn: () => scraperApi.getSitesConfig(),
+  })
+
+  const [draft, setDraft] = useState<string | null>(null)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (config.data && draft === null) setDraft(config.data.content)
+  }, [config.data, draft])
+
+  const save = useMutation({
+    mutationFn: (content: string) => scraperApi.putSitesConfig(content),
+    onSuccess: (next) => {
+      qc.setQueryData(['scraper', 'sites-config'], next)
+      setDraft(next.content)
+      setErrorMsg(null)
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'Failed to save sites.toml'
+      setErrorMsg(detail)
+    },
+  })
+
+  const dirty = draft !== null && config.data && draft !== config.data.content
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Site profiles</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Register shops by hostname and pin a platform or override selectors.
+          Plain-text TOML — edit here or directly in{' '}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">
+            {config.data?.path ?? 'backend/scraper/sites.toml'}
+          </code>
+          . The scraper reloads automatically when the file changes.
+        </p>
+
+        {config.data?.hostnames.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {config.data.hostnames.map((h) => (
+              <span
+                key={h}
+                className="rounded-full border border-border bg-muted/40 px-2.5 py-0.5 font-mono text-xs"
+              >
+                {h}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <textarea
+          value={draft ?? ''}
+          onChange={(e) => setDraft(e.target.value)}
+          spellCheck={false}
+          className="min-h-[240px] w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs leading-5 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          placeholder={'["mystore.com"]\nplatform = "shopify"\n'}
+        />
+
+        {errorMsg ? (
+          <p className="text-sm text-destructive">{errorMsg}</p>
+        ) : save.isSuccess && !dirty ? (
+          <p className="text-sm text-emerald-600 dark:text-emerald-400">
+            Saved. Scraper will pick up changes on the next run.
+          </p>
+        ) : null}
+
+        <div className="flex justify-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              if (config.data) setDraft(config.data.content)
+              setErrorMsg(null)
+            }}
+            disabled={!dirty || save.isPending}
+          >
+            Revert
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => draft !== null && save.mutate(draft)}
+            disabled={!dirty || save.isPending}
+          >
+            {save.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Check className="h-4 w-4" />
+            )}
+            Save profiles
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
