@@ -20,7 +20,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { StatTile } from '@/components/ui/stat-tile'
-import { toast } from '@/components/ui/toaster'
+import { toast } from '@/components/ui/toast-store'
 import { scraperApi } from '@/api'
 import { useCurrencySymbol } from '@/hooks/useSettings'
 import { formatMoney } from '@/lib/utils'
@@ -118,7 +118,7 @@ export function ProbePage() {
 
         <StatTile
           label="Platform"
-          value={result?.platform ?? 0}
+          value={result?.platform ?? 'n/a'}
           icon={<Sparkles className="h-4 w-4" />}
           hint={result ? 'detected' : 'run probe first'}
           tone={result ? 'primary' : 'default'}

@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react'
-import { cn } from '@/lib/utils'
 import { useCountUp } from '@/hooks/useCountUp'
+import { cn } from '@/lib/utils'
 import { BentoTile, TileHeader } from './bento'
 import { Skeleton } from './skeleton'
 
 interface StatTileProps {
   label: string
-  value: number | null | undefined
+  value: number | string | null | undefined
   icon?: ReactNode
   suffix?: string
   prefix?: string
@@ -31,14 +31,17 @@ export function StatTile({
   colSpan = 1,
   accent,
 }: StatTileProps) {
-  const animated = useCountUp(value ?? null, { decimals })
+  const isNumericValue = typeof value === 'number'
+  const animated = useCountUp(isNumericValue ? value : null, { decimals })
   const shown =
-    animated == null
-      ? '—'
-      : animated.toLocaleString(undefined, {
-          minimumFractionDigits: decimals,
-          maximumFractionDigits: decimals,
-        })
+    typeof value === 'string'
+      ? value
+      : animated == null
+        ? 'n/a'
+        : animated.toLocaleString(undefined, {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals,
+          })
 
   return (
     <BentoTile tone={tone} colSpan={colSpan}>

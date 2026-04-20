@@ -1,18 +1,19 @@
-import io
 import csv
+import io
 
 import httpx
 import openpyxl
 import pdfplumber
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
+from api.product_service import create_product_with_store
 from database.db import get_db
 from database.models import (
-    WooProductPreview,
-    WooPreviewRequest,
-    WooImportRequest,
-    FileImportPreviewResponse,
     FileImportCommitRequest,
+    FileImportPreviewResponse,
+    WooImportRequest,
+    WooPreviewRequest,
+    WooProductPreview,
 )
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -25,8 +26,6 @@ def _map_woo_stock(status: str) -> str:
         "onbackorder": "limited",
     }.get(status, "unknown")
 
-
-# ── WooCommerce ────────────────────────────────────────────────────────────────
 
 @router.post("/woo/preview", response_model=list[WooProductPreview])
 async def woo_preview(body: WooPreviewRequest):
@@ -44,18 +43,22 @@ async def woo_preview(body: WooPreviewRequest):
         raise HTTPException(status_code=resp.status_code, detail="WooCommerce API error")
 
     result = []
-    for p in resp.json():
-        images = p.get("images", [])
-        result.append(WooProductPreview(
-            woo_id=p["id"],
-            name=p["name"],
-            permalink=p["permalink"],
-            regular_price=p.get("regular_price") or None,
-            sale_price=p.get("sale_price") or None,
-            stock_status=_map_woo_stock(p.get("stock_status", "outofstock")),
-            image_url=images[0]["src"] if images else None,
-            categories=[c["name"] for c in p.get("categories", [])],
-        ))
+    for product in resp.json():
+        images = product.get("images", [])
+        result.append(
+            WooProductPreview(
+                woo_id=product["id"],
+                name=product["name"],
+                permalink=product["permalink"],
+                regular_price=product.get("regular_price") or None,
+                sale_price=product.get("sale_price") or None,
+                stock_status=_map_woo_stock(
+                    product.get("stock_status", "outofstock")
+                ),
+                image_url=images[0]["src"] if images else None,
+                categories=[category["name"] for category in product.get("categories", [])],
+            )
+        )
     return result
 
 
@@ -68,7 +71,7 @@ async def woo_import(body: WooImportRequest):
                 url,
                 auth=(body.credentials.consumer_key, body.credentials.consumer_secret),
                 params={
-                    "include": ",".join(str(i) for i in body.product_ids),
+                    "include": ",".join(str(product_id) for product_id in body.product_ids),
                     "per_page": 100,
                 },
             )
@@ -80,15 +83,15 @@ async def woo_import(body: WooImportRequest):
     db = await get_db()
     imported = 0
     try:
-        for p in resp.json():
-            images = p.get("images", [])
-            cur = await db.execute(
-                "INSERT INTO products (canonical_name, image_url) VALUES (?, ?)",
-                (p["name"], images[0]["src"] if images else None),
-            )
-            await db.execute(
-                "INSERT INTO product_stores (product_id, store_id, product_url) VALUES (?, ?, ?)",
-                (cur.lastrowid, body.store_id, p["permalink"]),
+        for product in resp.json():
+            images = product.get("images", [])
+            await create_product_with_store(
+                db,
+                canonical_name=product["name"],
+                image_url=images[0]["src"] if images else None,
+                category_id=None,
+                store_id=body.store_id,
+                product_url=product["permalink"],
             )
             imported += 1
         await db.commit()
@@ -98,18 +101,16 @@ async def woo_import(body: WooImportRequest):
     return {"imported": imported}
 
 
-# ── File Import ────────────────────────────────────────────────────────────────
-
-def _to_str(v) -> str:
-    return str(v) if v is not None else ""
+def _to_str(value) -> str:
+    return str(value) if value is not None else ""
 
 
 @router.post("/file/preview", response_model=FileImportPreviewResponse)
 async def file_preview(file: UploadFile = File(...)):
     content = await file.read()
-    fname = (file.filename or "").lower()
+    filename = (file.filename or "").lower()
 
-    if fname.endswith(".csv"):
+    if filename.endswith(".csv"):
         text = content.decode("utf-8-sig")
         rows = list(csv.reader(io.StringIO(text)))
         if not rows:
@@ -121,36 +122,36 @@ async def file_preview(file: UploadFile = File(...)):
             file_format="csv",
         )
 
-    if fname.endswith((".xlsx", ".xls")):
-        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-        ws = wb.active
-        all_rows = list(ws.iter_rows(values_only=True))
+    if filename.endswith((".xlsx", ".xls")):
+        workbook = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        worksheet = workbook.active
+        all_rows = list(worksheet.iter_rows(values_only=True))
         if not all_rows:
             raise HTTPException(400, "Empty spreadsheet")
         return FileImportPreviewResponse(
-            columns=[_to_str(c) for c in all_rows[0]],
-            sample_rows=[[_to_str(c) for c in row] for row in all_rows[1:6]],
+            columns=[_to_str(cell) for cell in all_rows[0]],
+            sample_rows=[[_to_str(cell) for cell in row] for row in all_rows[1:6]],
             total_rows=len(all_rows) - 1,
             file_format="excel",
         )
 
-    if fname.endswith(".pdf"):
+    if filename.endswith(".pdf"):
         rows: list[list] = []
         with pdfplumber.open(io.BytesIO(content)) as pdf:
             for page in pdf.pages:
-                tbl = page.extract_table()
-                if tbl:
-                    rows.extend(tbl)
+                table = page.extract_table()
+                if table:
+                    rows.extend(table)
         if not rows:
             raise HTTPException(400, "No table found in PDF")
         return FileImportPreviewResponse(
-            columns=[_to_str(c) for c in rows[0]],
-            sample_rows=[[_to_str(c) for c in row] for row in rows[1:6]],
+            columns=[_to_str(cell) for cell in rows[0]],
+            sample_rows=[[_to_str(cell) for cell in row] for row in rows[1:6]],
             total_rows=len(rows) - 1,
             file_format="pdf",
         )
 
-    raise HTTPException(400, "Unsupported format — use .csv, .xlsx, or .pdf")
+    raise HTTPException(400, "Unsupported format - use .csv, .xlsx, or .pdf")
 
 
 @router.post("/file/commit")
@@ -159,13 +160,13 @@ async def file_commit(body: FileImportCommitRequest):
     imported = 0
     try:
         for row in body.rows:
-            cur = await db.execute(
-                "INSERT INTO products (canonical_name, image_url, category_id) VALUES (?, ?, ?)",
-                (row.name, row.image_url, body.category_id),
-            )
-            await db.execute(
-                "INSERT INTO product_stores (product_id, store_id, product_url) VALUES (?, ?, ?)",
-                (cur.lastrowid, body.store_id, row.url),
+            await create_product_with_store(
+                db,
+                canonical_name=row.name,
+                image_url=row.image_url,
+                category_id=body.category_id,
+                store_id=body.store_id,
+                product_url=row.url,
             )
             imported += 1
         await db.commit()

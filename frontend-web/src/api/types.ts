@@ -102,6 +102,16 @@ export interface ProbeCandidate {
   dom_path: string | null
 }
 
+export type ScrapeSelectorField =
+  | 'title'
+  | 'price'
+  | 'discounted_price'
+  | 'dealer_price'
+  | 'stock_status'
+  | 'image'
+
+export type ScrapeSelectorMap = Partial<Record<ScrapeSelectorField, string | null>>
+
 export interface ScrapeResult {
   title: string | null
   price: number | null
@@ -112,6 +122,41 @@ export interface ScrapeResult {
   raw_discounted: string | null
   raw_dealer: string | null
   error: string | null
+}
+
+export interface SelectorLabCandidate {
+  selector: string
+  dom_path: string | null
+  text: string | null
+  sample: string | null
+  value: number | null
+  stock_status: StockStatus | null
+  tag: string | null
+  source: string
+  confidence: number
+  kind_hints: ScrapeSelectorField[]
+  reason: string | null
+}
+
+export interface SelectorLabProfile {
+  hostname: string
+  matched_hostname: string | null
+  platform: string | null
+  wait_for: string | null
+  selectors: ScrapeSelectorMap
+}
+
+export interface SelectorLabResponse {
+  url: string
+  final_url: string | null
+  hostname: string | null
+  platform: string
+  root_selector: string | null
+  extracted: ScrapeResult
+  current_profile: SelectorLabProfile | null
+  suggested_assignments: Record<string, string | null>
+  candidates: SelectorLabCandidate[]
+  notes: string[]
 }
 
 export interface ProbeResponse {
@@ -127,6 +172,12 @@ export interface ProbeResponse {
   extracted: ScrapeResult
   candidates: ProbeCandidate[]
   notes: string[]
+}
+
+export interface SelectorLabSaveResponse {
+  profile: SelectorLabProfile
+  path: string
+  hostnames: string[]
 }
 
 export interface WooCredentials {

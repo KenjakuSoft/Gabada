@@ -1,30 +1,51 @@
 import json
 import logging
-from typing import Optional, Tuple
+from typing import Optional
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
+
 from database.db import get_db
 from database.models import (
-    ScrapeConfig,
-    ScrapeResult,
+    LoginSessionRequest,
     ProbeRequest,
     ProbeResponse,
-    LoginSessionRequest,
+    ScrapeConfig,
+    ScrapeSelectors,
+    ScrapeResult,
+    SelectorLabProfile,
+    SelectorLabRequest,
+    SelectorLabResponse,
+    SelectorLabSaveRequest,
+    SelectorLabSaveResponse,
+    SelectorLabTestRequest,
 )
-from scraper.engine import scrape, probe, save_login_state
 from scraper import site_profiles
+from scraper.engine import inspect_selectors, probe, save_login_state, scrape
+from scraper.site_profiles import apply_platform_defaults
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/scraper", tags=["scraper"])
 
+_SELECTOR_FIELDS = (
+    "title",
+    "price",
+    "discounted_price",
+    "dealer_price",
+    "stock_status",
+    "image",
+)
 
-def _effective_price(price: Optional[float], disc: Optional[float]) -> Optional[float]:
-    return disc if disc is not None else price
+
+def _effective_price(
+    price: Optional[float], discounted_price: Optional[float]
+) -> Optional[float]:
+    return discounted_price if discounted_price is not None else price
 
 
 async def _compute_change(
     db, product_store_id: int, result: ScrapeResult
-) -> Tuple[str, Optional[float], Optional[float], Optional[str]]:
+) -> tuple[str, Optional[float], Optional[float], Optional[str]]:
     """Return (change_type, price_delta, previous_price, previous_stock_status)."""
     rows = await db.execute_fetchall(
         """SELECT price, discounted_price, stock_status
@@ -37,24 +58,26 @@ async def _compute_change(
     if not rows:
         return "new", None, None, None
 
-    prev = rows[0]
-    prev_eff = _effective_price(prev["price"], prev["discounted_price"])
-    new_eff = _effective_price(result.price, result.discounted_price)
-    prev_stock = prev["stock_status"] or "unknown"
-    new_stock = result.stock_status or "unknown"
+    previous = rows[0]
+    previous_effective = _effective_price(
+        previous["price"], previous["discounted_price"]
+    )
+    current_effective = _effective_price(result.price, result.discounted_price)
+    previous_stock = previous["stock_status"] or "unknown"
+    current_stock = result.stock_status or "unknown"
 
     price_changed = False
     price_delta: Optional[float] = None
 
-    if prev_eff is not None and new_eff is not None:
-        delta = new_eff - prev_eff
+    if previous_effective is not None and current_effective is not None:
+        delta = current_effective - previous_effective
         if abs(delta) > 0.001:
             price_delta = round(delta, 2)
             price_changed = True
-    elif prev_eff is None and new_eff is not None:
-        price_changed = True  # price data appeared; delta stays None
+    elif previous_effective is None and current_effective is not None:
+        price_changed = True
 
-    stock_changed = prev_stock != new_stock
+    stock_changed = previous_stock != current_stock
 
     if price_changed and stock_changed:
         change_type = "price_and_stock"
@@ -64,16 +87,16 @@ async def _compute_change(
         else:
             change_type = "price_up"
     elif stock_changed:
-        if new_stock == "out_of_stock":
+        if current_stock == "out_of_stock":
             change_type = "stock_out"
-        elif new_stock in ("in_stock", "limited"):
+        elif current_stock in ("in_stock", "limited"):
             change_type = "stock_in"
         else:
             change_type = "stock_change"
     else:
         change_type = "no_change"
 
-    return change_type, price_delta, prev_eff, prev_stock
+    return change_type, price_delta, previous_effective, previous_stock
 
 
 async def _do_scrape(product_store_id: int):
@@ -90,17 +113,16 @@ async def _do_scrape(product_store_id: int):
             return
 
         row = rows[0]
-        config_dict = json.loads(row["scrape_config"] or "{}")
-        config = ScrapeConfig(**config_dict)
-
+        config = ScrapeConfig(**json.loads(row["scrape_config"] or "{}"))
         result = await scrape(row["product_url"], config)
 
         if result.error:
             logger.error("Scrape error for ps_id=%d: %s", product_store_id, result.error)
             return
 
-        change_type, price_delta, previous_price, previous_stock_status = \
+        change_type, price_delta, previous_price, previous_stock_status = (
             await _compute_change(db, product_store_id, result)
+        )
 
         await db.execute(
             """INSERT INTO price_logs
@@ -126,8 +148,12 @@ async def _do_scrape(product_store_id: int):
         )
         await db.commit()
         logger.info(
-            "Scraped ps_id=%d → price=%s stock=%s change=%s delta=%s",
-            product_store_id, result.price, result.stock_status, change_type, price_delta,
+            "Scraped ps_id=%d -> price=%s stock=%s change=%s delta=%s",
+            product_store_id,
+            result.price,
+            result.stock_status,
+            change_type,
+            price_delta,
         )
     finally:
         await db.close()
@@ -140,15 +166,15 @@ async def scrape_all_active():
         rows = await db.execute_fetchall(
             "SELECT id FROM product_stores WHERE is_active = 1"
         )
-        ids = [r["id"] for r in rows]
+        ids = [row["id"] for row in rows]
     finally:
         await db.close()
 
-    for ps_id in ids:
+    for product_store_id in ids:
         try:
-            await _do_scrape(ps_id)
-        except Exception as e:
-            logger.error("Failed scraping ps_id=%d: %s", ps_id, e)
+            await _do_scrape(product_store_id)
+        except Exception as exc:
+            logger.error("Failed scraping ps_id=%d: %s", product_store_id, exc)
 
 
 @router.post("/scrape/{product_store_id}", status_code=202)
@@ -185,9 +211,139 @@ async def probe_url(request: ProbeRequest) -> ProbeResponse:
     )
     try:
         return await probe(request.url, config)
-    except Exception as e:
-        logger.error("Probe endpoint failed for %s: %s", request.url, e)
-        raise HTTPException(status_code=500, detail=f"Probe failed: {e}")
+    except Exception as exc:
+        logger.error("Probe endpoint failed for %s: %s", request.url, exc)
+        raise HTTPException(status_code=500, detail=f"Probe failed: {exc}")
+
+
+def _config_from_selector_body(
+    body: SelectorLabRequest,
+    selectors: Optional[dict[str, Optional[str]]] = None,
+    platform: Optional[str] = None,
+) -> ScrapeConfig:
+    selector_values = selectors or {}
+    return ScrapeConfig(
+        use_playwright=body.use_playwright,
+        wait_for=body.wait_for,
+        wait_timeout=body.wait_timeout,
+        cookies=body.cookies,
+        headers=body.headers,
+        storage_state_path=body.storage_state_path,
+        platform=platform,
+        selectors=ScrapeSelectors(
+            title=selector_values.get("title"),
+            price=selector_values.get("price"),
+            discounted_price=selector_values.get("discounted_price"),
+            dealer_price=selector_values.get("dealer_price"),
+            stock_status=selector_values.get("stock_status"),
+            image=selector_values.get("image"),
+        ),
+    )
+
+
+def _profile_response(profile: site_profiles.SiteProfile) -> SelectorLabProfile:
+    return SelectorLabProfile(
+        hostname=profile.hostname,
+        matched_hostname=profile.hostname,
+        platform=profile.platform,
+        wait_for=profile.wait_for,
+        selectors={field: profile.selectors.get(field) for field in _SELECTOR_FIELDS},
+    )
+
+
+async def _resolve_profile_hostname(
+    db,
+    body: SelectorLabSaveRequest,
+) -> str:
+    if body.hostname:
+        hostname = site_profiles.normalize_hostname(body.hostname)
+        if hostname:
+            return hostname
+    if body.store_id is not None:
+        rows = await db.execute_fetchall(
+            "SELECT base_url FROM stores WHERE id=?",
+            (body.store_id,),
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="store not found")
+        hostname = site_profiles.normalize_hostname(rows[0]["base_url"])
+        if hostname:
+            return hostname
+    if body.url:
+        hostname = site_profiles.normalize_hostname(body.url)
+        if hostname:
+            return hostname
+    raise HTTPException(status_code=400, detail="Could not resolve a hostname")
+
+
+@router.post("/selector-lab", response_model=SelectorLabResponse)
+async def selector_lab(request: SelectorLabRequest) -> SelectorLabResponse:
+    """Inspect a product page and return selector candidates for manual mapping."""
+    try:
+        config = _config_from_selector_body(request)
+        return await inspect_selectors(request.url, config)
+    except Exception as exc:
+        logger.error("Selector lab failed for %s: %s", request.url, exc)
+        raise HTTPException(status_code=500, detail=f"Selector lab failed: {exc}")
+
+
+@router.post("/selector-lab/test", response_model=ScrapeResult)
+async def selector_lab_test(request: SelectorLabTestRequest) -> ScrapeResult:
+    """Run a scrape using the Selector Lab's currently selected fields."""
+    try:
+        config = _config_from_selector_body(
+            request,
+            selectors=request.selectors,
+            platform=request.platform,
+        )
+        return await scrape(request.url, config)
+    except Exception as exc:
+        logger.error("Selector lab test failed for %s: %s", request.url, exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Selector lab test failed: {exc}",
+        )
+
+
+@router.put("/selector-lab/profile", response_model=SelectorLabSaveResponse)
+async def selector_lab_save_profile(
+    body: SelectorLabSaveRequest,
+) -> SelectorLabSaveResponse:
+    """Save the selected selectors as the default profile for a store hostname."""
+    db = await get_db()
+    try:
+        hostname = await _resolve_profile_hostname(db, body)
+        current = site_profiles.get_exact_profile(hostname)
+        merged_selectors = {
+            field: (
+                body.selectors[field]
+                if field in body.selectors
+                else (current.selectors.get(field) if current else None)
+            )
+            for field in _SELECTOR_FIELDS
+        }
+        profile = site_profiles.upsert_profile(
+            hostname,
+            platform=body.platform if body.platform is not None else (current.platform if current else None),
+            wait_for=body.wait_for if body.wait_for is not None else (current.wait_for if current else None),
+            selectors=merged_selectors,
+            headers=current.headers if current else None,
+        )
+        return SelectorLabSaveResponse(
+            profile=_profile_response(profile),
+            path=site_profiles.SITES_TOML_PATH,
+            hostnames=site_profiles.list_hostnames(),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Selector lab save failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save selector profile: {exc}",
+        )
+    finally:
+        await db.close()
 
 
 @router.post("/reprobe/{product_store_id}")
@@ -198,8 +354,6 @@ async def reprobe_store(product_store_id: int) -> dict:
     storage_state_path, and any custom selectors the user has set. Use this
     after a site redesign or when scrapes start returning nulls.
     """
-    # Local imports to avoid circular deps with api.products at module load.
-    from api.products import _apply_platform_defaults, _selectors_are_empty
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
@@ -208,15 +362,16 @@ async def reprobe_store(product_store_id: int) -> dict:
         )
         if not rows:
             raise HTTPException(status_code=404, detail="product_store not found")
+
         row = rows[0]
         config = ScrapeConfig(**json.loads(row["scrape_config"] or "{}"))
         try:
             report = await probe(row["product_url"], config)
-        except Exception as e:
-            logger.error("Reprobe failed for ps_id=%d: %s", product_store_id, e)
-            raise HTTPException(status_code=500, detail=f"Probe failed: {e}")
+        except Exception as exc:
+            logger.error("Reprobe failed for ps_id=%d: %s", product_store_id, exc)
+            raise HTTPException(status_code=500, detail=f"Probe failed: {exc}")
 
-        merged = _apply_platform_defaults(config, report.platform or "generic")
+        merged = apply_platform_defaults(config, report.platform or "generic")
         await db.execute(
             "UPDATE product_stores SET scrape_config=? WHERE id=?",
             (merged.model_dump_json(), product_store_id),
@@ -260,13 +415,13 @@ async def put_sites_config(body: SiteProfilesPayload) -> SiteProfilesResponse:
     """
     Overwrite ``sites.toml`` with new content. Rejects invalid TOML so a bad
     edit never silently breaks scraping. The file lives on disk, so you can
-    also edit it in Notepad — this endpoint just exists for the web UI.
+    also edit it in Notepad - this endpoint just exists for the web UI.
     """
     try:
         site_profiles.write_file(body.content)
-    except Exception as e:
-        logger.warning("Rejected invalid sites.toml: %s", e)
-        raise HTTPException(status_code=400, detail=f"Invalid TOML: {e}")
+    except Exception as exc:
+        logger.warning("Rejected invalid sites.toml: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Invalid TOML: {exc}")
     return SiteProfilesResponse(
         content=site_profiles.read_file(),
         path=site_profiles.SITES_TOML_PATH,
@@ -291,6 +446,6 @@ async def create_login_session(request: LoginSessionRequest) -> dict:
             wait_seconds=request.wait_seconds,
         )
         return {"status": "ok", **result}
-    except Exception as e:
-        logger.error("login-session failed for %s: %s", request.url, e)
-        raise HTTPException(status_code=500, detail=f"Login session failed: {e}")
+    except Exception as exc:
+        logger.error("login-session failed for %s: %s", request.url, exc)
+        raise HTTPException(status_code=500, detail=f"Login session failed: {exc}")

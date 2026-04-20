@@ -262,6 +262,41 @@ class ProbeResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class SelectorLabCandidate(BaseModel):
+    selector: str
+    dom_path: Optional[str] = None
+    text: Optional[str] = None
+    sample: Optional[str] = None
+    value: Optional[float] = None
+    stock_status: Optional[str] = None
+    tag: Optional[str] = None
+    source: str = "dom"
+    confidence: int = 0
+    kind_hints: list[str] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+class SelectorLabProfile(BaseModel):
+    hostname: str
+    matched_hostname: Optional[str] = None
+    platform: Optional[str] = None
+    wait_for: Optional[str] = None
+    selectors: dict[str, Optional[str]] = Field(default_factory=dict)
+
+
+class SelectorLabResponse(BaseModel):
+    url: str
+    final_url: Optional[str] = None
+    hostname: Optional[str] = None
+    platform: str = "generic"
+    root_selector: Optional[str] = None
+    extracted: ScrapeResult = ScrapeResult()
+    current_profile: Optional[SelectorLabProfile] = None
+    suggested_assignments: dict[str, Optional[str]] = Field(default_factory=dict)
+    candidates: list[SelectorLabCandidate] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class ProbeRequest(BaseModel):
     url: str
     use_playwright: bool = True
@@ -270,6 +305,36 @@ class ProbeRequest(BaseModel):
     cookies: list[dict[str, Any]] = Field(default_factory=list)
     headers: dict[str, str] = Field(default_factory=dict)
     storage_state_path: Optional[str] = None
+
+
+class SelectorLabRequest(BaseModel):
+    url: str
+    use_playwright: bool = True
+    wait_for: Optional[str] = None
+    wait_timeout: int = 15000
+    cookies: list[dict[str, Any]] = Field(default_factory=list)
+    headers: dict[str, str] = Field(default_factory=dict)
+    storage_state_path: Optional[str] = None
+
+
+class SelectorLabTestRequest(SelectorLabRequest):
+    platform: Optional[str] = None
+    selectors: dict[str, Optional[str]] = Field(default_factory=dict)
+
+
+class SelectorLabSaveRequest(BaseModel):
+    url: Optional[str] = None
+    store_id: Optional[int] = None
+    hostname: Optional[str] = None
+    platform: Optional[str] = None
+    wait_for: Optional[str] = None
+    selectors: dict[str, Optional[str]] = Field(default_factory=dict)
+
+
+class SelectorLabSaveResponse(BaseModel):
+    profile: SelectorLabProfile
+    path: str
+    hostnames: list[str] = Field(default_factory=list)
 
 
 class LoginSessionRequest(BaseModel):

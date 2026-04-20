@@ -31,6 +31,7 @@ The merge priority when building the effective ``ScrapeConfig`` is:
     3. Defaults pulled from the profile's ``platform`` (CS-Cart, Shopify, …).
     4. Untouched otherwise (auto-detect still runs at add-product time).
 """
+import json
 import logging
 import os
 import sys
@@ -67,36 +68,36 @@ PLATFORM_WAIT_FOR: dict[str, str] = {
 PLATFORM_SELECTORS: dict[str, dict[str, Optional[str]]] = {
     "cs-cart": {
         "title": ".ty-product-block-title",
-        "price": ".ty-productPage-price .ty-price-now, .ty-price-now .ty-price-num, .ty-price-now",
-        "discounted_price": ".ty-price-retail-price .ty-price-num, .ty-price-retail-price",
+        "price": ".ty-price-retail-price .ty-price-num, .ty-price-retail-price, .ty-list-price .ty-price-num, .ty-list-price",
+        "discounted_price": ".ty-productPage-price .ty-price-now, .ty-price-now .ty-price-num, .ty-price-now",
         "dealer_price": ".ty-price-dealer .ty-price-num, .ty-price-dealer",
         "stock_status": ".ty-qty-in-stock, .ty-qty-out-of-stock, .ty-special-msg",
     },
     "woocommerce": {
         "title": ".product_title",
-        "price": ".price ins .amount, .price .amount",
-        "discounted_price": ".price del .amount",
+        "price": "div.summary.entry-summary del .amount, .summary.entry-summary del .amount",
+        "discounted_price": "div.summary.entry-summary ins .amount, div.summary.entry-summary .price .amount, .summary.entry-summary ins .amount, .summary.entry-summary .price .amount",
         "dealer_price": None,
         "stock_status": ".stock",
     },
     "shopify": {
         "title": ".product__title, h1[class*='product']",
-        "price": ".price-item--sale, .price__regular .price-item",
-        "discounted_price": ".price-item--regular, .price__compare",
+        "price": ".price__compare .price-item, .price-item--regular",
+        "discounted_price": ".price-item--sale, .price__regular .price-item",
         "dealer_price": None,
         "stock_status": ".product-form__inventory, [class*='inventory']",
     },
     "magento": {
         "title": ".page-title .base",
-        "price": "[data-price-type='finalPrice'] .price, .price-box .price",
-        "discounted_price": "[data-price-type='oldPrice'] .price",
+        "price": "[data-price-type='oldPrice'] .price",
+        "discounted_price": "[data-price-type='finalPrice'] .price, .price-box .price",
         "dealer_price": None,
         "stock_status": ".stock.available, .stock.unavailable",
     },
     "prestashop": {
         "title": ".product_name, h1.product-name",
-        "price": "#our_price_display, .current-price",
-        "discounted_price": ".regular-price",
+        "price": ".regular-price",
+        "discounted_price": "#our_price_display, .current-price",
         "dealer_price": None,
         "stock_status": "#stock_availability, .availability",
     },
@@ -283,6 +284,13 @@ _DEFAULT_BODY = """# Gabada site profiles
 #   stock_status = \".availability\"
 """
 
+_SERIALIZED_HEADER = """# Gabada site profiles
+#
+# Managed by the Selector Lab and Settings editor.
+# Match is by hostname. \"www.\" is stripped automatically.
+#
+"""
+
 
 def read_file() -> str:
     try:
@@ -305,3 +313,125 @@ def write_file(content: str) -> None:
 
 def list_hostnames() -> list[str]:
     return sorted(_load().keys())
+
+
+def normalize_hostname(value: str) -> Optional[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    target = raw if "://" in raw else f"https://{raw.lstrip('/')}"
+    try:
+        host = (urlparse(target).hostname or "").lower()
+    except Exception:
+        host = ""
+    if not host:
+        host = raw.split("/")[0].strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host or None
+
+
+def get_exact_profile(hostname: str) -> Optional[SiteProfile]:
+    normalized = normalize_hostname(hostname)
+    if not normalized:
+        return None
+    entry = _load().get(normalized)
+    if not entry:
+        return None
+    selectors_raw = entry.get("selectors") or {}
+    headers_raw = entry.get("headers") or {}
+    return SiteProfile(
+        hostname=normalized,
+        platform=entry.get("platform"),
+        wait_for=entry.get("wait_for"),
+        selectors={k: str(v) for k, v in selectors_raw.items() if v},
+        headers={k: str(v) for k, v in headers_raw.items() if v},
+    )
+
+
+def _toml_quote(value: str) -> str:
+    return json.dumps(value)
+
+
+def _inline_table(values: dict[str, str]) -> str:
+    parts = [
+        f"{key} = {_toml_quote(str(values[key]))}"
+        for key in sorted(values)
+        if values[key]
+    ]
+    return "{ " + ", ".join(parts) + " }"
+
+
+def _serialize_profiles(profiles: dict[str, dict]) -> str:
+    lines = [_SERIALIZED_HEADER.rstrip(), ""]
+    for hostname in sorted(profiles):
+        entry = profiles[hostname] or {}
+        lines.append(f'["{hostname}"]')
+        platform = entry.get("platform")
+        wait_for = entry.get("wait_for")
+        selectors = {
+            str(k): str(v)
+            for k, v in (entry.get("selectors") or {}).items()
+            if v
+        }
+        headers = {
+            str(k): str(v)
+            for k, v in (entry.get("headers") or {}).items()
+            if v
+        }
+        if platform:
+            lines.append(f"platform = {_toml_quote(str(platform))}")
+        if wait_for:
+            lines.append(f"wait_for = {_toml_quote(str(wait_for))}")
+        if selectors:
+            lines.append(f"selectors = {_inline_table(selectors)}")
+        if headers:
+            lines.append(f"headers = {_inline_table(headers)}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def upsert_profile(
+    hostname: str,
+    *,
+    platform: Optional[str] = None,
+    wait_for: Optional[str] = None,
+    selectors: Optional[dict[str, Optional[str]]] = None,
+    headers: Optional[dict[str, str]] = None,
+) -> SiteProfile:
+    normalized = normalize_hostname(hostname)
+    if not normalized:
+        raise ValueError("Invalid hostname")
+
+    current = {k: dict(v) for k, v in _load().items()}
+    selectors_clean = {
+        str(k): str(v).strip()
+        for k, v in (selectors or {}).items()
+        if v and str(v).strip()
+    }
+    headers_clean = {
+        str(k): str(v).strip()
+        for k, v in (headers or {}).items()
+        if v and str(v).strip()
+    }
+
+    entry: dict[str, object] = {}
+    if platform:
+        entry["platform"] = platform
+    if wait_for:
+        entry["wait_for"] = wait_for
+    if selectors_clean:
+        entry["selectors"] = selectors_clean
+    if headers_clean:
+        entry["headers"] = headers_clean
+
+    if entry:
+        current[normalized] = entry
+    else:
+        current.pop(normalized, None)
+
+    write_file(_serialize_profiles(current))
+    profile = get_exact_profile(normalized)
+    if profile:
+        return profile
+    return SiteProfile(hostname=normalized)

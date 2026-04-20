@@ -10,6 +10,7 @@ if sys.platform == "win32":
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
 from database.db import init_db
@@ -29,7 +30,15 @@ class NoCacheHTMLStaticFiles(StaticFiles):
     """
 
     async def get_response(self, path: str, scope: Scope):  # type: ignore[override]
-        response = await super().get_response(path, scope)
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or Path(path).suffix != "":
+                raise
+            response = await super().get_response("index.html", scope)
+
+        if response.status_code == 404 and Path(path).suffix == "":
+            response = await super().get_response("index.html", scope)
         if path in ("", "index.html") or path.endswith(".html"):
             response.headers["Cache-Control"] = (
                 "no-store, no-cache, must-revalidate, max-age=0"
@@ -63,14 +72,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(categories.router)
-app.include_router(products.router)
-app.include_router(stores.router)
-app.include_router(logs.router)
-app.include_router(scraper_routes.router)
-app.include_router(activity.router)
-app.include_router(import_routes.router)
-app.include_router(settings.router)
+API_PREFIX = "/api"
+
+app.include_router(categories.router, prefix=API_PREFIX)
+app.include_router(products.router, prefix=API_PREFIX)
+app.include_router(stores.router, prefix=API_PREFIX)
+app.include_router(logs.router, prefix=API_PREFIX)
+app.include_router(scraper_routes.router, prefix=API_PREFIX)
+app.include_router(activity.router, prefix=API_PREFIX)
+app.include_router(import_routes.router, prefix=API_PREFIX)
+app.include_router(settings.router, prefix=API_PREFIX)
 
 
 @app.get("/health")

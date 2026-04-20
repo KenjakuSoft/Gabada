@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Save, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -20,12 +20,6 @@ export function EditProductCard({ product, onClose }: EditProductCardProps) {
   const [categoryId, setCategoryId] = useState(
     product.category_id == null ? '' : String(product.category_id),
   )
-
-  useEffect(() => {
-    setName(product.canonical_name)
-    setImageUrl(product.image_url ?? '')
-    setCategoryId(product.category_id == null ? '' : String(product.category_id))
-  }, [product])
 
   const categories = useQuery<Category[]>({
     queryKey: ['categories'],

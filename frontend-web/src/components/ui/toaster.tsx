@@ -1,75 +1,13 @@
 import { useEffect, useState } from 'react'
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-export type ToastVariant = 'success' | 'error' | 'info'
-
-export interface Toast {
-  id: number
-  title: string
-  description?: string
-  variant: ToastVariant
-  duration: number
-}
-
-type Listener = (toasts: Toast[]) => void
-
-let seq = 1
-let toasts: Toast[] = []
-const listeners = new Set<Listener>()
-const timers = new Map<number, number>()
-
-function emit() {
-  for (const l of listeners) l([...toasts])
-}
-
-export function pushToast(input: {
-  title: string
-  description?: string
-  variant?: ToastVariant
-  duration?: number
-}): number {
-  const t: Toast = {
-    id: seq++,
-    title: input.title,
-    description: input.description,
-    variant: input.variant ?? 'info',
-    duration: input.duration ?? 3200,
-  }
-  toasts = [...toasts, t]
-  emit()
-  const timer = window.setTimeout(() => dismissToast(t.id), t.duration)
-  timers.set(t.id, timer)
-  return t.id
-}
-
-export function dismissToast(id: number): void {
-  toasts = toasts.filter((t) => t.id !== id)
-  const timer = timers.get(id)
-  if (timer !== undefined) {
-    window.clearTimeout(timer)
-    timers.delete(id)
-  }
-  emit()
-}
-
-export const toast = {
-  success: (title: string, description?: string) =>
-    pushToast({ title, description, variant: 'success' }),
-  error: (title: string, description?: string) =>
-    pushToast({ title, description, variant: 'error' }),
-  info: (title: string, description?: string) =>
-    pushToast({ title, description, variant: 'info' }),
-}
+import { dismissToast, getToasts, subscribeToasts, type Toast } from './toast-store'
 
 export function Toaster() {
-  const [items, setItems] = useState<Toast[]>(toasts)
+  const [items, setItems] = useState<Toast[]>(() => getToasts())
 
   useEffect(() => {
-    listeners.add(setItems)
-    return () => {
-      listeners.delete(setItems)
-    }
+    return subscribeToasts(setItems)
   }, [])
 
   return (

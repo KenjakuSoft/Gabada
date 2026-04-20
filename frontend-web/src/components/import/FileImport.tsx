@@ -16,7 +16,7 @@ import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { StatTile } from '@/components/ui/stat-tile'
-import { toast } from '@/components/ui/toaster'
+import { toast } from '@/components/ui/toast-store'
 import { categoriesApi, importApi, storesApi } from '@/api'
 import type {
   Category,

@@ -33,7 +33,13 @@
 platform = "cs-cart"
 
 ["redacted-store"]
-platform = "cs-cart"
+platform = "generic"
+wait_for = ".product-details-area .price-box .price"
+
+[redacted-store.selectors]
+title = ".product-name h1"
+price = ".product-details-area .price-box .price"
+stock_status = ".product-details-area .availability"
 
 
 # ── Add your sites below. Copy one of the examples above and edit. ──────────
