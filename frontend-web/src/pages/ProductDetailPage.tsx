@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Skeleton } from '@/components/ui/skeleton'
-import { toast } from '@/components/ui/toaster'
+import { toast } from '@/components/ui/toast-store'
 import { StoreRow } from '@/components/products/StoreRow'
 import { AddStoreCard } from '@/components/products/AddStoreCard'
 import { EditProductCard } from '@/components/products/EditProductCard'
@@ -29,7 +29,7 @@ import { logsApi, productsApi, scraperApi } from '@/api'
 import { useCurrencySymbol } from '@/hooks/useSettings'
 import { useLiveTime } from '@/hooks/useLiveTime'
 import type { PriceLog, Product } from '@/api'
-import { cn, formatMoney } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>()

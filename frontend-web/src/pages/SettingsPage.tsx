@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Check,
@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
-import { toast } from '@/components/ui/toaster'
+import { toast } from '@/components/ui/toast-store'
 import { useLiveTime } from '@/hooks/useLiveTime'
 import { scraperApi, settingsApi } from '@/api'
 import type { Settings, SitesConfigResponse } from '@/api'
@@ -231,10 +231,8 @@ export function SettingsPage() {
     queryFn: () => settingsApi.get(),
   })
 
-  const [form, setForm] = useState<Settings | null>(null)
-  useEffect(() => {
-    if (settings.data && !form) setForm(settings.data)
-  }, [settings.data, form])
+  const [draft, setDraft] = useState<Settings | null>(null)
+  const form = draft ?? settings.data ?? null
 
   const next = useQuery<{ next_run_time: string | null }>({
     queryKey: ['settings', 'next-run'],
@@ -247,7 +245,7 @@ export function SettingsPage() {
     onSuccess: (updated) => {
       qc.setQueryData(['settings'], updated)
       qc.invalidateQueries({ queryKey: ['settings', 'next-run'] })
-      setForm(updated)
+      setDraft(null)
       toast.success('Settings saved')
     },
     onError: () =>
@@ -255,7 +253,7 @@ export function SettingsPage() {
   })
 
   const dirty = useMemo(() => {
-    if (!form || !settings.data) return false
+    if (!draft || !settings.data) return false
     const keys: Array<keyof Settings> = [
       'currency_code',
       'currency_symbol',
@@ -265,8 +263,8 @@ export function SettingsPage() {
       'scrape_enabled',
       'locale',
     ]
-    return keys.some((k) => form[k] !== settings.data[k])
-  }, [form, settings.data])
+    return keys.some((k) => draft[k] !== settings.data[k])
+  }, [draft, settings.data])
 
   if (!form) {
     return (
@@ -277,16 +275,23 @@ export function SettingsPage() {
   }
 
   function update<K extends keyof Settings>(key: K, value: Settings[K]) {
-    setForm((f) => (f ? { ...f, [key]: value } : f))
+    setDraft((current) => {
+      const source = current ?? settings.data
+      return source ? { ...source, [key]: value } : current
+    })
   }
 
   function pickCurrency(code: string) {
     const preset = CURRENCY_PRESETS.find((c) => c.code === code)
-    if (!preset || !form) return
-    setForm({
-      ...form,
-      currency_code: preset.code,
-      currency_symbol: preset.symbol,
+    if (!preset) return
+    setDraft((current) => {
+      const source = current ?? settings.data
+      if (!source) return current
+      return {
+        ...source,
+        currency_code: preset.code,
+        currency_symbol: preset.symbol,
+      }
     })
   }
 
@@ -511,16 +516,13 @@ function SiteProfilesCard() {
   })
 
   const [draft, setDraft] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (config.data && draft === null) setDraft(config.data.content)
-  }, [config.data, draft])
+  const content = draft ?? config.data?.content ?? ''
 
   const save = useMutation({
     mutationFn: (content: string) => scraperApi.putSitesConfig(content),
     onSuccess: (next) => {
       qc.setQueryData(['scraper', 'sites-config'], next)
-      setDraft(next.content)
+      setDraft(null)
       toast.success('Profiles saved', 'Scraper reloads on next run')
     },
     onError: (err: unknown) => {
@@ -531,7 +533,7 @@ function SiteProfilesCard() {
     },
   })
 
-  const dirty = draft !== null && config.data && draft !== config.data.content
+  const dirty = draft !== null && config.data != null && draft !== config.data.content
 
   return (
     <BentoGrid cols={6}>
@@ -545,16 +547,14 @@ function SiteProfilesCard() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  if (config.data) setDraft(config.data.content)
-                }}
+                onClick={() => setDraft(null)}
                 disabled={!dirty || save.isPending}
               >
                 Revert
               </Button>
               <Button
                 size="sm"
-                onClick={() => draft !== null && save.mutate(draft)}
+                onClick={() => save.mutate(content)}
                 disabled={!dirty || save.isPending}
               >
                 {save.isPending ? (
@@ -587,7 +587,7 @@ function SiteProfilesCard() {
         ) : null}
 
         <textarea
-          value={draft ?? ''}
+          value={content}
           onChange={(e) => setDraft(e.target.value)}
           spellCheck={false}
           className="mt-3 min-h-[280px] w-full rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-xs leading-5 text-foreground outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring"

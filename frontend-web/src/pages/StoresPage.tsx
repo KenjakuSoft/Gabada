@@ -19,9 +19,10 @@ import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Skeleton } from '@/components/ui/skeleton'
-import { toast } from '@/components/ui/toaster'
+import { toast } from '@/components/ui/toast-store'
 import { storesApi, productsApi } from '@/api'
 import { useLiveTime } from '@/hooks/useLiveTime'
+import { useNow } from '@/hooks/useNow'
 import type { Product, Store } from '@/api'
 
 interface StoreAggregate {
@@ -99,12 +100,13 @@ export function StoresPage() {
     () => computeAggregates(stores.data ?? [], products.data ?? []),
     [stores.data, products.data],
   )
+  const now = useNow()
 
   const totals = useMemo(() => {
     let productLinks = 0
     let inStock = 0
     let recentlyScraped = 0
-    const cutoff = Date.now() - 24 * 60 * 60_000
+    const cutoff = now - 24 * 60 * 60_000
     for (const a of aggregates) {
       productLinks += a.productCount
       inStock += a.inStockCount
@@ -113,7 +115,7 @@ export function StoresPage() {
       }
     }
     return { productLinks, inStock, recentlyScraped }
-  }, [aggregates])
+  }, [aggregates, now])
 
   const create = useMutation({
     mutationFn: () =>

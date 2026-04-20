@@ -32,6 +32,9 @@ from playwright.async_api import (
 from database.models import (
     ProbeCandidate,
     ProbeResponse,
+    SelectorLabCandidate,
+    SelectorLabProfile,
+    SelectorLabResponse,
     ScrapeConfig,
     ScrapeResult,
 )
@@ -39,6 +42,8 @@ from scraper.site_profiles import (
     PLATFORM_SELECTORS as _PLATFORM_SELECTORS,
     PLATFORM_WAIT_FOR as _PLATFORM_WAIT_FOR,
     apply_profile as _apply_site_profile,
+    find_profile as _find_site_profile,
+    normalize_hostname as _normalize_hostname,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,14 +98,28 @@ def _parse_price(raw: Optional[str]) -> Optional[float]:
     if _is_installment_price(raw):
         return None
     cleaned = re.sub(r"[^\d.,]", "", raw.strip())
+    cleaned = cleaned.strip(".,")
     if not cleaned:
         return None
     # European format: 1.299,99
     if re.match(r"^\d{1,3}(\.\d{3})+(,\d+)?$", cleaned):
         cleaned = cleaned.replace(".", "").replace(",", ".")
+    # US / Sri Lanka format: 1,299.99 or 55,500
+    elif re.match(r"^\d{1,3}(,\d{3})+(\.\d+)?$", cleaned):
+        cleaned = cleaned.replace(",", "")
+    elif cleaned.count(",") and not cleaned.count("."):
+        if re.match(r"^\d+,\d{1,2}$", cleaned):
+            cleaned = cleaned.replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+    elif cleaned.count(".") and not cleaned.count(","):
+        if re.match(r"^\d{1,3}(\.\d{3})+$", cleaned):
+            cleaned = cleaned.replace(".", "")
     else:
-        cleaned = re.sub(r",(\d{3})", r"\1", cleaned)
-        cleaned = cleaned.replace(",", ".")
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
     try:
         v = float(cleaned)
         return v if v > 0 else None
@@ -142,6 +161,10 @@ def _parse_stock(raw: Optional[str]) -> str:
     if not raw:
         return "unknown"
     t = raw.strip()
+    if re.search(r"\b(?:availability|stock)\s*:\s*no\b", t, re.IGNORECASE):
+        return "out_of_stock"
+    if re.search(r"\b(?:availability|stock)\s*:\s*yes\b", t, re.IGNORECASE):
+        return "in_stock"
     # Order matters: preorder / backorder BEFORE in-stock, because those pages
     # often also show "available" / "add to cart" copy.
     if _STOCK_PREORDER_RE.search(t):
@@ -174,6 +197,226 @@ def _stock_from_schema_url(url: str) -> str:
     if "limitedavailability" in url or "limited" in url:
         return "limited"
     return "unknown"
+
+
+_PRODUCT_ROOT_SELECTORS = [
+    "div.summary.entry-summary",
+    ".summary.entry-summary",
+    "#product .summary",
+    ".product-details-area",
+    ".product-view-area",
+    ".ty-product-block",
+    ".ty-productPage-body",
+    ".ty-productPage",
+    "#product-info-main",
+    ".product__info-container",
+    ".product-single__info",
+    ".product-page",
+    "article.product",
+    "[itemtype*='Product']",
+]
+
+
+async def _get_product_root(page: Page):
+    for selector in _PRODUCT_ROOT_SELECTORS:
+        try:
+            root = await page.query_selector(selector)
+        except Exception:
+            continue
+        if root:
+            return root
+    return None
+
+
+async def _query_selector_scoped(
+    page: Page,
+    selector: Optional[str],
+    *,
+    root=None,
+    allow_page_fallback: bool = True,
+):
+    if not selector:
+        return None
+    if root is not None:
+        try:
+            el = await root.query_selector(selector)
+        except Exception:
+            el = None
+        if el or not allow_page_fallback:
+            return el
+    try:
+        return await page.query_selector(selector)
+    except Exception:
+        return None
+
+
+async def _query_selector_all_scoped(
+    page: Page,
+    selector: Optional[str],
+    *,
+    root=None,
+    allow_page_fallback: bool = True,
+):
+    if not selector:
+        return []
+    if root is not None:
+        try:
+            els = await root.query_selector_all(selector)
+        except Exception:
+            els = []
+        if els or not allow_page_fallback:
+            return els
+    try:
+        return await page.query_selector_all(selector)
+    except Exception:
+        return []
+
+
+async def _read_element_text(el) -> Optional[str]:
+    if not el:
+        return None
+    try:
+        raw = await el.get_attribute("content")
+        if raw:
+            raw = raw.strip()
+            if raw:
+                return raw
+    except Exception:
+        pass
+    try:
+        raw = await el.inner_text()
+    except Exception:
+        return None
+    raw = (raw or "").strip()
+    return raw or None
+
+
+def _clear_discount(result: ScrapeResult) -> None:
+    result.discounted_price = None
+    result.raw_discounted = None
+
+
+def _normalize_scrape_result(result: ScrapeResult) -> ScrapeResult:
+    """Keep ``price`` as regular and ``discounted_price`` as current sale."""
+    if result.price is None and result.discounted_price is not None:
+        result.price = result.discounted_price
+        if not result.raw_price:
+            result.raw_price = result.raw_discounted
+        _clear_discount(result)
+        return result
+
+    if result.price is None or result.discounted_price is None:
+        return result
+
+    if abs(result.price - result.discounted_price) < 0.01:
+        _clear_discount(result)
+        return result
+
+    if result.discounted_price > result.price:
+        old_price = result.price
+        old_raw_price = result.raw_price
+        result.price = result.discounted_price
+        result.raw_price = result.raw_discounted or result.raw_price
+        result.discounted_price = old_price
+        result.raw_discounted = old_raw_price
+
+    if result.discounted_price is None or result.price is None:
+        return result
+
+    if result.discounted_price >= result.price:
+        _clear_discount(result)
+        return result
+
+    if result.price > result.discounted_price * 5:
+        logger.debug(
+            "Dropping suspicious discount pair regular=%s discounted=%s raw=%r raw_discounted=%r",
+            result.price,
+            result.discounted_price,
+            result.raw_price,
+            result.raw_discounted,
+        )
+        _clear_discount(result)
+
+    return result
+
+
+_RAW_PRICE_CURRENCY_RE = re.compile(
+    r"(?:\b(?:rs\.?|lkr|usd|aed|sgd|myr|inr|php|bdt)\b|රු|\/=|\$|€|£|¥|฿|₹|₽)",
+    re.IGNORECASE,
+)
+_RAW_PRICE_HINT_RE = re.compile(
+    r"\b(price|list\s*price|our\s*price|selling\s*price|sale\s*price|"
+    r"special\s*price|offer\s*price|regular\s*price|unit\s*price|per\s*unit|amount)\b",
+    re.IGNORECASE,
+)
+_RAW_PRICE_SPEC_RE = re.compile(
+    r"\b(weight|item\s*code|model|warranty|stock|availability|sku|serial|"
+    r"memory\s*type|form\s*factor|capacity|speeds?|latencies?|temperature|"
+    r"voltage|dimensions?|length|width|height|depth|size|color|colour|"
+    r"days?|years?|weeks?|months?|gm|kg|mg|cm|mm|inch(?:es)?|gb|tb|mb|"
+    r"mhz|ghz|mt/s|mah|hz)\b",
+    re.IGNORECASE,
+)
+_RAW_PLAIN_NUMBER_RE = re.compile(r"^\d+(?:[.,]\d{1,2})?$")
+
+
+def _raw_price_signal(raw: Optional[str]) -> int:
+    if not raw:
+        return -100
+    text = raw.strip()
+    score = 0
+    if _RAW_PRICE_CURRENCY_RE.search(text):
+        score += 4
+    if _RAW_PRICE_HINT_RE.search(text):
+        score += 3
+    if re.search(r"\d{1,3}(,\d{3})+(?:\.\d+)?", text):
+        score += 2
+    if re.search(r"\.\d{2}\b", text):
+        score += 1
+    if _RAW_PLAIN_NUMBER_RE.fullmatch(text):
+        score -= 2
+    if _RAW_PRICE_SPEC_RE.search(text) and not _RAW_PRICE_HINT_RE.search(text):
+        score -= 5
+    return score
+
+
+def _should_replace_price(
+    current_price: Optional[float],
+    current_raw: Optional[str],
+    candidate_price: Optional[float],
+    candidate_raw: Optional[str],
+) -> bool:
+    if candidate_price is None:
+        return False
+    if current_price is None:
+        return True
+    current_signal = _raw_price_signal(current_raw)
+    candidate_signal = _raw_price_signal(candidate_raw)
+    if candidate_signal >= current_signal + 3:
+        return True
+    if candidate_signal <= current_signal:
+        return False
+    low = min(current_price, candidate_price)
+    high = max(current_price, candidate_price)
+    if low <= 0:
+        return True
+    return (high / low) >= 1.5
+
+
+def _merge_price_candidate(target: ScrapeResult, candidate: ScrapeResult) -> None:
+    if _should_replace_price(
+        target.price,
+        target.raw_price,
+        candidate.price,
+        candidate.raw_price,
+    ):
+        target.price = candidate.price
+        target.raw_price = candidate.raw_price
+        target.discounted_price = candidate.discounted_price
+        target.raw_discounted = candidate.raw_discounted
+    elif target.discounted_price is None and candidate.discounted_price is not None:
+        target.discounted_price = candidate.discounted_price
+        target.raw_discounted = candidate.raw_discounted
 
 
 # ── Strategy 1: JSON-LD ───────────────────────────────────────────────────────
@@ -374,11 +617,18 @@ _TITLE_SELECTORS = [
 
 async def _try_common(page: Page) -> ScrapeResult:
     result = ScrapeResult()
+    product_root = await _get_product_root(page)
+    price_scope_only = product_root is not None
     try:
         for sel in _PRICE_SELECTORS:
-            el = await page.query_selector(sel)
+            el = await _query_selector_scoped(
+                page,
+                sel,
+                root=product_root,
+                allow_page_fallback=not price_scope_only,
+            )
             if el:
-                raw = await el.get_attribute("content") or await el.inner_text()
+                raw = await _read_element_text(el)
                 if _is_installment_price(raw):
                     continue
                 p = _parse_price(raw)
@@ -388,9 +638,14 @@ async def _try_common(page: Page) -> ScrapeResult:
                     break
 
         for sel in _ORIG_PRICE_SELECTORS:
-            el = await page.query_selector(sel)
+            el = await _query_selector_scoped(
+                page,
+                sel,
+                root=product_root,
+                allow_page_fallback=not price_scope_only,
+            )
             if el:
-                raw = await el.get_attribute("content") or await el.inner_text()
+                raw = await _read_element_text(el)
                 if _is_installment_price(raw):
                     continue
                 p = _parse_price(raw)
@@ -404,9 +659,14 @@ async def _try_common(page: Page) -> ScrapeResult:
                     break
 
         for sel in _DEALER_PRICE_SELECTORS:
-            el = await page.query_selector(sel)
+            el = await _query_selector_scoped(
+                page,
+                sel,
+                root=product_root,
+                allow_page_fallback=not price_scope_only,
+            )
             if el:
-                raw = await el.get_attribute("content") or await el.inner_text()
+                raw = await _read_element_text(el)
                 if not _is_installment_price(raw):
                     d = _parse_price(raw)
                     if d:
@@ -415,18 +675,18 @@ async def _try_common(page: Page) -> ScrapeResult:
                         break
 
         for sel in _TITLE_SELECTORS:
-            el = await page.query_selector(sel)
+            el = await _query_selector_scoped(page, sel, root=product_root)
             if el:
-                t = (await el.inner_text()).strip()
+                t = await _read_element_text(el)
                 if t:
                     result.title = t
                     break
 
         for sel in _STOCK_SELECTORS:
-            els = await page.query_selector_all(sel)
+            els = await _query_selector_all_scoped(page, sel, root=product_root)
             found = False
             for el in els:
-                t = await el.inner_text()
+                t = await _read_element_text(el)
                 s = _parse_stock(t)
                 if s != "unknown":
                     result.stock_status = s
@@ -443,7 +703,7 @@ async def _try_common(page: Page) -> ScrapeResult:
             "Common pattern hit: name=%s price=%s dealer=%s",
             result.title, result.price, result.dealer_price,
         )
-    return result
+    return _normalize_scrape_result(result)
 
 
 # ── Strategy 3b: Deterministic smart scan ────────────────────────────────────
@@ -470,12 +730,35 @@ _SMART_SCAN_JS = r"""() => {
             && parseFloat(s.opacity || '1') > 0;
     }
 
-    const BAD = /cart|basket|total|order|ship|emi|monthly|instalment|installment|per[\s-]?month|easy[\s-]?pay|flexi|interest[\s-]?free|per[\s-]?week|payment[\s-]?plan|visa|mastercard|credit[\s-]?card|debit[\s-]?card|card[\s-]?offer|related|similar|recommend|cross[\s-]?sell|upsell|nav|menu|header|footer/i;
+    const PRODUCT_ROOT_SELECTORS = [
+        'div.summary.entry-summary',
+        '.summary.entry-summary',
+        '#product .summary',
+        '.product-details-area',
+        '.product-view-area',
+        '.ty-product-block',
+        '.ty-productPage-body',
+        '.ty-productPage',
+        '#product-info-main',
+        '.product__info-container',
+        '.product-single__info',
+        '.product-page',
+        'article.product',
+        '[itemtype*="Product"]',
+    ];
+
+    const BAD = /cart|basket|total|checkout|order-summary|order-total|mini-cart|ship(?:ping)?|emi|monthly|instalment|installment|per[\s-]?month|easy[\s-]?pay|flexi|interest[\s-]?free|per[\s-]?week|payment[\s-]?plan|visa|mastercard|credit[\s-]?card|debit[\s-]?card|card[\s-]?offer|related|similar|recommend|cross[\s-]?sell|upsell|recently[\s-]?viewed|featured|bundle|combo|accessories|meta|posted_in|nav|menu|header|footer|inst-zone|inst-line|rx-inst|payhere|koko|mintpay|klarna|afterpay|affirm|zippay|downsale|sale-badge|discount-badge|sticker|badge/i;
     const STRIKE = /\b(retail|was|compare|original|old|regular|strike|crossed|del-price|list-price|ty-list-price|ty-price-retail|mrp|rrp|old-price|price-old|was-price|price-was|sale-was|line-through|strikethrough|previous-price|msrp|rrp-price|price-old-amount)\b/i;
     const DEALER = /dealer|wholesale|trade|b2b|your[\s-]?price|distributor|reseller/i;
     const PRICE_CONTEXT = /\bprice\b|\bcost\b|\bamount\b/i;
     const PROD_CONTEXT = /product|summary|detail|info|offer|sale|now|current|item-main|ty-product-block|prod-main/i;
     const SALE_SIGNAL = /\b(save|was|regular|originally|compare|rrp|mrp|msrp|list[\s-]?price|retail[\s-]?price|you[\s-]?save|off)\b|\d+\s*%\s*off|−\s*\d|-\s*\d+\s*%/i;
+    const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|aed|sgd|myr|inr|php|bdt)\b|රු|\/=|\$|€|£|¥|฿|₹|₽)/i;
+    const INLINE_PRICE_SIGNAL = /\b(?:price|list[\s-]?price|our[\s-]?price|selling[\s-]?price|special[\s-]?price|sale[\s-]?price|offer[\s-]?price|regular[\s-]?price|unit[\s-]?price|per[\s-]?unit|amount)\b/i;
+    const INLINE_SPEC_SIGNAL = /\b(?:weight|item[\s-]?code|model|warranty|stock|availability|sku|serial|memory[\s-]?type|form[\s-]?factor|capacity|speeds?|latencies?|temperature|voltage|dimensions?|length|width|height|depth|size|color|colour|days?|years?|weeks?|months?|specification|specifications)\b/i;
+    const MEASURE_UNIT = /\b(?:gm|kg|mg|cm|mm|inch(?:es)?|gb|tb|mb|mhz|ghz|mt\/s|mah|hz|w|v|°c)\b/i;
+    const PHONE_LIKE = /(?:\+\d{1,3}\s*)?(?:\d[\s-]?){7,}/;
+    const PRICE_FRAGMENT_RE = /(?:rs\.?|lkr|රු|\/=|\$|€|£|¥|฿|₹|₽)?\s*\d[\d,]*(?:\.\d{1,2})?(?:\s*(?:\/=|rs\.?|lkr))?/ig;
     // A variant-option container holds several alternative prices (one per
     // color/size/config) that are NOT the main displayed price. Candidates
     // inside these containers get deprioritized unless they also sit inside
@@ -568,18 +851,23 @@ _SMART_SCAN_JS = r"""() => {
 
     const priceRe = /^(?:(?:Rs\.?|LKR|USD|AED|SGD|MYR|INR|PHP|BDT|\$|€|£|¥|฿|₹|₽)\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:\/=|Rs\.?|LKR|USD)?$/i;
 
+    let scanRoot = document.body;
+    for (const selector of PRODUCT_ROOT_SELECTORS) {
+        const found = document.querySelector(selector);
+        if (found) {
+            scanRoot = found;
+            break;
+        }
+    }
+
     const candidates = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(scanRoot, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
         const text = (node.textContent || '').trim();
         if (!text) continue;
-        const m = text.match(priceRe);
-        if (!m) continue;
         const el = node.parentElement;
         if (!el || !visible(el)) continue;
-        const num = parseFloat(m[1].replace(/,/g, ''));
-        if (!(num > 0) || num > 50000000) continue;
         if (inBadContext(el)) continue;
 
         let fontSize = 14, fontWeight = 400;
@@ -588,6 +876,14 @@ _SMART_SCAN_JS = r"""() => {
             fontSize = parseFloat(style.fontSize) || 14;
             fontWeight = parseInt(style.fontWeight, 10) || 400;
         } catch (_) {}
+
+        const normalizedText = text.replace(/\s+/g, ' ').trim();
+        const textHasCurrency = CURRENCY_SIGNAL.test(normalizedText);
+        const textHasPriceSignal = INLINE_PRICE_SIGNAL.test(normalizedText);
+        const textLooksSpec = INLINE_SPEC_SIGNAL.test(normalizedText);
+        if (PHONE_LIKE.test(normalizedText) && !textHasCurrency && !textHasPriceSignal) continue;
+        const matches = Array.from(normalizedText.matchAll(PRICE_FRAGMENT_RE));
+        if (matches.length === 0) continue;
 
         // Scan up to 4 ancestors for any sale-signal text ("was", "save",
         // "%", "rrp", "mrp", etc.). This lets us recognize original prices
@@ -599,18 +895,46 @@ _SMART_SCAN_JS = r"""() => {
             if (SALE_SIGNAL.test(txt)) { nearSaleSignal = true; break; }
         }
 
-        candidates.push({
-            text,
-            value: num,
-            score: contextScore(el),
-            font_size: fontSize,
-            font_weight: fontWeight,
-            struck: isStruck(el),
-            dealer: isDealer(el),
-            variant_alt: variantAlt(el),
-            near_sale_signal: nearSaleSignal,
-            dom_path: domPath(el),
-        });
+        const context = contextScore(el);
+        for (const match of matches) {
+            const fragment = (match[0] || '').trim();
+            const numeric = (fragment.match(/\d[\d,]*(?:\.\d{1,2})?/) || [null])[0];
+            if (!numeric) continue;
+            const num = parseFloat(numeric.replace(/,/g, ''));
+            if (!(num > 0) || num > 50000000) continue;
+
+            const idx = match.index || 0;
+            const local = normalizedText.slice(
+                Math.max(0, idx - 16),
+                Math.min(normalizedText.length, idx + fragment.length + 16)
+            );
+            const hasCurrency = textHasCurrency || CURRENCY_SIGNAL.test(fragment);
+            const hasPriceSignal = textHasPriceSignal || INLINE_PRICE_SIGNAL.test(local);
+            const hasMeasureUnit = MEASURE_UNIT.test(local);
+
+            if (textLooksSpec && !hasPriceSignal && !hasCurrency && context < 20) continue;
+            if (hasMeasureUnit && !hasPriceSignal && !hasCurrency && context < 20) continue;
+            if (!hasCurrency && !hasPriceSignal && context < 20) continue;
+
+            let score = context;
+            if (hasCurrency) score += 30;
+            if (hasPriceSignal) score += 24;
+            if (textLooksSpec && !hasPriceSignal && !hasCurrency) score -= 18;
+            if (hasMeasureUnit && !hasPriceSignal && !hasCurrency) score -= 18;
+
+            candidates.push({
+                text: fragment,
+                value: num,
+                score,
+                font_size: fontSize,
+                font_weight: fontWeight,
+                struck: isStruck(el),
+                dealer: isDealer(el),
+                variant_alt: variantAlt(el),
+                near_sale_signal: nearSaleSignal,
+                dom_path: domPath(el),
+            });
+        }
     }
 
     // Deterministic main-price selection.
@@ -622,14 +946,11 @@ _SMART_SCAN_JS = r"""() => {
         .filter(c => !c.struck && !c.dealer);
     let primary = eligible.filter(c => !c.variant_alt);
     if (primary.length === 0) primary = eligible;
-    // Rank: highest score, largest font, heaviest weight, smallest value,
-    // then earliest DOM order. "Smallest value" biases toward the sale
-    // price when two equally-scored mains exist.
+    // Rank: highest score, largest font, heaviest weight, then earliest DOM order.
     const mains = primary.sort((a, b) =>
               b.score - a.score
            || b.font_size - a.font_size
            || b.font_weight - a.font_weight
-           || a.value - b.value
            || a._i - b._i);
 
     const main = mains[0] || null;
@@ -675,29 +996,33 @@ _SMART_SCAN_JS = r"""() => {
         'a[class*="add-to-cart"]',
         '.preorder-button', '.pre-order-button', '.notify-me',
     ];
-    outer: for (const sel of btnSelectors) {
-        for (const btn of document.querySelectorAll(sel)) {
-            if (!visible(btn)) continue;
-            const t = ((btn.textContent || btn.value || '') + '').toLowerCase();
-            if (/pre[\s-]?order|pre[\s-]?sale|coming[\s-]?soon|notify[\s-]?me|notify[\s-]?when/.test(t)) {
-                stock = 'preorder'; break outer;
-            }
-            if (/back[\s-]?order|on[\s-]?backorder/.test(t)) {
-                stock = 'backorder'; break outer;
-            }
-            if (/out.?of.?stock|sold.?out|unavailable/.test(t)) {
-                stock = 'out_of_stock'; break outer;
-            }
-            if (btn.disabled || btn.getAttribute('disabled') !== null) {
-                stock = 'out_of_stock'; break outer;
-            }
-            if (/add|buy|cart|order|purchase|checkout|shop.?now/.test(t)) {
-                stock = 'in_stock'; break outer;
+    const buttonRoots = [scanRoot];
+    if (scanRoot !== document.body) buttonRoots.push(document);
+    outer: for (const root of buttonRoots) {
+        for (const sel of btnSelectors) {
+            for (const btn of root.querySelectorAll(sel)) {
+                if (!visible(btn)) continue;
+                const t = ((btn.textContent || btn.value || '') + '').toLowerCase();
+                if (/pre[\s-]?order|pre[\s-]?sale|coming[\s-]?soon|notify[\s-]?me|notify[\s-]?when/.test(t)) {
+                    stock = 'preorder'; break outer;
+                }
+                if (/back[\s-]?order|on[\s-]?backorder/.test(t)) {
+                    stock = 'backorder'; break outer;
+                }
+                if (/out.?of.?stock|sold.?out|unavailable/.test(t)) {
+                    stock = 'out_of_stock'; break outer;
+                }
+                if (btn.disabled || btn.getAttribute('disabled') !== null) {
+                    stock = 'out_of_stock'; break outer;
+                }
+                if (/add|buy|cart|order|purchase|checkout|shop.?now/.test(t)) {
+                    stock = 'in_stock'; break outer;
+                }
             }
         }
     }
     if (stock === 'unknown') {
-        const text = (document.body.innerText || '').toLowerCase();
+        const text = (((scanRoot && scanRoot.innerText) || document.body.innerText || '')).toLowerCase();
         // Order: explicit out-of-stock / preorder signals before "in stock",
         // because many preorder / back-order pages also advertise "available".
         if (/\bout[\s-]of[\s-]stock\b|\bsold[\s-]out\b|\bnot available\b/.test(text))
@@ -748,6 +1073,540 @@ async def _run_smart_scan(page: Page) -> dict:
         }
 
 
+_SELECTOR_LAB_FIELDS = (
+    "title",
+    "price",
+    "discounted_price",
+    "dealer_price",
+    "stock_status",
+    "image",
+)
+
+_SELECTOR_LAB_PAYMENT_RE = re.compile(
+    r"\b(koko|installments?|today|30\s*days|60\s*days|credit\s*card|"
+    r"transaction\s*fee|webxpay|bank\s*rates|buy\s*now,\s*pay\s*later|total)\b",
+    re.IGNORECASE,
+)
+_SELECTOR_LAB_RELATED_RE = re.compile(
+    r"\b(related|you\s*might\s*also\s*be\s*interested|recommend|upsell|cross[\s-]?sell)\b",
+    re.IGNORECASE,
+)
+
+_SELECTOR_LAB_JS = r"""() => {
+    function visible(el) {
+        if (!el) return false;
+        const s = window.getComputedStyle(el);
+        return s.display !== 'none' && s.visibility !== 'hidden'
+            && parseFloat(s.opacity || '1') > 0;
+    }
+
+    function normalizeText(value) {
+        return (value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function short(value, limit) {
+        const text = normalizeText(value);
+        if (!text) return '';
+        if (text.length <= limit) return text;
+        return text.slice(0, limit - 1) + '…';
+    }
+
+    function escapeCss(value) {
+        if (window.CSS && typeof window.CSS.escape === 'function') {
+            return window.CSS.escape(value);
+        }
+        return String(value).replace(/([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1');
+    }
+
+    function elementSelector(el) {
+        if (!el || !el.tagName) return null;
+        if (el.id) {
+            const byId = `#${escapeCss(el.id)}`;
+            try {
+                if (document.querySelectorAll(byId).length === 1) return byId;
+            } catch (_) {}
+        }
+
+        const parts = [];
+        let cur = el;
+        while (cur && cur.nodeType === 1 && cur !== document.documentElement) {
+            let part = cur.tagName.toLowerCase();
+            const classes = Array.from(cur.classList || [])
+                .filter((cls) =>
+                    cls
+                    && cls.length < 48
+                    && !/^(active|selected|current|focus|hover|open|show|hidden|disabled)$/.test(cls)
+                )
+                .slice(0, 2);
+            if (classes.length) {
+                const withClasses = part + classes.map((cls) => `.${escapeCss(cls)}`).join('');
+                try {
+                    if (document.querySelectorAll(withClasses).length === 1) return withClasses;
+                } catch (_) {}
+                part = withClasses;
+            }
+            if (cur.parentElement) {
+                const siblings = Array.from(cur.parentElement.children)
+                    .filter((child) => child.tagName === cur.tagName);
+                if (siblings.length > 1) {
+                    part += `:nth-of-type(${siblings.indexOf(cur) + 1})`;
+                }
+            }
+            parts.unshift(part);
+            const joined = parts.join(' > ');
+            try {
+                if (document.querySelectorAll(joined).length === 1) return joined;
+            } catch (_) {}
+            if (parts.length >= 5) break;
+            cur = cur.parentElement;
+        }
+        return parts.join(' > ') || el.tagName.toLowerCase();
+    }
+
+    function domPath(el) {
+        const parts = [];
+        let cur = el;
+        for (let i = 0; i < 5 && cur; i += 1, cur = cur.parentElement) {
+            const cls = typeof cur.className === 'string'
+                ? cur.className.split(/\s+/).filter(Boolean).slice(0, 2).join('.')
+                : '';
+            parts.push(cur.tagName.toLowerCase() + (cls ? '.' + cls : ''));
+        }
+        return parts.reverse().join(' > ');
+    }
+
+    function isStruck(el) {
+        let cur = el;
+        for (let i = 0; i < 5 && cur; i += 1, cur = cur.parentElement) {
+            const tag = cur.tagName;
+            if (tag === 'DEL' || tag === 'S' || tag === 'STRIKE') return true;
+            try {
+                const style = window.getComputedStyle(cur);
+                const td = style.textDecorationLine || style.textDecoration || '';
+                if (td.includes('line-through')) return true;
+            } catch (_) {}
+        }
+        return false;
+    }
+
+    const PRODUCT_ROOT_SELECTORS = [
+        'div.summary.entry-summary',
+        '.summary.entry-summary',
+        '#product .summary',
+        '.product-details-area',
+        '.product-view-area',
+        '.ty-product-block',
+        '.ty-productPage-body',
+        '.ty-productPage',
+        '#product-info-main',
+        '.product__info-container',
+        '.product-single__info',
+        '.product-page',
+        'article.product',
+        '[itemtype*="Product"]',
+    ];
+
+    const BAD = /cart|basket|checkout|order-summary|order-total|mini-cart|related|similar|recommend|upsell|cross[\s-]?sell|recently[\s-]?viewed|featured|bundle|combo|accessories|meta|nav|menu|header|footer|breadcrumb|review|rating/i;
+    const PRICE_FRAGMENT_RE = /(?:rs\.?|lkr|\u0dbb\u0dd4|\/=|\$|€|£|¥|฿|₹|₽)?\s*\d[\d,]*(?:\.\d{1,2})?(?:\s*(?:\/=|rs\.?|lkr))?/ig;
+    const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|aed|sgd|myr|inr|php|bdt)\b|\u0dbb\u0dd4|\/=|\$|€|£|¥|฿|₹|₽)/i;
+    const PRICE_HINT = /\b(?:price|amount|cost|now|current|selling|our[\s-]?price|unit[\s-]?price|per[\s-]?unit|offer)\b/i;
+    const OLD_PRICE_HINT = /\b(?:old|regular|retail|list|was|compare|original|mrp|rrp|msrp)\b/i;
+    const SALE_HINT = /\b(?:sale|special|offer|discount|save|final|deal)\b/i;
+    const DEALER_HINT = /\b(?:dealer|trade|wholesale|b2b|distributor|reseller)\b/i;
+    const SPEC_HINT = /\b(?:weight|warranty|model|sku|code|serial|capacity|voltage|memory|mhz|ghz|gb|tb|cm|mm|inch|size|days?|years?|weeks?|months?|spec|specifications?)\b/i;
+    const STOCK_HINT = /\b(?:stock|availability|available|sold[\s-]?out|out[\s-]?of[\s-]?stock|pre[\s-]?order|back[\s-]?order|limited|low[\s-]?stock|notify me)\b/i;
+    const STOCK_OUT = /\b(?:out[\s-]?of[\s-]?stock|sold[\s-]?out|unavailable|not available)\b/i;
+    const STOCK_IN = /\b(?:in[\s-]?stock|available|add[\s-]?to[\s-]?cart|buy[\s-]?now|order[\s-]?now|purchase)\b/i;
+    const STOCK_LIMITED = /\b(?:limited|low[\s-]?stock|few left)\b/i;
+    const STOCK_PREORDER = /\b(?:pre[\s-]?order|pre[\s-]?sale|coming soon|notify me)\b/i;
+    const STOCK_BACKORDER = /\b(?:back[\s-]?order|on[\s-]?backorder)\b/i;
+    const IMAGE_HINT = /product|gallery|main|primary|featured|zoom|hero/i;
+
+    let root = document.body;
+    let rootSelector = 'body';
+    for (const selector of PRODUCT_ROOT_SELECTORS) {
+        const found = document.querySelector(selector);
+        if (found) {
+            root = found;
+            rootSelector = selector;
+            break;
+        }
+    }
+
+    let platform = 'generic';
+    try {
+        if (document.querySelector('.ty-price, .ty-price-num, .ty-price-now, .ty-productPage-price, [class*="ty-product-block"]')) {
+            platform = 'cs-cart';
+        } else if (document.querySelector('.woocommerce, body[class*="woocommerce"]')) {
+            platform = 'woocommerce';
+        } else if (document.querySelector('[data-shopify], body[class*="template-product"], #shopify-section-product')) {
+            platform = 'shopify';
+        } else if (document.querySelector('.catalog-product-view, #product-info-main, body[class*="catalog-product"]')) {
+            platform = 'magento';
+        } else if (document.querySelector('#product_page_product_name, body[id="product"], body.product-page')) {
+            platform = 'prestashop';
+        }
+    } catch (_) {}
+
+    function parseStock(text) {
+        const value = normalizeText(text).toLowerCase();
+        if (!value) return null;
+        if (STOCK_OUT.test(value)) return 'out_of_stock';
+        if (STOCK_PREORDER.test(value)) return 'preorder';
+        if (STOCK_BACKORDER.test(value)) return 'backorder';
+        if (STOCK_LIMITED.test(value)) return 'limited';
+        if (STOCK_IN.test(value)) return 'in_stock';
+        return null;
+    }
+
+    function addCandidate(store, seen, el, data) {
+        const selector = data.selector || elementSelector(el);
+        if (!selector) return;
+        const kindHints = Array.from(new Set((data.kind_hints || []).filter(Boolean)));
+        const sample = short(data.sample || data.text || '', 120);
+        const key = [selector, sample, kindHints.join('|'), data.source || 'dom'].join('::');
+        if (seen.has(key)) return;
+        seen.add(key);
+        store.push({
+            selector,
+            dom_path: data.dom_path || domPath(el),
+            text: short(data.text || '', 220) || null,
+            sample: sample || null,
+            value: data.value ?? null,
+            stock_status: data.stock_status || null,
+            tag: (el.tagName || '').toLowerCase(),
+            source: data.source || 'dom',
+            confidence: data.confidence || 0,
+            kind_hints: kindHints,
+            reason: data.reason || null,
+        });
+    }
+
+    const candidates = [];
+    const seen = new Set();
+
+    const titleSelectors = [
+        'h1',
+        '[itemprop="name"]',
+        '.product_title',
+        '.product-title',
+        '.product-name',
+        '.ty-product-block-title',
+        '.page-title .base',
+    ];
+    for (const selector of titleSelectors) {
+        const pool = root.querySelectorAll(selector).length
+            ? root.querySelectorAll(selector)
+            : document.querySelectorAll(selector);
+        for (const el of pool) {
+            if (!visible(el)) continue;
+            const text = normalizeText(el.textContent || '');
+            if (!text || text.length < 4) continue;
+            const confidence = el.tagName === 'H1' ? 92 : 76;
+            addCandidate(candidates, seen, el, {
+                text,
+                sample: text,
+                source: 'title',
+                confidence,
+                kind_hints: ['title'],
+                reason: selector,
+            });
+        }
+    }
+
+    const imagePool = root.querySelectorAll('img').length
+        ? root.querySelectorAll('img')
+        : document.querySelectorAll('img');
+    for (const el of imagePool) {
+        const src = normalizeText(el.currentSrc || el.getAttribute('src') || '');
+        if (!src || /^data:/.test(src)) continue;
+        const info = [
+            el.className || '',
+            el.id || '',
+            el.getAttribute('alt') || '',
+        ].join(' ');
+        const score = 48
+            + ((el.clientWidth || 0) >= 180 ? 18 : 0)
+            + ((el.clientHeight || 0) >= 180 ? 12 : 0)
+            + (IMAGE_HINT.test(info) ? 18 : 0);
+        addCandidate(candidates, seen, el, {
+            text: src,
+            sample: src,
+            source: 'image',
+            confidence: score,
+            kind_hints: ['image'],
+            reason: short(info, 80) || 'img',
+        });
+    }
+
+    const pool = Array.from(root.querySelectorAll('*')).slice(0, 1200);
+    for (const el of pool) {
+        const tag = (el.tagName || '').toLowerCase();
+        if (!tag || ['script', 'style', 'noscript', 'svg', 'path'].includes(tag)) continue;
+        if (!visible(el) && tag !== 'input') continue;
+
+        const rawText = tag === 'input'
+            ? normalizeText(el.value || el.getAttribute('value') || '')
+            : normalizeText(el.innerText || el.textContent || '');
+        const text = rawText.length > 220 ? rawText.slice(0, 220) : rawText;
+        const meta = [
+            el.className || '',
+            el.id || '',
+            el.getAttribute('itemprop') || '',
+            el.getAttribute('aria-label') || '',
+            el.getAttribute('name') || '',
+        ].join(' ');
+
+        if (BAD.test(meta)) continue;
+
+        if (text && (STOCK_HINT.test(text) || tag === 'button' || tag === 'a' || tag === 'input')) {
+            const stockStatus = parseStock(text + ' ' + meta);
+            if (stockStatus) {
+                let confidence = 44;
+                if (/stock|availability/i.test(text)) confidence += 22;
+                if (tag === 'button' || tag === 'input') confidence += 12;
+                addCandidate(candidates, seen, el, {
+                    text,
+                    sample: text,
+                    source: 'stock',
+                    confidence,
+                    stock_status: stockStatus,
+                    kind_hints: ['stock_status'],
+                    reason: short(meta || text, 80),
+                });
+            }
+        }
+
+        if (!text || text.length > 180) continue;
+        const matches = Array.from(text.matchAll(PRICE_FRAGMENT_RE));
+        if (matches.length === 0) continue;
+
+        let fontSize = 14;
+        try {
+            fontSize = parseFloat(window.getComputedStyle(el).fontSize) || 14;
+        } catch (_) {}
+
+        for (const match of matches) {
+            const fragment = normalizeText(match[0] || '');
+            const numeric = (fragment.match(/\d[\d,]*(?:\.\d{1,2})?/) || [null])[0];
+            if (!numeric) continue;
+            const value = parseFloat(numeric.replace(/,/g, ''));
+            if (!(value > 0) || value > 50000000) continue;
+
+            const hasCurrency = CURRENCY_SIGNAL.test(fragment) || CURRENCY_SIGNAL.test(text);
+            const hasPriceHint = PRICE_HINT.test(text) || PRICE_HINT.test(meta);
+            const hasOldHint = OLD_PRICE_HINT.test(text) || OLD_PRICE_HINT.test(meta) || isStruck(el);
+            const hasSaleHint = SALE_HINT.test(text) || SALE_HINT.test(meta);
+            const hasDealerHint = DEALER_HINT.test(text) || DEALER_HINT.test(meta);
+            const looksSpec = SPEC_HINT.test(text);
+
+            if (!hasCurrency && !hasPriceHint && !hasOldHint && !hasSaleHint && !hasDealerHint) {
+                if (looksSpec || value < 1000 || fontSize < 16) continue;
+            }
+
+            const kindHints = [];
+            if (hasDealerHint) {
+                kindHints.push('dealer_price');
+            } else {
+                if (hasOldHint) kindHints.push('price');
+                if (hasSaleHint) kindHints.push('discounted_price');
+                if (kindHints.length === 0) {
+                    kindHints.push('price', 'discounted_price');
+                }
+            }
+
+            let confidence = 34;
+            if (hasCurrency) confidence += 28;
+            if (hasPriceHint) confidence += 20;
+            if (hasOldHint || hasSaleHint) confidence += 14;
+            if (hasDealerHint) confidence += 10;
+            confidence += Math.min(18, Math.round(fontSize));
+
+            addCandidate(candidates, seen, el, {
+                text,
+                sample: fragment,
+                source: 'price',
+                confidence,
+                value,
+                kind_hints: kindHints,
+                reason: short(meta || text, 90),
+            });
+        }
+    }
+
+    candidates.sort((a, b) =>
+        b.confidence - a.confidence
+        || ((b.value || 0) - (a.value || 0))
+        || String(a.selector).localeCompare(String(b.selector)));
+
+    return {
+        platform,
+        root_selector: rootSelector,
+        candidates: candidates.slice(0, 180),
+    };
+}"""
+
+
+async def _run_selector_lab(page: Page) -> dict:
+    try:
+        return await page.evaluate(_SELECTOR_LAB_JS)
+    except Exception as e:
+        logger.debug("Selector lab error: %s", e)
+        return {
+            "platform": "generic",
+            "root_selector": None,
+            "candidates": [],
+        }
+
+
+def _lab_profile(url: str) -> Optional[SelectorLabProfile]:
+    matched = _find_site_profile(url)
+    if not matched:
+        return None
+    hostname = _normalize_hostname(url) or matched.hostname
+    selectors = {field: matched.selectors.get(field) for field in _SELECTOR_LAB_FIELDS}
+    return SelectorLabProfile(
+        hostname=hostname,
+        matched_hostname=matched.hostname,
+        platform=matched.platform,
+        wait_for=matched.wait_for,
+        selectors=selectors,
+    )
+
+
+def _suggest_selector_assignments(
+    candidates: list[SelectorLabCandidate],
+    profile: Optional[SelectorLabProfile],
+) -> dict[str, Optional[str]]:
+    def is_noise(candidate: SelectorLabCandidate) -> bool:
+        blob = " ".join(
+            part
+            for part in (
+                candidate.sample,
+                candidate.text,
+                candidate.reason,
+                candidate.selector,
+                candidate.dom_path,
+            )
+            if part
+        )
+        return bool(
+            _SELECTOR_LAB_PAYMENT_RE.search(blob)
+            or _SELECTOR_LAB_RELATED_RE.search(blob)
+        )
+
+    def best_candidate(field: str) -> Optional[SelectorLabCandidate]:
+        ranked = [candidate for candidate in candidates if field in candidate.kind_hints]
+        preferred = [candidate for candidate in ranked if not is_noise(candidate)]
+        return (preferred or ranked or [None])[0]
+
+    suggested: dict[str, Optional[str]] = {
+        "wait_for": profile.wait_for if profile else None,
+    }
+    for field in _SELECTOR_LAB_FIELDS:
+        suggested[field] = profile.selectors.get(field) if profile else None
+
+    for field in _SELECTOR_LAB_FIELDS:
+        if suggested.get(field):
+            continue
+        candidate = best_candidate(field)
+        if candidate:
+            suggested[field] = candidate.selector
+
+    if not suggested.get("wait_for"):
+        for field in ("discounted_price", "price", "stock_status", "title"):
+            if suggested.get(field):
+                suggested["wait_for"] = suggested[field]
+                break
+
+    return suggested
+
+
+async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabResponse:
+    response = SelectorLabResponse(url=url)
+    current_profile = _lab_profile(url)
+    headers = dict(config.headers)
+    matched = _find_site_profile(url)
+    if matched:
+        headers = {**matched.headers, **headers}
+    nav_config = ScrapeConfig(
+        use_playwright=config.use_playwright,
+        wait_for=config.wait_for,
+        wait_timeout=config.wait_timeout,
+        selectors=config.selectors,
+        cookies=config.cookies,
+        headers=headers,
+        storage_state_path=config.storage_state_path,
+        platform=config.platform,
+    )
+
+    context = await _open_context(nav_config)
+    page = await context.new_page()
+    try:
+        await _navigate(page, url, nav_config)
+        response.final_url = page.url
+        response.hostname = _normalize_hostname(page.url or url)
+        response.current_profile = current_profile
+
+        lab = await _run_selector_lab(page)
+        response.platform = lab.get("platform", "generic") or "generic"
+        response.root_selector = lab.get("root_selector")
+        response.candidates = [
+            SelectorLabCandidate(
+                selector=str(item.get("selector") or ""),
+                dom_path=item.get("dom_path"),
+                text=item.get("text"),
+                sample=item.get("sample"),
+                value=item.get("value"),
+                stock_status=item.get("stock_status"),
+                tag=item.get("tag"),
+                source=str(item.get("source") or "dom"),
+                confidence=int(item.get("confidence", 0) or 0),
+                kind_hints=[
+                    str(kind)
+                    for kind in (item.get("kind_hints") or [])
+                    if kind
+                ],
+                reason=item.get("reason"),
+            )
+            for item in (lab.get("candidates") or [])
+            if item.get("selector")
+        ]
+
+        effective = _apply_site_profile(url, config)
+        response.extracted = await scrape_with_open_page(
+            page,
+            effective,
+            platform_hint=response.platform,
+        )
+        response.suggested_assignments = _suggest_selector_assignments(
+            response.candidates,
+            response.current_profile,
+        )
+
+        if response.current_profile:
+            note = f"Matched saved profile: {response.current_profile.matched_hostname}"
+            if response.current_profile.matched_hostname != response.current_profile.hostname:
+                note += f" for {response.current_profile.hostname}"
+            response.notes.append(note)
+        if response.hostname and response.hostname.endswith("mskcomputers.lk"):
+            response.notes.append(
+                "MSK product pages include KOKO/installment and related-product prices. "
+                "Prefer the main LKR amount in the top product block, then test on a few products before saving."
+            )
+        if response.root_selector:
+            response.notes.append(f"Detected product root: {response.root_selector}")
+        response.notes.append(
+            f"Collected {len(response.candidates)} selector candidate"
+            f"{'' if len(response.candidates) == 1 else 's'}."
+        )
+        if not response.candidates:
+            response.notes.append("No useful candidates were found on the page.")
+        return response
+    finally:
+        await context.close()
+
+
 async def _try_smart_scan(page: Page) -> ScrapeResult:
     result = ScrapeResult()
     data = await _run_smart_scan(page)
@@ -778,7 +1637,7 @@ async def _try_smart_scan(page: Page) -> ScrapeResult:
             "Smart scan hit: price=%s disc=%s dealer=%s",
             result.price, result.discounted_price, result.dealer_price,
         )
-    return result
+    return _normalize_scrape_result(result)
 
 
 # ── Strategy 4: Custom selectors (user-configured override) ──────────────────
@@ -787,23 +1646,40 @@ async def _apply_custom(
     page: Page, config: ScrapeConfig, base: ScrapeResult
 ) -> ScrapeResult:
     sel = config.selectors
+    product_root = await _get_product_root(page)
+    price_scope_only = product_root is not None
 
-    async def get_text(selector: Optional[str]) -> Optional[str]:
-        if not selector:
-            return None
-        try:
-            el = await page.query_selector(selector)
-            if not el:
-                return None
-            return (await el.inner_text()).strip() or None
-        except Exception:
-            return None
+    async def get_text(
+        selector: Optional[str],
+        *,
+        root=None,
+        allow_page_fallback: bool = True,
+    ) -> Optional[str]:
+        el = await _query_selector_scoped(
+            page,
+            selector,
+            root=root,
+            allow_page_fallback=allow_page_fallback,
+        )
+        return await _read_element_text(el)
 
-    title = await get_text(sel.title)
-    raw_price = await get_text(sel.price)
-    raw_disc = await get_text(sel.discounted_price)
-    raw_dealer = await get_text(sel.dealer_price)
-    stock_raw = await get_text(sel.stock_status)
+    title = await get_text(sel.title, root=product_root)
+    raw_price = await get_text(
+        sel.price,
+        root=product_root,
+        allow_page_fallback=not price_scope_only,
+    )
+    raw_disc = await get_text(
+        sel.discounted_price,
+        root=product_root,
+        allow_page_fallback=not price_scope_only,
+    )
+    raw_dealer = await get_text(
+        sel.dealer_price,
+        root=product_root,
+        allow_page_fallback=not price_scope_only,
+    )
+    stock_raw = await get_text(sel.stock_status, root=product_root)
 
     if _is_installment_price(raw_price):
         raw_price = None
@@ -812,7 +1688,7 @@ async def _apply_custom(
     if _is_installment_price(raw_dealer):
         raw_dealer = None
 
-    return ScrapeResult(
+    result = ScrapeResult(
         title=title or base.title,
         price=_parse_price(raw_price) or base.price,
         discounted_price=_parse_price(raw_disc) or base.discounted_price,
@@ -824,6 +1700,7 @@ async def _apply_custom(
         raw_discounted=raw_disc or base.raw_discounted,
         raw_dealer=raw_dealer or base.raw_dealer,
     )
+    return _normalize_scrape_result(result)
 
 
 # ── Context factory (shared by scrape() and probe()) ─────────────────────────
@@ -1052,12 +1929,7 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
         # CSS patterns as last-resort enrichment (fills fields still missing)
         if not result.price or not result.dealer_price or not result.title:
             common = await _try_common(page)
-            if not result.price and common.price:
-                result.price = common.price
-                result.raw_price = common.raw_price
-            if not result.discounted_price and common.discounted_price:
-                result.discounted_price = common.discounted_price
-                result.raw_discounted = common.raw_discounted
+            _merge_price_candidate(result, common)
             if not result.dealer_price and common.dealer_price:
                 result.dealer_price = common.dealer_price
                 result.raw_dealer = common.raw_dealer
@@ -1077,6 +1949,7 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
 
         if not result.stock_status:
             result.stock_status = "unknown"
+        result = _normalize_scrape_result(result)
 
         logger.info(
             "Scrape done: %s → price=%s disc=%s dealer=%s stock=%s",
@@ -1198,12 +2071,7 @@ async def scrape_with_open_page(
 
     if not result.price or not result.dealer_price or not result.title:
         common = await _try_common(page)
-        if not result.price and common.price:
-            result.price = common.price
-            result.raw_price = common.raw_price
-        if not result.discounted_price and common.discounted_price:
-            result.discounted_price = common.discounted_price
-            result.raw_discounted = common.raw_discounted
+        _merge_price_candidate(result, common)
         if not result.dealer_price and common.dealer_price:
             result.dealer_price = common.dealer_price
             result.raw_dealer = common.raw_dealer
@@ -1223,7 +2091,7 @@ async def scrape_with_open_page(
     if not result.stock_status:
         result.stock_status = "unknown"
 
-    return result
+    return _normalize_scrape_result(result)
 
 
 # ── Login helper ─────────────────────────────────────────────────────────────

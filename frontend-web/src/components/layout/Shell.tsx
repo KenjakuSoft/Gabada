@@ -13,6 +13,8 @@ import {
   Settings,
   Store as StoreIcon,
   Sun,
+  Tag,
+  Target,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -27,10 +29,12 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: Home },
+  { to: '/categories', label: 'Categories', icon: Tag },
   { to: '/add', label: 'Add product', icon: Plus },
   { to: '/stores', label: 'Stores', icon: StoreIcon },
   { to: '/import', label: 'Import', icon: Download },
   { to: '/probe', label: 'Probe', icon: Search },
+  { to: '/selector-lab', label: 'Selector Lab', icon: Target },
   { to: '/activity', label: 'Activity', icon: Activity },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]

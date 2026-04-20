@@ -30,6 +30,7 @@ const CHANGE_LABEL: Record<string, string> = {
 }
 
 const REFRESH_MS = 30_000
+const EMPTY_ENTRIES: ActivityEntry[] = []
 
 export function ActivityPage() {
   const symbol = useCurrencySymbol()
@@ -40,7 +41,7 @@ export function ActivityPage() {
     staleTime: 10_000,
   })
 
-  const entries = activity.data ?? []
+  const entries = activity.data ?? EMPTY_ENTRIES
   const stats = useMemo(() => computeStats(entries), [entries])
 
   return (

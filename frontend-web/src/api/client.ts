@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const baseURL = import.meta.env.DEV ? '/api' : ''
+const baseURL = '/api'
 
 export const http = axios.create({
   baseURL,

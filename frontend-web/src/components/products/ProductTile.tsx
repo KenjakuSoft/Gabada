@@ -1,4 +1,3 @@
-import { useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { ImageOff, TrendingDown, TrendingUp } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -68,9 +67,6 @@ export function ProductTile({ product, symbol }: ProductTileProps) {
   const liveTime = useLiveTime(scrapedAt)
   const count = product.stores.length
   const animatedLow = useCountUp(low, { decimals: 2 })
-  const prevDelta = useRef<number | null>(delta)
-  const justChanged = prevDelta.current !== delta && delta != null
-  prevDelta.current = delta
 
   const deltaColor =
     delta == null || delta === 0
@@ -84,10 +80,7 @@ export function ProductTile({ product, symbol }: ProductTileProps) {
     <BentoTile
       interactive
       padded={false}
-      className={cn(
-        'group flex flex-col',
-        justChanged && 'gbd-flash',
-      )}
+      className={cn('group flex flex-col')}
     >
       <Link
         to={`/product/${product.id}`}

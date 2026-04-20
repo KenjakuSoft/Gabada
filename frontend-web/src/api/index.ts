@@ -6,6 +6,10 @@ import type {
   FileImportRow,
   PriceLog,
   ProbeResponse,
+  ScrapeResult,
+  ScrapeSelectorMap,
+  SelectorLabResponse,
+  SelectorLabSaveResponse,
   Settings,
   Store,
   WooCredentials,
@@ -105,6 +109,46 @@ export const scraperApi = {
     wait_timeout?: number
   }): Promise<ProbeResponse> => {
     const { data } = await http.post<ProbeResponse>('/scraper/probe', body)
+    return data
+  },
+  selectorLab: async (body: {
+    url: string
+    use_playwright?: boolean
+    wait_for?: string | null
+    wait_timeout?: number
+  }): Promise<SelectorLabResponse> => {
+    const { data } = await http.post<SelectorLabResponse>(
+      '/scraper/selector-lab',
+      body,
+    )
+    return data
+  },
+  testSelectorLab: async (body: {
+    url: string
+    use_playwright?: boolean
+    wait_for?: string | null
+    wait_timeout?: number
+    platform?: string | null
+    selectors: ScrapeSelectorMap
+  }): Promise<ScrapeResult> => {
+    const { data } = await http.post<ScrapeResult>(
+      '/scraper/selector-lab/test',
+      body,
+    )
+    return data
+  },
+  saveSelectorProfile: async (body: {
+    url?: string
+    store_id?: number | null
+    hostname?: string | null
+    platform?: string | null
+    wait_for?: string | null
+    selectors: ScrapeSelectorMap
+  }): Promise<SelectorLabSaveResponse> => {
+    const { data } = await http.put<SelectorLabSaveResponse>(
+      '/scraper/selector-lab/profile',
+      body,
+    )
     return data
   },
   reprobe: async (

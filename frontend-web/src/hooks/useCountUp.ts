@@ -20,20 +20,35 @@ export function useCountUp(
   const firstRef = useRef(true)
 
   useEffect(() => {
+    const scheduleDisplay = (next: number | null) => {
+      rafRef.current = requestAnimationFrame(() => {
+        setDisplay(next)
+        rafRef.current = null
+      })
+    }
+
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+
     if (value == null) {
-      setDisplay(null)
       fromRef.current = 0
+      scheduleDisplay(null)
       return
     }
     if (firstRef.current) {
       firstRef.current = false
       fromRef.current = value
-      setDisplay(value)
+      scheduleDisplay(value)
       return
     }
     const from = fromRef.current
     const to = value
-    if (from === to) return
+    if (from === to) {
+      scheduleDisplay(to)
+      return
+    }
     const start = performance.now()
     const step = (t: number) => {
       const progress = Math.min(1, (t - start) / duration)
