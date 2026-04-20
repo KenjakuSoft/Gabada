@@ -13,10 +13,14 @@ venv/
 
 # Database
 backend/gabada.db
+backend/gabada.db-wal
+backend/gabada.db-shm
+backend/*.db-journal
 
 # Frontend (Vite/React)
 frontend-web/node_modules/
 frontend-web/dist/
+frontend-web/.vite/
 
 # IDE / tools
 .vscode/
@@ -24,6 +28,8 @@ frontend-web/dist/
 *.suo
 *.user
 .claude/
+AGENTS.md
+CLAUDE.md
 
 # OS
 .DS_Store
@@ -32,3 +38,4 @@ desktop.ini
 
 # Logs
 *.log
+gcm-diagnose.log
