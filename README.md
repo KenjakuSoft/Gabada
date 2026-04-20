@@ -1,23 +1,220 @@
+<div align="center">
+
 # Gabada
 
-Gabada is a local product price and stock tracker for online stores. It scrapes product pages, stores price history in SQLite, and gives you a web UI for comparing stores, spotting price drops, and fixing scraper issues when a shop changes its layout.
+### Track prices, compare stores, and fix scraper issues without leaving the app.
 
-## What it does
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vite.dev)
+[![Playwright](https://img.shields.io/badge/Playwright-Chromium-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](./LICENSE)
 
-- Track one product across multiple stores
+[Quick Start](#quick-start) | [Features](#feature-highlights) | [Selector Lab](#selector-lab) | [Development](#development) | [API](#api)
+
+</div>
+
+Gabada is a local product price and stock tracker for online stores. It scrapes product pages, stores history in SQLite, and gives you a web app for managing products, comparing stores, spotting price drops, and fixing scraper problems when a site layout changes.
+
+## Why Gabada
+
+- Track the same product across multiple stores
 - Log price and stock changes over time
 - Import products from WooCommerce, CSV, Excel, or PDF
-- Use `Probe` to inspect what the scraper extracted
-- Use `Selector Lab` to scan a page, review selector candidates, test them, and save a profile for a store/domain
-- Save per-site scrape profiles in `backend/scraper/sites.toml`
+- Diagnose scraper issues with `Probe`
+- Repair hard sites with `Selector Lab`
+- Save selector profiles per store or domain
 
-## Stack
+## Feature Highlights
 
-- Backend: FastAPI, Playwright, APScheduler, aiosqlite, Pydantic
-- Frontend: React 19, Vite 8, TypeScript, Tailwind v4, TanStack Query
-- Database: SQLite at [gabada.db](/C:/Users/redacted-store/Desktop/Gabada/backend/gabada.db)
+| | |
+|---|---|
+| **Multi-store tracking** | Link one product to multiple shops and compare latest prices side by side. |
+| **Price history** | Store every scrape and surface meaningful price and stock changes in the activity feed. |
+| **Selector Lab** | Scan a page, review candidate selectors, test them, and save a profile for the store. |
+| **Probe tools** | Inspect the scraper output for a product URL before you save or rescrape anything. |
+| **Bulk import** | Bring in products from WooCommerce, CSV, Excel, or PDF. |
+| **Category management** | Organize products with category names and colors. |
+| **Launcher included** | Start the app with [start_gabada.bat](./start_gabada.bat) on Windows after setup. |
+| **Built for noisy stores** | Helpful for sites with installment prices, related-product numbers, or inconsistent markup. |
 
-## Project layout
+## Product Workflow
+
+1. Add or import products.
+2. Link each product to one or more store URLs.
+3. Scrape automatically or trigger manual scrapes.
+4. Review price history and recent activity.
+5. If a store breaks, use `Probe` or `Selector Lab` to correct it.
+
+## App Areas
+
+- `Home` - overview of tracked products
+- `Categories` - manage category names and colors
+- `Add product` - quick add using product URLs
+- `Stores` - manage store records
+- `Import` - WooCommerce and file import
+- `Probe` - inspect what the scraper extracted from a URL
+- `Selector Lab` - inspect selector candidates, assign fields, test, and save
+- `Activity` - recent price and stock changes
+- `Settings` - app settings and site-profile editor
+
+## Quick Start
+
+### Requirements
+
+- Python 3.11+
+- Node.js 20+
+- Git
+
+Playwright downloads its own Chromium build, so you do not need a separate browser install.
+
+### Clone
+
+```powershell
+git clone https://github.com/Xx-LiDAF-xX/Gabada.git
+cd Gabada
+```
+
+### Backend Setup
+
+```powershell
+cd backend
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m playwright install chromium
+```
+
+### Frontend Setup
+
+```powershell
+cd ..\frontend-web
+npm.cmd install
+npm.cmd run build
+```
+
+### Run The App
+
+**Windows launcher**
+
+Double-click [start_gabada.bat](./start_gabada.bat).
+
+What it does:
+- uses `backend\.venv\Scripts\python.exe`
+- checks `http://127.0.0.1:8000/health`
+- opens the app in your browser after the backend is ready
+
+**Manual start**
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m uvicorn main:app --port 8000
+```
+
+Open:
+- App: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+- API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- Health: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
+
+## Selector Lab
+
+Selector Lab is the main recovery tool for stores that scrape badly.
+
+Use it when:
+- a page has multiple unrelated numbers
+- installment or payment-plan amounts confuse the scraper
+- a site layout changed
+- you want to save a more reliable selector profile for a domain
+
+Typical workflow:
+
+1. Open `/selector-lab`
+2. Paste a product URL
+3. Scan selectors
+4. Review recommended candidates
+5. Assign `wait_for`, `title`, `price`, `discounted_price`, `stock_status`, or `image`
+6. Test the selection
+7. Save it for the store or domain
+
+For noisy pages, turn on the helpful filtering and ignore payment or related-product rows.
+
+## Scraping Model
+
+Gabada uses a waterfall approach:
+
+1. JSON-LD structured data
+2. Microdata and schema hints
+3. Smart page scan
+4. Common patterns and custom selectors
+
+Important behavior:
+- prices and stock are scraped outside the API request cycle
+- the backend reuses one Playwright browser instance
+- per-site selector overrides can be saved by hostname
+- `price` is treated as the regular or original price
+- `discounted_price` is treated as the current sale price
+
+## Site Profiles
+
+Gabada stores domain-level scrape profiles in [backend/scraper/sites.toml](./backend/scraper/sites.toml).
+
+You can edit profiles in two ways:
+- in the app under `Settings -> Site profiles`
+- directly in `backend/scraper/sites.toml`
+
+Example:
+
+```toml
+["example.com"]
+platform = "generic"
+wait_for = ".product-price"
+selectors = { title = "h1", price = ".product-price", stock_status = ".availability" }
+```
+
+## Development
+
+Run backend and frontend separately for hot reload.
+
+### Terminal 1
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
+```
+
+### Terminal 2
+
+```powershell
+cd frontend-web
+npm.cmd run dev
+```
+
+Open:
+- Frontend dev server: [http://127.0.0.1:5173](http://127.0.0.1:5173)
+- Backend API: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+
+The frontend proxies API calls to `/api` on the backend.
+
+### Useful Commands
+
+**Frontend**
+
+```powershell
+cd frontend-web
+npm.cmd run dev
+npm.cmd run build
+npm.cmd run lint
+```
+
+**Backend**
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m py_compile main.py
+```
+
+## Architecture
 
 ```text
 Gabada/
@@ -35,153 +232,10 @@ Gabada/
 `- README.md
 ```
 
-## Requirements
-
-- Python 3.11+
-- Node.js 20+
-- Git
-
-Playwright downloads its own Chromium build, so you do not need to install a browser separately.
-
-## Clone
-
-```powershell
-git clone https://github.com/Xx-LiDAF-xX/Gabada.git
-cd Gabada
-```
-
-## First-time setup
-
-### Backend
-
-```powershell
-cd backend
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m playwright install chromium
-```
-
-### Frontend
-
-```powershell
-cd ..\frontend-web
-npm.cmd install
-npm.cmd run build
-```
-
-## Run the app
-
-### Windows launcher
-
-After setup, double-click [start_gabada.bat](/C:/Users/redacted-store/Desktop/Gabada/start_gabada.bat).
-
-Notes:
-- It uses `backend\.venv\Scripts\python.exe`
-- It checks `http://127.0.0.1:8000/health` before opening the app
-- It expects the frontend to already be built
-
-### Manual run
-
-```powershell
-cd C:\Users\redacted-store\Desktop\Gabada\backend
-.\.venv\Scripts\python.exe -m uvicorn main:app --port 8000
-```
-
-Open:
-- App: [http://127.0.0.1:8000](http://127.0.0.1:8000)
-- API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- Health: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
-
-## Development mode
-
-Run the backend and frontend separately for hot reload.
-
-### Terminal 1
-
-```powershell
-cd C:\Users\redacted-store\Desktop\Gabada\backend
-.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
-```
-
-### Terminal 2
-
-```powershell
-cd C:\Users\redacted-store\Desktop\Gabada\frontend-web
-npm.cmd run dev
-```
-
-Open:
-- Frontend dev server: [http://127.0.0.1:5173](http://127.0.0.1:5173)
-- Backend API: [http://127.0.0.1:8000](http://127.0.0.1:8000)
-
-The frontend proxies API calls to `/api` on the backend.
-
-## Main app areas
-
-- Home: overview of tracked products
-- Categories: manage category names and colors
-- Add product: quick add via URLs
-- Stores: manage store records
-- Import: WooCommerce and file import
-- Probe: inspect what the scraper extracted from a URL
-- Selector Lab: inspect page candidates, assign selectors, test them, and save them
-- Activity: recent price and stock changes
-- Settings: app settings and site-profile editor
-
-## Scraping model
-
-The scraper uses a waterfall approach:
-
-1. JSON-LD structured data
-2. Microdata / schema hints
-3. Smart page scan
-4. Common patterns and custom selectors
-
-Important behavior:
-- Prices and stock are scraped outside the API request cycle
-- The backend reuses one Playwright browser instance
-- Site-specific selector overrides can be saved by hostname
-- `price` is treated as the regular/original price
-- `discounted_price` is treated as the current sale price
-
-## Selector Lab
-
-Selector Lab is the main tool for hard-to-scrape stores.
-
-Use it when:
-- a store has multiple unrelated numbers on the page
-- installment/payment-plan prices are confusing the scraper
-- a product page layout changed
-- you want to save a better selector profile for a domain
-
-Typical workflow:
-
-1. Open `/selector-lab`
-2. Paste a product URL
-3. Scan selectors
-4. Review recommended candidates
-5. Assign `wait_for`, `title`, `price`, `discounted_price`, `stock_status`, or `image`
-6. Test the selection
-7. Save it for the store/domain
-
-For sites with noisy pages, use the "Useful only" filter and ignore payment or related-product rows.
-
-## Site profiles
-
-Gabada stores domain-level scrape profiles in [sites.toml](/C:/Users/redacted-store/Desktop/Gabada/backend/scraper/sites.toml).
-
-You can edit them in two ways:
-- in the app under `Settings -> Site profiles`
-- directly in `backend/scraper/sites.toml`
-
-Example:
-
-```toml
-["example.com"]
-platform = "generic"
-wait_for = ".product-price"
-selectors = { title = "h1", price = ".product-price", stock_status = ".availability" }
-```
+Stack:
+- Backend: FastAPI, Playwright, APScheduler, aiosqlite, Pydantic
+- Frontend: React 19, Vite 8, TypeScript, Tailwind v4, TanStack Query
+- Database: SQLite at `backend/gabada.db`
 
 ## API
 
@@ -200,25 +254,6 @@ Common endpoints:
 - `POST /api/scraper/scrape-all`
 
 Interactive docs are available at `/docs`.
-
-## Useful commands
-
-### Frontend
-
-```powershell
-cd frontend-web
-npm.cmd run dev
-npm.cmd run build
-npm.cmd run lint
-```
-
-### Backend
-
-```powershell
-cd backend
-.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
-.\.venv\Scripts\python.exe -m py_compile main.py
-```
 
 ## Troubleshooting
 
@@ -243,10 +278,10 @@ py -3.11 -m venv .venv
 
 ### A store scrapes the wrong price
 
-- Try `Probe` first to see what the scraper is extracting
-- Use `Selector Lab` for that product page
-- Save a selector profile for the store/domain
-- Re-scrape the affected products after fixing the selectors
+- try `Probe` first to see what the scraper extracted
+- use `Selector Lab` for that product page
+- save a selector profile for the store or domain
+- rescrape the affected products after fixing selectors
 
 ### API requests fail in development
 
@@ -256,4 +291,4 @@ Make sure both servers are running:
 
 ## License
 
-[MIT](/C:/Users/redacted-store/Desktop/Gabada/LICENSE)
+[MIT](./LICENSE)
