@@ -13,6 +13,7 @@ import type {
 } from './types'
 
 export { productsApi } from './products'
+export type { QuickAddResponse, QuickAddResult } from './products'
 export type * from './types'
 
 export const storesApi = {

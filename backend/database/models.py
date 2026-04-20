@@ -207,6 +207,32 @@ class FileImportCommitRequest(BaseModel):
     category_id: Optional[int] = None
 
 
+# ── Quick-add (paste URLs → tracked products) ────────────────────────────────
+
+class QuickAddRequest(BaseModel):
+    urls: list[str]
+    category_id: Optional[int] = None
+
+
+class QuickAddResult(BaseModel):
+    url: str
+    status: str  # "ok" | "error"
+    product_id: Optional[int] = None
+    product_store_id: Optional[int] = None
+    name: Optional[str] = None
+    store_id: Optional[int] = None
+    store_name: Optional[str] = None
+    platform: Optional[str] = None
+    price: Optional[float] = None
+    discounted_price: Optional[float] = None
+    stock_status: Optional[str] = None
+    error: Optional[str] = None
+
+
+class QuickAddResponse(BaseModel):
+    results: list[QuickAddResult]
+
+
 # ── Probe / diagnostics ───────────────────────────────────────────────────────
 
 class ProbeCandidate(BaseModel):

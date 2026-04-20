@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Shell } from '@/components/layout/Shell'
+import { Toaster } from '@/components/ui/toaster'
 import { useApplyTheme } from '@/store/theme'
 import { HomePage } from '@/pages/HomePage'
 import { ProductDetailPage } from '@/pages/ProductDetailPage'
@@ -47,6 +48,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ThemedApp />
+        <Toaster />
       </BrowserRouter>
     </QueryClientProvider>
   )

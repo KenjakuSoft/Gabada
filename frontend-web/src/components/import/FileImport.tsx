@@ -1,22 +1,23 @@
 import { useMemo, useState, type ChangeEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Download, Loader2, Upload } from 'lucide-react'
+import {
+  CheckCircle2,
+  Columns3,
+  Download,
+  FileUp,
+  Loader2,
+  Rows3,
+  Upload,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import {
-  categoriesApi,
-  importApi,
-  storesApi,
-} from '@/api'
+import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
+import { StatTile } from '@/components/ui/stat-tile'
+import { toast } from '@/components/ui/toaster'
+import { categoriesApi, importApi, storesApi } from '@/api'
 import type {
   Category,
   FileImportPreviewResponse,
@@ -55,7 +56,9 @@ export function FileImport() {
       )
       setUrlCol(cols.find((c) => /url|link|permalink/i.test(c)) ?? '')
       setImageCol(cols.find((c) => /image|img|photo/i.test(c)) ?? '')
+      toast.success(`Parsed ${data.total_rows} rows`, data.file_format)
     },
+    onError: () => toast.error('Could not read that file'),
   })
 
   const rows = useMemo<FileImportRow[]>(() => {
@@ -80,10 +83,12 @@ export function FileImport() {
         store_id: Number(storeId),
         category_id: categoryId ? Number(categoryId) : null,
       }),
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['products'] })
+      toast.success(`Imported ${data.imported} products`)
       navigate('/')
     },
+    onError: () => toast.error('Import failed'),
   })
 
   function onFile(e: ChangeEvent<HTMLInputElement>) {
@@ -96,15 +101,17 @@ export function FileImport() {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Upload file</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <label className="flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-border p-6 hover:bg-accent/30">
+      <BentoGrid cols={6}>
+        <BentoTile colSpan={4} tone="primary">
+          <TileHeader
+            eyebrow="Step 1"
+            title="Upload file"
+            icon={<FileUp className="h-4 w-4" />}
+          />
+          <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-border bg-background/60 p-6 transition-colors hover:border-primary/40 hover:bg-accent/30">
             <Upload className="h-5 w-5 text-muted-foreground" />
-            <div className="flex-1">
-              <div className="text-sm font-medium">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">
                 {file ? file.name : 'Choose CSV, Excel, or PDF'}
               </div>
               <div className="text-xs text-muted-foreground">
@@ -120,7 +127,7 @@ export function FileImport() {
               onChange={onFile}
             />
           </label>
-          <div className="flex justify-end">
+          <div className="mt-3 flex justify-end">
             <Button
               onClick={() => previewMutation.mutate()}
               disabled={!file || previewMutation.isPending}
@@ -131,29 +138,38 @@ export function FileImport() {
               Preview
             </Button>
           </div>
-          {previewMutation.isError ? (
-            <p className="text-sm text-destructive">
-              Could not read that file.
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
+        </BentoTile>
+
+        <StatTile
+          label="Total rows"
+          value={preview?.total_rows ?? 0}
+          icon={<Rows3 className="h-4 w-4" />}
+          hint={preview?.file_format ?? 'awaiting file'}
+          tone={preview ? 'primary' : 'default'}
+        />
+        <StatTile
+          label="Mapped"
+          value={rows.length}
+          icon={<CheckCircle2 className="h-4 w-4" />}
+          hint={nameCol && urlCol ? 'ready to commit' : 'set name + URL'}
+          tone={rows.length > 0 ? 'success' : 'default'}
+        />
+      </BentoGrid>
 
       {preview ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              Map columns
-              <Badge variant="secondary" className="font-mono text-xs">
-                {preview.file_format}
-              </Badge>
-              <span className="text-xs font-normal text-muted-foreground">
-                {preview.total_rows} rows
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-3">
+        <BentoGrid cols={6}>
+          <BentoTile colSpan={6}>
+            <TileHeader
+              eyebrow="Step 2"
+              title="Map columns"
+              icon={<Columns3 className="h-4 w-4" />}
+              action={
+                <Badge variant="secondary" className="font-mono text-xs">
+                  {preview.file_format}
+                </Badge>
+              }
+            />
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <ColSelect
                 label="Name column"
                 value={nameCol}
@@ -203,60 +219,60 @@ export function FileImport() {
                   ))}
                 </Select>
               </div>
+              <div className="flex items-end">
+                <Button
+                  className="w-full"
+                  onClick={() => commitMutation.mutate()}
+                  disabled={!canCommit || commitMutation.isPending}
+                >
+                  {commitMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  Import {rows.length}
+                </Button>
+              </div>
             </div>
 
-            <div className="overflow-hidden rounded-md border border-border">
-              <table className="w-full text-xs">
-                <thead className="bg-muted/50 text-muted-foreground">
-                  <tr>
-                    {preview.columns.map((c) => (
-                      <th
-                        key={c}
-                        className="px-2 py-1.5 text-left font-medium"
-                      >
-                        {c}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.sample_rows.map((row, i) => (
-                    <tr key={i} className="border-t border-border">
-                      {row.map((v, j) => (
-                        <td key={j} className="truncate px-2 py-1.5">
-                          {v}
-                        </td>
+            <div className="mt-4 overflow-hidden rounded-md border border-border">
+              <div className="max-h-[320px] overflow-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-muted/80 text-muted-foreground backdrop-blur">
+                    <tr>
+                      {preview.columns.map((c) => (
+                        <th
+                          key={c}
+                          className="px-2 py-1.5 text-left font-medium"
+                        >
+                          {c}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {preview.sample_rows.map((row, i) => (
+                      <tr
+                        key={i}
+                        className="border-t border-border transition-colors hover:bg-accent/20"
+                      >
+                        {row.map((v, j) => (
+                          <td key={j} className="truncate px-2 py-1.5">
+                            {v}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Showing first {preview.sample_rows.length} rows. Backend currently
-              commits the previewed rows only.
+            <p className="mt-2 text-xs text-muted-foreground">
+              Showing first {preview.sample_rows.length} rows. Backend commits
+              the previewed rows only.
             </p>
-
-            <div className="flex justify-end">
-              <Button
-                onClick={() => commitMutation.mutate()}
-                disabled={!canCommit || commitMutation.isPending}
-              >
-                {commitMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                Import {rows.length} products
-              </Button>
-            </div>
-            {commitMutation.isError ? (
-              <p className="text-right text-sm text-destructive">
-                Import failed.
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
+          </BentoTile>
+        </BentoGrid>
       ) : null}
     </div>
   )

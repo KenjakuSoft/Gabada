@@ -1,348 +1,265 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Check, ImageOff, Loader2, Search } from 'lucide-react'
+import {
+  AlertCircle,
+  CheckCircle2,
+  ExternalLink,
+  Hash,
+  Loader2,
+  Sparkles,
+  Zap,
+} from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import {
-  categoriesApi,
-  productsApi,
-  scraperApi,
-  storesApi,
-} from '@/api'
+import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
+import { StatTile } from '@/components/ui/stat-tile'
+import { toast } from '@/components/ui/toaster'
+import { categoriesApi, productsApi } from '@/api'
+import type { Category, QuickAddResult } from '@/api'
 import { useCurrencySymbol } from '@/hooks/useSettings'
-import { formatMoney } from '@/lib/utils'
-import type { Category, ProbeResponse, Store } from '@/api'
+import { cn, formatMoney } from '@/lib/utils'
+
+const URL_RE = /^https?:\/\/\S+$/i
+
+function parseUrls(raw: string): string[] {
+  return raw
+    .split(/\r?\n|,/g)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
 
 export function AddProductPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const symbol = useCurrencySymbol()
 
-  const [url, setUrl] = useState('')
-  const [name, setName] = useState('')
-  const [imageUrl, setImageUrl] = useState('')
-  const [storeId, setStoreId] = useState<string>('')
+  const [text, setText] = useState('')
   const [categoryId, setCategoryId] = useState<string>('')
-  const [probe, setProbe] = useState<ProbeResponse | null>(null)
-  const [newStoreName, setNewStoreName] = useState('')
-
-  const stores = useQuery<Store[]>({
-    queryKey: ['stores'],
-    queryFn: () => storesApi.list(),
-  })
+  const [results, setResults] = useState<QuickAddResult[] | null>(null)
 
   const categories = useQuery<Category[]>({
     queryKey: ['categories'],
     queryFn: () => categoriesApi.list(),
   })
 
-  const matchedStore = useMemo(() => {
-    if (!url || !stores.data) return null
-    try {
-      const host = new URL(url).hostname
-      return (
-        stores.data.find((s) => {
-          try {
-            return new URL(s.base_url).hostname === host
-          } catch {
-            return false
-          }
-        }) ?? null
-      )
-    } catch {
-      return null
-    }
-  }, [url, stores.data])
+  const urls = useMemo(() => parseUrls(text), [text])
+  const validCount = urls.filter((u) => URL_RE.test(u)).length
+  const invalidCount = urls.length - validCount
 
-  const probeMutation = useMutation({
-    mutationFn: () => scraperApi.probe({ url }),
-    onSuccess: (data) => {
-      setProbe(data)
-      if (data.extracted.title && !name) setName(data.extracted.title)
-      if (data.json_ld_name && !name) setName(data.json_ld_name)
-      if (matchedStore) setStoreId(String(matchedStore.id))
-    },
-  })
-
-  const createStore = useMutation({
-    mutationFn: async () => {
-      const host = new URL(url).origin
-      return storesApi.create({
-        name: newStoreName || new URL(url).hostname,
-        base_url: host,
-      })
-    },
-    onSuccess: (created) => {
-      qc.invalidateQueries({ queryKey: ['stores'] })
-      setStoreId(String(created.id))
-      setNewStoreName('')
-    },
-  })
-
-  const createProduct = useMutation({
-    mutationFn: async () => {
-      const product = await productsApi.create({
-        canonical_name: name.trim(),
-        image_url: imageUrl.trim() || null,
+  const quickAdd = useMutation({
+    mutationFn: () =>
+      productsApi.quickAdd({
+        urls,
         category_id: categoryId ? Number(categoryId) : null,
-      })
-      await productsApi.addStore(product.id, {
-        store_id: Number(storeId),
-        product_url: url.trim(),
-        auto_detect: true,
-      })
-      return product
-    },
-    onSuccess: (product) => {
+      }),
+    onSuccess: (data) => {
+      setResults(data.results)
       qc.invalidateQueries({ queryKey: ['products'] })
-      navigate(`/product/${product.id}`)
+      qc.invalidateQueries({ queryKey: ['stores'] })
+      const ok = data.results.filter((r) => r.status === 'ok').length
+      const err = data.results.filter((r) => r.status === 'error').length
+      if (err === 0) toast.success(`Added ${ok} product${ok === 1 ? '' : 's'}`)
+      else toast.info(`Added ${ok}`, `${err} failed`)
     },
+    onError: () =>
+      toast.error(
+        'Request failed',
+        'Make sure the backend is running and try again',
+      ),
   })
 
-  const canProbe = url.trim().length > 8
-  const canCreate =
-    name.trim().length > 0 && storeId !== '' && url.trim().length > 8
+  const okCount = results?.filter((r) => r.status === 'ok').length ?? 0
+  const errCount = results?.filter((r) => r.status === 'error').length ?? 0
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-6xl space-y-6">
       <PageHeader
-        title="Add product"
-        description="Paste a store URL. We auto-detect the platform and preview what we'll scrape."
+        title="Add products"
+        description="Paste URLs. Platform, title, price, and stock are auto-detected."
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>1. Store URL</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex gap-2">
-            <Input
-              placeholder="https://shop.example.com/products/widget"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-            <Button
-              onClick={() => probeMutation.mutate()}
-              disabled={!canProbe || probeMutation.isPending}
-            >
-              {probeMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Search className="h-4 w-4" />
-              )}
-              Probe
-            </Button>
-          </div>
-          {probeMutation.isError ? (
-            <p className="text-sm text-destructive">
-              Probe failed. Check the URL and that the backend is running.
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      {probe ? (
-        <ProbePreview probe={probe} symbol={symbol} />
-      ) : null}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>2. Details</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="name">Product name</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Sony WH-1000XM5"
-            />
-          </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="image">Image URL (optional)</Label>
-            <Input
-              id="image"
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              placeholder="https://…"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="store">Store</Label>
-            <div className="flex gap-2">
+      <BentoGrid cols={6}>
+        <BentoTile colSpan={4} tone="primary">
+          <TileHeader
+            eyebrow="Paste-and-go"
+            title="URLs"
+            icon={<Sparkles className="h-4 w-4" />}
+            action={
+              <div className="flex items-center gap-2 text-xs">
+                <Badge variant={validCount > 0 ? 'success' : 'muted'}>
+                  {validCount} valid
+                </Badge>
+                {invalidCount > 0 ? (
+                  <Badge variant="destructive">{invalidCount} invalid</Badge>
+                ) : null}
+              </div>
+            }
+          />
+          <textarea
+            className="mt-3 w-full min-h-[180px] rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring"
+            placeholder={
+              'https://shop-a.com/product/foo\nhttps://shop-b.com/items/bar'
+            }
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            disabled={quickAdd.isPending}
+          />
+          <div className="mt-3 flex flex-wrap items-end gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="category">Category (optional)</Label>
               <Select
-                id="store"
-                value={storeId}
-                onChange={(e) => setStoreId(e.target.value)}
+                id="category"
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
+                disabled={quickAdd.isPending}
               >
-                <option value="">— select —</option>
-                {(stores.data ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
+                <option value="">— none —</option>
+                {(categories.data ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
                   </option>
                 ))}
               </Select>
             </div>
-            {url && !matchedStore ? (
-              <div className="mt-2 rounded-md border border-dashed border-border p-2">
-                <p className="mb-2 text-xs text-muted-foreground">
-                  No store matches this URL. Create one?
-                </p>
-                <div className="flex gap-2">
-                  <Input
-                    value={newStoreName}
-                    onChange={(e) => setNewStoreName(e.target.value)}
-                    placeholder={
-                      (() => {
-                        try {
-                          return new URL(url).hostname
-                        } catch {
-                          return 'Store name'
-                        }
-                      })()
-                    }
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => createStore.mutate()}
-                    disabled={createStore.isPending}
-                  >
-                    Create
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="category">Category (optional)</Label>
-            <Select
-              id="category"
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
+            <Button
+              className="ml-auto"
+              onClick={() => quickAdd.mutate()}
+              disabled={validCount === 0 || quickAdd.isPending}
             >
-              <option value="">— none —</option>
-              {(categories.data ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
+              {quickAdd.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Detecting…
+                </>
+              ) : (
+                <>
+                  <Zap className="h-4 w-4" />
+                  Add & track {validCount > 0 ? `· ${validCount}` : ''}
+                </>
+              )}
+            </Button>
           </div>
-        </CardContent>
-      </Card>
+        </BentoTile>
 
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" onClick={() => navigate('/')}>
-          Cancel
-        </Button>
-        <Button
-          onClick={() => createProduct.mutate()}
-          disabled={!canCreate || createProduct.isPending}
-        >
-          {createProduct.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Check className="h-4 w-4" />
-          )}
-          Create product
-        </Button>
-      </div>
-      {createProduct.isError ? (
-        <p className="text-right text-sm text-destructive">
-          Failed to create product.
-        </p>
+        <StatTile
+          label="URLs ready"
+          value={validCount}
+          icon={<Hash className="h-4 w-4" />}
+          hint={invalidCount > 0 ? `${invalidCount} skipped` : 'all valid'}
+          tone={validCount > 0 ? 'success' : 'default'}
+        />
+        <StatTile
+          label={results ? 'Added' : 'Ready'}
+          value={results ? okCount : 0}
+          icon={<CheckCircle2 className="h-4 w-4" />}
+          hint={results && errCount > 0 ? `${errCount} failed` : undefined}
+          tone={results && okCount > 0 ? 'success' : 'default'}
+        />
+      </BentoGrid>
+
+      {results ? (
+        <BentoGrid cols={6}>
+          <BentoTile colSpan={6}>
+            <TileHeader
+              eyebrow="Results"
+              title={`${results.length} processed`}
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setText('')
+                    setResults(null)
+                  }}
+                >
+                  Add more
+                </Button>
+              }
+            />
+            <div
+              className="gbd-stagger mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+              key={results.length}
+            >
+              {results.map((r, i) => (
+                <ResultCard
+                  key={i}
+                  r={r}
+                  symbol={symbol}
+                  onOpen={() => navigate(`/product/${r.product_id}`)}
+                />
+              ))}
+            </div>
+          </BentoTile>
+        </BentoGrid>
       ) : null}
     </div>
   )
 }
 
-function ProbePreview({
-  probe,
-  symbol,
-}: {
-  probe: ProbeResponse
+interface ResultCardProps {
+  r: QuickAddResult
   symbol: string
-}) {
-  const e = probe.extracted
+  onOpen: () => void
+}
+
+function ResultCard({ r, symbol, onOpen }: ResultCardProps) {
+  const ok = r.status === 'ok'
+  const effective = r.discounted_price ?? r.price ?? null
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          Probe result
-          <Badge variant="secondary" className="font-mono text-xs">
-            {probe.platform}
-          </Badge>
-          {probe.json_ld_found ? (
-            <Badge variant="success">JSON-LD</Badge>
-          ) : null}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2 text-sm">
-          <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
-            {probe.suggested_selectors?.image ||
-            probe.json_ld_name ? null : (
-              <ImageOff className="h-6 w-6 text-muted-foreground" />
-            )}
+    <div
+      className={cn(
+        'flex flex-col gap-2 rounded-lg border p-3 transition-colors',
+        ok
+          ? 'border-emerald-500/30 bg-emerald-500/5'
+          : 'border-destructive/30 bg-destructive/5',
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold">
+            {r.name ?? '(no title)'}
           </div>
-          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-            <span className="text-muted-foreground">Title</span>
-            <span className="font-medium">{e.title ?? '—'}</span>
-            <span className="text-muted-foreground">Price</span>
-            <span className="font-semibold tabular-nums">
-              {e.price != null ? formatMoney(e.price, symbol) : '—'}
-            </span>
-            {e.discounted_price != null ? (
-              <>
-                <span className="text-muted-foreground">Discounted</span>
-                <span className="font-semibold tabular-nums text-success">
-                  {formatMoney(e.discounted_price, symbol)}
-                </span>
-              </>
-            ) : null}
-            {e.dealer_price != null ? (
-              <>
-                <span className="text-muted-foreground">Dealer</span>
-                <span className="font-semibold tabular-nums">
-                  {formatMoney(e.dealer_price, symbol)}
-                </span>
-              </>
-            ) : null}
-            <span className="text-muted-foreground">Stock</span>
-            <span>{e.stock_status}</span>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {r.store_name ?? new URL(r.url).hostname}
           </div>
         </div>
+        {ok ? (
+          <Badge variant="success" className="shrink-0">
+            <CheckCircle2 className="mr-1 h-3 w-3" />
+            ok
+          </Badge>
+        ) : (
+          <Badge variant="destructive" className="shrink-0">
+            <AlertCircle className="mr-1 h-3 w-3" />
+            error
+          </Badge>
+        )}
+      </div>
 
-        {probe.notes.length > 0 ? (
-          <div className="rounded-md border border-border bg-muted/40 p-3 text-xs">
-            <div className="mb-1 font-medium text-muted-foreground">Notes</div>
-            <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
-              {probe.notes.map((n, i) => (
-                <li key={i}>{n}</li>
-              ))}
-            </ul>
+      {ok ? (
+        <div className="flex items-end justify-between">
+          <div>
+            <div className="text-lg font-semibold tabular-nums">
+              {effective != null ? formatMoney(effective, symbol) : '—'}
+            </div>
+            {r.platform ? (
+              <Badge variant="secondary" className="mt-1 font-mono text-[10px]">
+                {r.platform}
+              </Badge>
+            ) : null}
           </div>
-        ) : null}
-
-        {e.error ? (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-            {e.error}
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
+          <Button variant="ghost" size="sm" onClick={onOpen}>
+            Open
+            <ExternalLink className="h-3 w-3" />
+          </Button>
+        </div>
+      ) : (
+        <div className="text-xs text-destructive">{r.error ?? 'Failed'}</div>
+      )}
+    </div>
   )
 }

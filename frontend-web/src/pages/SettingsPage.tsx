@@ -1,17 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Loader2, RefreshCw } from 'lucide-react'
+import {
+  Check,
+  Clock,
+  FileCode,
+  Globe2,
+  Loader2,
+  Radio,
+  RefreshCw,
+  Timer,
+} from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
+import { toast } from '@/components/ui/toaster'
+import { useLiveTime } from '@/hooks/useLiveTime'
 import { scraperApi, settingsApi } from '@/api'
 import type { Settings, SitesConfigResponse } from '@/api'
 
@@ -241,12 +248,29 @@ export function SettingsPage() {
       qc.setQueryData(['settings'], updated)
       qc.invalidateQueries({ queryKey: ['settings', 'next-run'] })
       setForm(updated)
+      toast.success('Settings saved')
     },
+    onError: () =>
+      toast.error('Save failed', 'Invalid cron, timezone, or backend offline'),
   })
+
+  const dirty = useMemo(() => {
+    if (!form || !settings.data) return false
+    const keys: Array<keyof Settings> = [
+      'currency_code',
+      'currency_symbol',
+      'country_code',
+      'timezone',
+      'scrape_cron',
+      'scrape_enabled',
+      'locale',
+    ]
+    return keys.some((k) => form[k] !== settings.data[k])
+  }, [form, settings.data])
 
   if (!form) {
     return (
-      <div className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
+      <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
         {settings.isError ? 'Failed to load settings.' : 'Loading…'}
       </div>
     )
@@ -266,171 +290,216 @@ export function SettingsPage() {
     })
   }
 
+  const nextLabel = next.data?.next_run_time
+    ? new Date(next.data.next_run_time).toLocaleString()
+    : form.scrape_enabled
+      ? '—'
+      : 'disabled'
+
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-6xl space-y-6">
       <PageHeader
         title="Settings"
         description="Currency, timezone, and scrape schedule."
         actions={
-          <Button
-            size="sm"
-            onClick={() =>
-              save.mutate({
-                currency_code: form.currency_code,
-                currency_symbol: form.currency_symbol,
-                country_code: form.country_code,
-                timezone: form.timezone,
-                scrape_cron: form.scrape_cron,
-                scrape_enabled: form.scrape_enabled,
-                locale: form.locale,
-              })
-            }
-            disabled={save.isPending}
-          >
-            {save.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Check className="h-4 w-4" />
-            )}
-            Save
-          </Button>
+          <>
+            {dirty ? (
+              <Badge variant="warning" className="text-[10px]">
+                unsaved changes
+              </Badge>
+            ) : null}
+            <Button
+              size="sm"
+              onClick={() =>
+                save.mutate({
+                  currency_code: form.currency_code,
+                  currency_symbol: form.currency_symbol,
+                  country_code: form.country_code,
+                  timezone: form.timezone,
+                  scrape_cron: form.scrape_cron,
+                  scrape_enabled: form.scrape_enabled,
+                  locale: form.locale,
+                })
+              }
+              disabled={save.isPending || !dirty}
+            >
+              {save.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
+              Save
+            </Button>
+          </>
         }
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Regional</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="currency">Currency</Label>
-            <Select
-              id="currency"
-              value={form.currency_code}
-              onChange={(e) => pickCurrency(e.target.value)}
-            >
-              {CURRENCY_PRESETS.map((c) => (
-                <option key={c.code} value={c.code}>
-                  {c.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="symbol">Currency symbol</Label>
-            <Input
-              id="symbol"
-              value={form.currency_symbol}
-              onChange={(e) => update('currency_symbol', e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="country">Country code (ISO-3166)</Label>
-            <Input
-              id="country"
-              value={form.country_code}
-              maxLength={2}
-              onChange={(e) =>
-                update('country_code', e.target.value.toUpperCase())
-              }
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="locale">Locale</Label>
-            <Input
-              id="locale"
-              value={form.locale}
-              onChange={(e) => update('locale', e.target.value)}
-              placeholder="en-US"
-            />
-          </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="tz">Timezone</Label>
-            <Input
-              id="tz"
-              value={form.timezone}
-              onChange={(e) => update('timezone', e.target.value)}
-              list="tz-presets"
-              placeholder="UTC"
-            />
-            <datalist id="tz-presets">
-              {TIMEZONE_PRESETS.map((tz) => (
-                <option key={tz} value={tz} />
-              ))}
-            </datalist>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Scrape schedule</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <label className="flex cursor-pointer items-center gap-3">
-            <input
-              type="checkbox"
-              checked={form.scrape_enabled}
-              onChange={(e) => update('scrape_enabled', e.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-            <span className="text-sm font-medium">
-              Enable automatic scraping
-            </span>
-          </label>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="cron">Cron expression</Label>
-            <Input
-              id="cron"
-              value={form.scrape_cron}
-              onChange={(e) => update('scrape_cron', e.target.value)}
-              className="font-mono"
-              placeholder="0 8 * * *"
-            />
-            <p className="text-xs text-muted-foreground">
-              Standard 5-field cron (minute hour day month weekday). Interpreted
-              in the timezone above.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-1.5">
-            {CRON_PRESETS.map((p) => (
-              <button
-                key={p.value}
-                type="button"
-                onClick={() => update('scrape_cron', p.value)}
-                className="rounded-full border border-border bg-muted/40 px-2.5 py-0.5 text-xs hover:bg-accent"
+      <BentoGrid cols={6}>
+        <BentoTile colSpan={3} tone="primary">
+          <TileHeader
+            eyebrow="Regional"
+            title="Currency & locale"
+            icon={<Globe2 className="h-4 w-4" />}
+          />
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="currency">Currency</Label>
+              <Select
+                id="currency"
+                value={form.currency_code}
+                onChange={(e) => pickCurrency(e.target.value)}
               >
-                {p.label}
-              </button>
-            ))}
+                {CURRENCY_PRESETS.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="symbol">Symbol</Label>
+              <Input
+                id="symbol"
+                value={form.currency_symbol}
+                onChange={(e) => update('currency_symbol', e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="country">Country (ISO-3166)</Label>
+              <Input
+                id="country"
+                value={form.country_code}
+                maxLength={2}
+                onChange={(e) =>
+                  update('country_code', e.target.value.toUpperCase())
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="locale">Locale</Label>
+              <Input
+                id="locale"
+                value={form.locale}
+                onChange={(e) => update('locale', e.target.value)}
+                placeholder="en-US"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tz">Timezone</Label>
+              <Input
+                id="tz"
+                value={form.timezone}
+                onChange={(e) => update('timezone', e.target.value)}
+                list="tz-presets"
+                placeholder="UTC"
+              />
+              <datalist id="tz-presets">
+                {TIMEZONE_PRESETS.map((tz) => (
+                  <option key={tz} value={tz} />
+                ))}
+              </datalist>
+            </div>
           </div>
+        </BentoTile>
 
-          <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-            <span className="flex items-center gap-2 text-muted-foreground">
-              <RefreshCw className="h-3.5 w-3.5" />
-              Next scheduled run
-            </span>
-            <span className="font-mono text-xs">
-              {next.data?.next_run_time
-                ? new Date(next.data.next_run_time).toLocaleString()
-                : form.scrape_enabled
-                  ? '—'
-                  : 'disabled'}
-            </span>
+        <BentoTile colSpan={3} tone="accent">
+          <TileHeader
+            eyebrow="Automation"
+            title="Scrape schedule"
+            icon={<Timer className="h-4 w-4" />}
+            action={
+              <label className="flex cursor-pointer items-center gap-2 rounded-md bg-background/60 px-2.5 py-1">
+                <input
+                  type="checkbox"
+                  checked={form.scrape_enabled}
+                  onChange={(e) => update('scrape_enabled', e.target.checked)}
+                  className="h-4 w-4 accent-primary"
+                />
+                <span className="text-xs font-medium">Enabled</span>
+              </label>
+            }
+          />
+          <div className="mt-3 space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="cron">Cron expression</Label>
+              <Input
+                id="cron"
+                value={form.scrape_cron}
+                onChange={(e) => update('scrape_cron', e.target.value)}
+                className="font-mono"
+                placeholder="0 8 * * *"
+              />
+              <p className="text-xs text-muted-foreground">
+                5-field cron (min hour day mon weekday) in the timezone above.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {CRON_PRESETS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => update('scrape_cron', p.value)}
+                  className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                    form.scrape_cron === p.value
+                      ? 'border-primary bg-primary/15 text-foreground'
+                      : 'border-border bg-muted/40 hover:bg-accent'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </CardContent>
-      </Card>
+        </BentoTile>
 
-      {save.isError ? (
-        <p className="text-right text-sm text-destructive">
-          Failed to save: invalid cron, timezone, or backend unreachable.
-        </p>
-      ) : null}
+        <BentoTile
+          colSpan={4}
+          tone={form.scrape_enabled ? 'success' : 'default'}
+        >
+          <TileHeader
+            eyebrow="Next scheduled run"
+            title={nextLabel}
+            icon={<RefreshCw className="h-4 w-4" />}
+          />
+          <div className="mt-2 text-xs text-muted-foreground">
+            {next.data?.next_run_time ? (
+              <NextRunLive iso={next.data.next_run_time} />
+            ) : form.scrape_enabled ? (
+              'awaiting scheduler'
+            ) : (
+              'automation off'
+            )}
+          </div>
+        </BentoTile>
+
+        <BentoTile
+          colSpan={2}
+          tone={form.scrape_enabled ? 'primary' : 'default'}
+        >
+          <TileHeader
+            eyebrow="Live status"
+            title={form.scrape_enabled ? 'On' : 'Off'}
+            icon={<Radio className="h-4 w-4" />}
+          />
+          <div className="mt-2 text-xs text-muted-foreground">
+            {form.scrape_enabled ? 'auto-scraping' : 'manual only'}
+          </div>
+        </BentoTile>
+      </BentoGrid>
 
       <SiteProfilesCard />
     </div>
+  )
+}
+
+function NextRunLive({ iso }: { iso: string }) {
+  const live = useLiveTime(iso)
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Clock className="h-3 w-3" />
+      {live}
+    </span>
   )
 }
 
@@ -442,7 +511,6 @@ function SiteProfilesCard() {
   })
 
   const [draft, setDraft] = useState<string | null>(null)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   useEffect(() => {
     if (config.data && draft === null) setDraft(config.data.content)
@@ -453,42 +521,67 @@ function SiteProfilesCard() {
     onSuccess: (next) => {
       qc.setQueryData(['scraper', 'sites-config'], next)
       setDraft(next.content)
-      setErrorMsg(null)
+      toast.success('Profiles saved', 'Scraper reloads on next run')
     },
     onError: (err: unknown) => {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
           ?.detail ?? 'Failed to save sites.toml'
-      setErrorMsg(detail)
+      toast.error('Save failed', detail)
     },
   })
 
   const dirty = draft !== null && config.data && draft !== config.data.content
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Site profiles</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
+    <BentoGrid cols={6}>
+      <BentoTile colSpan={6}>
+        <TileHeader
+          eyebrow="Scraper · TOML"
+          title="Site profiles"
+          icon={<FileCode className="h-4 w-4" />}
+          action={
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (config.data) setDraft(config.data.content)
+                }}
+                disabled={!dirty || save.isPending}
+              >
+                Revert
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => draft !== null && save.mutate(draft)}
+                disabled={!dirty || save.isPending}
+              >
+                {save.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                Save profiles
+              </Button>
+            </div>
+          }
+        />
+        <p className="mt-3 text-sm text-muted-foreground">
           Register shops by hostname and pin a platform or override selectors.
           Plain-text TOML — edit here or directly in{' '}
           <code className="rounded bg-muted px-1 py-0.5 text-xs">
             {config.data?.path ?? 'backend/scraper/sites.toml'}
           </code>
-          . The scraper reloads automatically when the file changes.
+          . The scraper reloads when the file changes.
         </p>
 
         {config.data?.hostnames.length ? (
-          <div className="flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {config.data.hostnames.map((h) => (
-              <span
-                key={h}
-                className="rounded-full border border-border bg-muted/40 px-2.5 py-0.5 font-mono text-xs"
-              >
+              <Badge key={h} variant="outline" className="font-mono text-[11px]">
                 {h}
-              </span>
+              </Badge>
             ))}
           </div>
         ) : null}
@@ -497,44 +590,10 @@ function SiteProfilesCard() {
           value={draft ?? ''}
           onChange={(e) => setDraft(e.target.value)}
           spellCheck={false}
-          className="min-h-[240px] w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs leading-5 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="mt-3 min-h-[280px] w-full rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-xs leading-5 text-foreground outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring"
           placeholder={'["mystore.com"]\nplatform = "shopify"\n'}
         />
-
-        {errorMsg ? (
-          <p className="text-sm text-destructive">{errorMsg}</p>
-        ) : save.isSuccess && !dirty ? (
-          <p className="text-sm text-emerald-600 dark:text-emerald-400">
-            Saved. Scraper will pick up changes on the next run.
-          </p>
-        ) : null}
-
-        <div className="flex justify-end gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              if (config.data) setDraft(config.data.content)
-              setErrorMsg(null)
-            }}
-            disabled={!dirty || save.isPending}
-          >
-            Revert
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => draft !== null && save.mutate(draft)}
-            disabled={!dirty || save.isPending}
-          >
-            {save.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Check className="h-4 w-4" />
-            )}
-            Save profiles
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      </BentoTile>
+    </BentoGrid>
   )
 }

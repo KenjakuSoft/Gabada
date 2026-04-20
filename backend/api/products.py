@@ -1,11 +1,14 @@
 import json
 import logging
+import re
+from urllib.parse import urlparse, unquote
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from database.db import get_db
 from database.models import (
     Product, ProductCreate, ProductStoreCreate, ProductStoreSummary,
     ProductStoreOverride, ProductStoreOverrideUpsert,
+    QuickAddRequest, QuickAddResponse, QuickAddResult,
     ScrapeConfig, ScrapeSelectors,
 )
 from scraper.engine import probe as probe_url
@@ -291,3 +294,166 @@ async def delete_override(product_id: int, product_store_id: int):
         await db.commit()
     finally:
         await db.close()
+
+
+# ── Quick-add (paste URLs → tracked products, zero-config) ────────────────────
+
+_SLUG_SEP_RE = re.compile(r"[-_+]+")
+
+
+def _title_from_url(url: str) -> str:
+    """Produce a readable fallback title from the URL's last path segment."""
+    try:
+        parsed = urlparse(url)
+        segs = [s for s in parsed.path.split("/") if s]
+        if segs:
+            raw = unquote(segs[-1])
+            raw = re.sub(r"\.(html?|php|aspx?)$", "", raw, flags=re.IGNORECASE)
+            words = _SLUG_SEP_RE.sub(" ", raw).strip()
+            if words:
+                return words.title()
+        return parsed.hostname or url
+    except Exception:
+        return url
+
+
+async def _find_or_create_store_for_url(db, url: str) -> tuple[int, str]:
+    """Return (store_id, store_name) for the host of `url`, creating one if missing."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError("URL has no hostname")
+
+    base_url = f"{parsed.scheme or 'https'}://{host}"
+
+    rows = await db.execute_fetchall("SELECT id, name, base_url FROM stores")
+    for r in rows:
+        try:
+            r_host = (urlparse(r["base_url"]).hostname or "").lower()
+        except Exception:
+            r_host = ""
+        if r_host == host:
+            return r["id"], r["name"]
+
+    cur = await db.execute(
+        "INSERT INTO stores (name, base_url) VALUES (?, ?)",
+        (host, base_url),
+    )
+    await db.commit()
+    return cur.lastrowid, host
+
+
+async def _quick_add_one(db, url: str, category_id: Optional[int]) -> QuickAddResult:
+    url = url.strip()
+    if not url:
+        return QuickAddResult(url=url, status="error", error="Empty URL")
+
+    try:
+        store_id, store_name = await _find_or_create_store_for_url(db, url)
+    except Exception as e:
+        return QuickAddResult(url=url, status="error", error=f"Bad URL: {e}")
+
+    # Probe — engine already consults sites.toml and platform defaults.
+    try:
+        report = await probe_url(url, ScrapeConfig())
+    except Exception as e:
+        logger.warning("quick-add probe failed for %s: %s", url, e)
+        return QuickAddResult(
+            url=url, status="error", store_id=store_id, store_name=store_name,
+            error=f"Probe failed: {e}",
+        )
+
+    extracted = report.extracted
+    name = (
+        (extracted.title or "").strip()
+        or (report.json_ld_name or "").strip()
+        or _title_from_url(url)
+    )
+
+    # Create product
+    prod_cur = await db.execute(
+        "INSERT INTO products (canonical_name, image_url, category_id) VALUES (?, ?, ?)",
+        (name, None, category_id),
+    )
+    product_id = prod_cur.lastrowid
+
+    # Link to store (empty config — engine re-applies site profile each scrape)
+    ps_cur = await db.execute(
+        """INSERT INTO product_stores (product_id, store_id, product_url, scrape_config)
+           VALUES (?, ?, ?, ?)""",
+        (product_id, store_id, url, ScrapeConfig().model_dump_json()),
+    )
+    product_store_id = ps_cur.lastrowid
+
+    # Log initial snapshot if probe produced anything useful
+    if extracted.price is not None or extracted.stock_status != "unknown":
+        await db.execute(
+            """INSERT INTO price_logs
+               (product_store_id, title, price, discounted_price, dealer_price,
+                stock_status, raw_price, raw_discounted, raw_dealer,
+                change_type, price_delta, previous_price, previous_stock_status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', NULL, NULL, NULL)""",
+            (
+                product_store_id,
+                extracted.title,
+                extracted.price,
+                extracted.discounted_price,
+                extracted.dealer_price,
+                extracted.stock_status,
+                extracted.raw_price,
+                extracted.raw_discounted,
+                extracted.raw_dealer,
+            ),
+        )
+
+    await db.commit()
+
+    return QuickAddResult(
+        url=url,
+        status="ok",
+        product_id=product_id,
+        product_store_id=product_store_id,
+        name=name,
+        store_id=store_id,
+        store_name=store_name,
+        platform=report.platform,
+        price=extracted.price,
+        discounted_price=extracted.discounted_price,
+        stock_status=extracted.stock_status,
+    )
+
+
+@router.post("/quick-add", response_model=QuickAddResponse)
+async def quick_add(body: QuickAddRequest) -> QuickAddResponse:
+    """
+    Paste a list of product URLs, auto-detect everything, create tracked products.
+
+    For each URL: hostname → find-or-create store; probe → platform, title,
+    price, stock; create product + product_store link + initial price log.
+    """
+    # Dedupe while preserving order; drop empties
+    seen: set[str] = set()
+    urls: list[str] = []
+    for raw in body.urls:
+        u = (raw or "").strip()
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        urls.append(u)
+
+    if not urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+
+    results: list[QuickAddResult] = []
+    db = await get_db()
+    try:
+        for u in urls:
+            try:
+                results.append(await _quick_add_one(db, u, body.category_id))
+            except Exception as e:
+                logger.exception("quick-add failed for %s", u)
+                results.append(QuickAddResult(url=u, status="error", error=str(e)))
+    finally:
+        await db.close()
+
+    return QuickAddResponse(results=results)

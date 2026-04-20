@@ -3,20 +3,23 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
+  Boxes,
+  Clock,
   ImageOff,
+  LineChart as LineChartIcon,
   Pencil,
   RefreshCw,
+  Tag,
   Trash2,
+  TrendingDown,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
+import { StatTile } from '@/components/ui/stat-tile'
+import { Skeleton } from '@/components/ui/skeleton'
+import { toast } from '@/components/ui/toaster'
 import { StoreRow } from '@/components/products/StoreRow'
 import { AddStoreCard } from '@/components/products/AddStoreCard'
 import { EditProductCard } from '@/components/products/EditProductCard'
@@ -24,7 +27,9 @@ import { PriceChart } from '@/components/products/PriceChart'
 import { LogsTable } from '@/components/products/LogsTable'
 import { logsApi, productsApi, scraperApi } from '@/api'
 import { useCurrencySymbol } from '@/hooks/useSettings'
+import { useLiveTime } from '@/hooks/useLiveTime'
 import type { PriceLog, Product } from '@/api'
+import { cn, formatMoney } from '@/lib/utils'
 
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -55,42 +60,31 @@ export function ProductDetailPage() {
       qc.invalidateQueries({ queryKey: ['product', productId] })
       qc.invalidateQueries({ queryKey: ['product-logs', productId] })
       qc.invalidateQueries({ queryKey: ['products'] })
+      toast.success('Scrape complete', 'All stores refreshed')
     },
+    onError: () => toast.error('Scrape failed'),
   })
 
   const remove = useMutation({
     mutationFn: () => productsApi.remove(productId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['products'] })
+      toast.info('Product deleted')
       navigate('/')
     },
   })
 
   if (!Number.isFinite(productId) || productId <= 0) {
-    return (
-      <div className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-        Invalid product id.
-      </div>
-    )
+    return <ErrorState text="Invalid product id." />
   }
-
-  if (product.isLoading) {
-    return (
-      <div className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-        Loading…
-      </div>
-    )
-  }
-
+  if (product.isLoading) return <DetailSkeleton />
   if (product.isError || !product.data) {
-    return (
-      <div className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-        Failed to load product.
-      </div>
-    )
+    return <ErrorState text="Failed to load product." />
   }
 
   const p = product.data
+  const stats = computeStats(p)
+  const recent = mostRecentScrape(p)
 
   return (
     <div className="space-y-6">
@@ -107,9 +101,7 @@ export function ProductDetailPage() {
         <PageHeader
           title={p.canonical_name}
           description={
-            p.category_name
-              ? `Category: ${p.category_name}`
-              : 'Uncategorized product'
+            p.category_name ? `Category: ${p.category_name}` : 'Uncategorized'
           }
           actions={
             <>
@@ -154,32 +146,29 @@ export function ProductDetailPage() {
         <EditProductCard product={p} onClose={() => setEditing(false)} />
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-        <Card>
-          <CardContent className="flex flex-col items-center gap-4 p-6">
-            <div className="flex h-48 w-48 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted">
+      <BentoGrid cols={6}>
+        <BentoTile colSpan={2} rowSpan={2} padded={false} className="overflow-hidden">
+          <div className="flex h-full flex-col">
+            <div className="relative flex-1 min-h-[260px] bg-gradient-to-br from-muted/80 to-muted/30">
               {p.image_url ? (
                 <img
                   src={p.image_url}
                   alt=""
-                  className="h-full w-full object-contain"
+                  className="absolute inset-0 h-full w-full object-contain p-6"
                 />
               ) : (
-                <ImageOff className="h-10 w-10 text-muted-foreground" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <ImageOff className="h-12 w-12 text-muted-foreground/50" />
+                </div>
               )}
-            </div>
-            <div className="w-full space-y-2 text-xs">
-              <InfoRow label="ID" value={`#${p.id}`} />
-              <InfoRow label="Stores" value={String(p.stores.length)} />
-              <InfoRow
-                label="Created"
-                value={new Date(p.created_at).toLocaleDateString()}
-              />
-              {p.category_name ? (
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Category</span>
+              <div className="absolute inset-x-0 bottom-0 space-y-1 bg-gradient-to-t from-black/70 via-black/30 to-transparent p-4">
+                <div className="line-clamp-2 text-sm font-semibold text-white">
+                  {p.canonical_name}
+                </div>
+                {p.category_name ? (
                   <Badge
                     variant="outline"
+                    className="border-white/40 bg-black/30 text-white"
                     style={
                       p.category_color
                         ? { borderColor: p.category_color, color: p.category_color }
@@ -188,17 +177,63 @@ export function ProductDetailPage() {
                   >
                     {p.category_name}
                   </Badge>
-                </div>
-              ) : null}
+                ) : null}
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </BentoTile>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Stores</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1.5">
+        <StatTile
+          label="Lowest price"
+          value={stats.low}
+          decimals={2}
+          prefix={stats.low != null ? symbol : undefined}
+          icon={<Tag className="h-4 w-4" />}
+          hint={stats.lowStore ? `at ${stats.lowStore}` : undefined}
+          tone="primary"
+        />
+        <StatTile
+          label="Stores"
+          value={p.stores.length}
+          icon={<Boxes className="h-4 w-4" />}
+          hint={`${stats.inStockStores} in stock`}
+        />
+        <StatTile
+          label="Logs"
+          value={logs.data?.length ?? 0}
+          icon={<LineChartIcon className="h-4 w-4" />}
+          loading={logs.isLoading}
+          hint="price snapshots"
+        />
+        <StatTile
+          label="Latest drop"
+          value={stats.bestDrop}
+          decimals={2}
+          prefix={stats.bestDrop != null ? symbol : undefined}
+          icon={<TrendingDown className="h-4 w-4" />}
+          tone="success"
+          hint={stats.bestDrop != null ? 'vs previous' : 'no drops'}
+        />
+
+        <BentoTile colSpan={4}>
+          <TileHeader
+            eyebrow="Last activity"
+            icon={<Clock className="h-4 w-4" />}
+            title={<LiveTimeLine iso={recent} />}
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            Created {new Date(p.created_at).toLocaleDateString()} · #{p.id}
+          </p>
+        </BentoTile>
+      </BentoGrid>
+
+      <BentoGrid cols={6}>
+        <BentoTile colSpan={6}>
+          <TileHeader
+            eyebrow="Stores"
+            title={`${p.stores.length} linked`}
+          />
+          <div className="mt-3 space-y-1.5">
             {p.stores.length === 0 ? (
               <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
                 No stores linked yet.
@@ -216,44 +251,113 @@ export function ProductDetailPage() {
             <div className="pt-2">
               <AddStoreCard productId={p.id} />
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </BentoTile>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Price history</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <PriceChart
-            logs={logs.data ?? []}
-            stores={p.stores}
-            symbol={symbol}
+        <BentoTile colSpan={6}>
+          <TileHeader
+            eyebrow="Price history"
+            title="Across all stores"
+            icon={<LineChartIcon className="h-4 w-4" />}
           />
-        </CardContent>
-      </Card>
+          <div className="mt-3">
+            <PriceChart
+              logs={logs.data ?? []}
+              stores={p.stores}
+              symbol={symbol}
+            />
+          </div>
+        </BentoTile>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent logs</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <LogsTable
-            logs={(logs.data ?? []).slice(0, 100)}
-            stores={p.stores}
-            symbol={symbol}
-          />
-        </CardContent>
-      </Card>
+        <BentoTile colSpan={6}>
+          <TileHeader eyebrow="Recent logs" title="Newest first" />
+          <div className="mt-3">
+            <LogsTable
+              logs={(logs.data ?? []).slice(0, 100)}
+              stores={p.stores}
+              symbol={symbol}
+            />
+          </div>
+        </BentoTile>
+      </BentoGrid>
     </div>
   )
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function LiveTimeLine({ iso }: { iso: string | null }) {
+  const live = useLiveTime(iso)
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{value}</span>
+    <span className={cn(iso ? '' : 'text-muted-foreground')}>
+      {iso ? live : 'never scraped'}
+    </span>
+  )
+}
+
+interface DetailStats {
+  low: number | null
+  lowStore: string | null
+  inStockStores: number
+  bestDrop: number | null
+}
+
+function computeStats(p: Product): DetailStats {
+  let low: number | null = null
+  let lowStore: string | null = null
+  let inStockStores = 0
+  let bestDrop: number | null = null
+  for (const s of p.stores) {
+    const effective =
+      s.manual_price ?? s.latest_discounted_price ?? s.latest_price
+    if (effective != null && (low == null || effective < low)) {
+      low = effective
+      lowStore = s.store_name
+    }
+    const stock = s.manual_stock_status ?? s.latest_stock_status
+    if (stock === 'in_stock' || stock === 'limited') inStockStores += 1
+    if (
+      s.latest_price_delta != null &&
+      s.latest_price_delta < 0 &&
+      (bestDrop == null || s.latest_price_delta < bestDrop)
+    ) {
+      bestDrop = s.latest_price_delta
+    }
+  }
+  return { low, lowStore, inStockStores, bestDrop }
+}
+
+function mostRecentScrape(p: Product): string | null {
+  let newest: string | null = null
+  for (const s of p.stores) {
+    if (!s.latest_scraped_at) continue
+    if (!newest || s.latest_scraped_at > newest) newest = s.latest_scraped_at
+  }
+  return newest
+}
+
+function DetailSkeleton() {
+  return (
+    <div className="space-y-6">
+      <Skeleton className="h-8 w-64" />
+      <BentoGrid cols={6}>
+        <BentoTile colSpan={2} rowSpan={2} padded={false}>
+          <Skeleton className="h-full w-full min-h-[220px] rounded-none" />
+        </BentoTile>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <BentoTile key={i}>
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="mt-4 h-8 w-32" />
+          </BentoTile>
+        ))}
+      </BentoGrid>
     </div>
   )
 }
+
+function ErrorState({ text }: { text: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
+      {text}
+    </div>
+  )
+}
+
