@@ -1,6 +1,25 @@
 import { http } from './client'
 import type { Product, ProductStoreSummary } from './types'
 
+export interface QuickAddResult {
+  url: string
+  status: 'ok' | 'error'
+  product_id?: number | null
+  product_store_id?: number | null
+  name?: string | null
+  store_id?: number | null
+  store_name?: string | null
+  platform?: string | null
+  price?: number | null
+  discounted_price?: number | null
+  stock_status?: string | null
+  error?: string | null
+}
+
+export interface QuickAddResponse {
+  results: QuickAddResult[]
+}
+
 export const productsApi = {
   list: async (categoryId?: number): Promise<Product[]> => {
     const { data } = await http.get<Product[]>('/products/', {
@@ -76,5 +95,16 @@ export const productsApi = {
 
   clearOverride: async (productId: number, storeLinkId: number): Promise<void> => {
     await http.delete(`/products/${productId}/stores/${storeLinkId}/override`)
+  },
+
+  quickAdd: async (body: {
+    urls: string[]
+    category_id?: number | null
+  }): Promise<QuickAddResponse> => {
+    const { data } = await http.post<QuickAddResponse>(
+      '/products/quick-add',
+      body,
+    )
+    return data
   },
 }

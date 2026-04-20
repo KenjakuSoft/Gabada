@@ -83,3 +83,84 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+/* ── Bento + live-feel motion primitives ───────────────────────────────── */
+
+@keyframes gbd-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+@keyframes gbd-fade-up {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes gbd-pop {
+  0%   { transform: scale(0.96); opacity: 0; }
+  60%  { transform: scale(1.02); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes gbd-pulse-ring {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 50%, transparent); }
+  70%  { box-shadow: 0 0 0 10px color-mix(in oklch, var(--primary) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 0%, transparent); }
+}
+@keyframes gbd-flash {
+  0%   { background-color: color-mix(in oklch, var(--accent) 80%, transparent); }
+  100% { background-color: transparent; }
+}
+@keyframes gbd-toast-in {
+  from { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.98); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@utility gbd-skeleton {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--muted) 60%, transparent) 0%,
+    color-mix(in oklch, var(--muted) 100%, transparent) 50%,
+    color-mix(in oklch, var(--muted) 60%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: gbd-shimmer 1.4s linear infinite;
+  border-radius: var(--radius-md);
+}
+@utility gbd-reveal {
+  animation: gbd-fade-up 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@utility gbd-pop {
+  animation: gbd-pop 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@utility gbd-pulse-ring {
+  animation: gbd-pulse-ring 1.8s ease-out infinite;
+}
+@utility gbd-flash {
+  animation: gbd-flash 1200ms ease-out;
+}
+@utility gbd-toast-in {
+  animation: gbd-toast-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Stagger helpers — apply to children of .gbd-stagger with nth-child delay */
+.gbd-stagger > * { animation: gbd-fade-up 420ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.gbd-stagger > *:nth-child(1)  { animation-delay:  20ms; }
+.gbd-stagger > *:nth-child(2)  { animation-delay:  60ms; }
+.gbd-stagger > *:nth-child(3)  { animation-delay: 100ms; }
+.gbd-stagger > *:nth-child(4)  { animation-delay: 140ms; }
+.gbd-stagger > *:nth-child(5)  { animation-delay: 180ms; }
+.gbd-stagger > *:nth-child(6)  { animation-delay: 220ms; }
+.gbd-stagger > *:nth-child(7)  { animation-delay: 260ms; }
+.gbd-stagger > *:nth-child(8)  { animation-delay: 300ms; }
+.gbd-stagger > *:nth-child(9)  { animation-delay: 340ms; }
+.gbd-stagger > *:nth-child(10) { animation-delay: 380ms; }
+.gbd-stagger > *:nth-child(n+11) { animation-delay: 400ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gbd-stagger > *,
+  .gbd-reveal,
+  .gbd-pop,
+  .gbd-toast-in {
+    animation: none !important;
+  }
+  .gbd-skeleton { animation: none; }
+  .gbd-pulse-ring { animation: none; }
+}
