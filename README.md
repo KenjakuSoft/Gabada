@@ -1015,6 +1015,29 @@ you can open in Notepad.
 
 ## 📋 Changelog
 
+### `v0.7.0` — 2026-04-20
+
+> Bento-driven UI overhaul — every page is now interactive and live
+
+**Added**
+- **Bento primitive set** at `frontend-web/src/components/ui/bento.tsx` — `BentoGrid` (1–6 col), `BentoTile` (colSpan, rowSpan, `interactive`, tone variants built on `color-mix(in oklch,...)` gradients), and `TileHeader` (eyebrow/title/icon/action slots) used across every page
+- **`StatTile`** (`components/ui/stat-tile.tsx`) with requestAnimationFrame count-up animation for numeric stats and loading skeleton support
+- **`useLiveTime` hook** (`hooks/useLiveTime.ts`) — self-scheduling relative timestamps ("2m ago" → "3m ago" without re-renders elsewhere)
+- **`useCountUp` hook** (`hooks/useCountUp.ts`) — rAF cubic-ease number interpolation for price deltas and counters
+- **Toast system** (`components/ui/toaster.tsx`) — module-level singleton replacing inline banner errors across Save, Import, Scrape, Probe, and Store CRUD flows
+- **Skeleton primitive** (`components/ui/skeleton.tsx`) for loading placeholders that mirror real tile geometry
+- **Activity auto-refresh** — the feed now polls every 30 s with cascading `gbd-stagger` reveals and tinted drop/rise borders per row
+- **Dirty-state save gating** in Settings — the Save button stays disabled until form values diverge from server state, with an "unsaved changes" badge in the page header
+
+**Changed**
+- **All 9 pages** (Home, ProductDetail, AddProduct, Stores, Import, Probe, Activity, Settings, NotFound) rebuilt on bento tiles with per-page stat rows, tone-keyed primary/accent/success tiles, and consistent `PageHeader` actions
+- **Product images** switched from `object-cover` crop to `object-contain` with padded gradient surfaces (`aspect-[4/3]` on tiles, `min-h-[260px]` on the detail hero) — full product visible regardless of native aspect ratio
+- **StoresPage** — per-store aggregate tiles computed client-side (product count, in-stock, drops, last scrape) with availability progress bars
+- **ImportPage** — source-picker with interactive WooCommerce / File tiles; both import flows now show live Found/Selected/Mapped counters
+- **ProbePage** — request tile + Platform/Candidates stat tiles; candidates table sticky-header with variant/dealer/struck flag badges
+
+---
+
 ### `v0.6.0` — 2026-04-19
 
 > Plain-text site registry — add shops without touching engine code
