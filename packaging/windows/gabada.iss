@@ -1,6 +1,9 @@
 #define MyAppName "Gabada"
 #define MyAppPublisher "Gabada"
-#define MyAppVersion "0.1.0"
+
+#ifndef MyAppVersion
+  #define MyAppVersion "0.1.0"
+#endif
 
 #ifndef SourceDir
   #define SourceDir "..\dist\Gabada"

@@ -1,6 +1,7 @@
 param(
     [switch]$SkipFrontendBuild,
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    [string]$AppVersion
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,9 +78,17 @@ if (-not $ISCC) {
 }
 
 Write-Host "Creating installer..."
-& $ISCC `
-    "/DSourceDir=$DistDir\Gabada" `
-    "/DOutputDir=$OutputDir" `
-    $InstallerScript
+$ISCCArgs = @(
+    "/DSourceDir=$DistDir\Gabada",
+    "/DOutputDir=$OutputDir"
+)
+
+if ($AppVersion) {
+    $ISCCArgs += "/DMyAppVersion=$AppVersion"
+}
+
+$ISCCArgs += $InstallerScript
+
+& $ISCC @ISCCArgs
 
 Write-Host "Installer created in $OutputDir"
