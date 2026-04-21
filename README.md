@@ -34,6 +34,7 @@ Gabada is a local product price and stock tracker for online stores. It scrapes 
 | **Price history** | Store every scrape and surface meaningful price and stock changes in the activity feed. |
 | **Selector Lab** | Scan a page, review candidate selectors, test them, and save a profile for the store. |
 | **Probe tools** | Inspect the scraper output for a product URL before you save or rescrape anything. |
+| **Safer extraction** | Cross-check suspicious price and stock matches against the main product area before accepting them. |
 | **Bulk import** | Bring in products from WooCommerce, CSV, Excel, or PDF. |
 | **Category management** | Organize products with category names and colors. |
 | **Launcher included** | Start the app with [start_gabada.bat](./start_gabada.bat) on Windows after setup. |
@@ -123,6 +124,7 @@ Selector Lab is the main recovery tool for stores that scrape badly.
 Use it when:
 - a page has multiple unrelated numbers
 - installment or payment-plan amounts confuse the scraper
+- stock buttons or availability labels are mixed with unrelated product cards
 - a site layout changed
 - you want to save a more reliable selector profile for a domain
 
@@ -137,6 +139,7 @@ Typical workflow:
 7. Save it for the store or domain
 
 For noisy pages, turn on the helpful filtering and ignore payment or related-product rows.
+If the scraper auto-corrects a suspicious match, Probe and Selector Lab surface a review warning so you can verify what changed.
 
 ## Scraping Model
 
@@ -153,6 +156,8 @@ Important behavior:
 - per-site selector overrides can be saved by hostname
 - `price` is treated as the regular or original price
 - `discounted_price` is treated as the current sale price
+- price and stock selection prefer the main product area over related, payment, or header/footer noise
+- suspicious matches can be reviewed and auto-corrected before they are saved
 
 ## Site Profiles
 
