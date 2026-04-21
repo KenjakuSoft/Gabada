@@ -157,6 +157,8 @@ class ScrapeResult(BaseModel):
     raw_price: Optional[str] = None
     raw_discounted: Optional[str] = None
     raw_dealer: Optional[str] = None
+    review_status: str = "ok"
+    review_notes: list[str] = Field(default_factory=list)
     error: Optional[str] = None
 
 

@@ -15,6 +15,7 @@ import {
   Target,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { ScrapeReviewNotice } from '@/components/scraper/ScrapeReviewNotice'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -788,6 +789,9 @@ export function SelectorLabPage() {
                 <div className="mt-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
                   {displayed.error}
                 </div>
+              ) : null}
+              {displayed ? (
+                <ScrapeReviewNotice result={displayed} className="mt-4" />
               ) : null}
             </BentoTile>
           </BentoGrid>

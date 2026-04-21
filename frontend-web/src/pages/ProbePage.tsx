@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { StatTile } from '@/components/ui/stat-tile'
 import { toast } from '@/components/ui/toast-store'
+import { ScrapeReviewNotice } from '@/components/scraper/ScrapeReviewNotice'
 import { scraperApi } from '@/api'
 import { useCurrencySymbol } from '@/hooks/useSettings'
 import { formatMoney } from '@/lib/utils'
@@ -216,6 +217,7 @@ function ProbeResults({
               <span>{e.error}</span>
             </div>
           ) : null}
+          <ScrapeReviewNotice result={e} className="mt-4" />
         </BentoTile>
 
         <BentoTile colSpan={3}>

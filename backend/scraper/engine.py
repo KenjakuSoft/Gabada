@@ -19,7 +19,7 @@ import os
 import re
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from playwright.async_api import (
     async_playwright,
@@ -358,6 +358,13 @@ _RAW_PRICE_SPEC_RE = re.compile(
     re.IGNORECASE,
 )
 _RAW_PLAIN_NUMBER_RE = re.compile(r"^\d+(?:[.,]\d{1,2})?$")
+_RAW_PRICE_NOISE_RE = re.compile(
+    r"\b(koko|installments?|monthly|per\s*month|credit\s*card|interest[\s-]?free|"
+    r"today|buy\s*now,\s*pay\s*later|related|recommend|similar|upsell|cross[\s-]?sell|"
+    r"hotline|call|contact|whatsapp)\b",
+    re.IGNORECASE,
+)
+_RAW_PHONE_RE = re.compile(r"(?:\+\d{1,3}\s*)?(?:\d[\s-]?){7,}")
 
 
 def _raw_price_signal(raw: Optional[str]) -> int:
@@ -375,9 +382,179 @@ def _raw_price_signal(raw: Optional[str]) -> int:
         score += 1
     if _RAW_PLAIN_NUMBER_RE.fullmatch(text):
         score -= 2
+    if _RAW_PRICE_NOISE_RE.search(text):
+        score -= 5
+    if _RAW_PHONE_RE.search(text) and not _RAW_PRICE_CURRENCY_RE.search(text):
+        score -= 6
     if _RAW_PRICE_SPEC_RE.search(text) and not _RAW_PRICE_HINT_RE.search(text):
         score -= 5
     return score
+
+
+def _prices_close(left: Optional[float], right: Optional[float]) -> bool:
+    if left is None or right is None:
+        return False
+    tolerance = max(5.0, min(abs(left), abs(right)) * 0.025)
+    return abs(left - right) <= tolerance
+
+
+def _price_ratio(left: Optional[float], right: Optional[float]) -> float:
+    if left is None or right is None:
+        return float("inf")
+    low = min(abs(left), abs(right))
+    if low <= 0:
+        return float("inf")
+    return max(abs(left), abs(right)) / low
+
+
+def _adopt_smart_prices(target: ScrapeResult, smart: ScrapeResult) -> None:
+    target.price = smart.price
+    target.discounted_price = smart.discounted_price
+    target.raw_price = smart.raw_price
+    target.raw_discounted = smart.raw_discounted
+    if smart.dealer_price is not None:
+        target.dealer_price = smart.dealer_price
+        target.raw_dealer = smart.raw_dealer
+
+
+def _add_review_note(result: ScrapeResult, message: str) -> None:
+    if message not in result.review_notes:
+        result.review_notes.append(message)
+
+
+def _review_result_with_smart_scan(
+    result: ScrapeResult,
+    smart: ScrapeResult,
+    smart_data: dict[str, Any],
+    *,
+    has_custom: bool,
+    structured_price_locked: bool,
+) -> ScrapeResult:
+    if smart.price is None:
+        return _normalize_scrape_result(result)
+
+    main = smart_data.get("main") or {}
+    main_score = int(main.get("score", 0) or 0)
+    if main_score < 24:
+        return _normalize_scrape_result(result)
+
+    reviewed = result.model_copy(deep=True)
+    smart_current = smart.discounted_price if smart.discounted_price is not None else smart.price
+    result_current = (
+        reviewed.discounted_price if reviewed.discounted_price is not None else reviewed.price
+    )
+    smart_regular = smart.price if smart.discounted_price is not None else None
+    result_regular = reviewed.price if reviewed.discounted_price is not None else None
+    current_raw = (
+        reviewed.raw_discounted if reviewed.discounted_price is not None else reviewed.raw_price
+    )
+
+    current_mismatch = result_current is None or not _prices_close(result_current, smart_current)
+    regular_mismatch = False
+    if smart_regular is not None:
+        regular_mismatch = result_regular is None or not _prices_close(result_regular, smart_regular)
+    elif reviewed.discounted_price is not None:
+        regular_mismatch = not _prices_close(reviewed.price, smart_current)
+
+    major_divergence = (
+        _price_ratio(result_current, smart_current) >= 1.25
+        or (
+            smart_regular is not None
+            and _price_ratio(result_regular, smart_regular) >= 1.25
+        )
+    )
+    suspicious_current_raw = _raw_price_signal(current_raw) <= 1
+    suspicious_regular_raw = reviewed.discounted_price is not None and _raw_price_signal(reviewed.raw_price) <= 1
+
+    should_adopt = False
+    reasons: list[str] = []
+
+    if result_current is None:
+        should_adopt = True
+        reasons.append("missing current price")
+    elif current_mismatch and (
+        has_custom
+        or not structured_price_locked
+        or suspicious_current_raw
+        or major_divergence
+    ):
+        should_adopt = True
+        reasons.append("current price disagrees with smart scan")
+
+    if smart_regular is not None:
+        if result_regular is None and (has_custom or not structured_price_locked):
+            should_adopt = True
+            reasons.append("missing regular price")
+        elif regular_mismatch and (
+            has_custom
+            or not structured_price_locked
+            or suspicious_regular_raw
+            or major_divergence
+        ):
+            should_adopt = True
+            reasons.append("regular price disagrees with smart scan")
+    elif reviewed.discounted_price is not None and (
+        has_custom
+        or not structured_price_locked
+        or suspicious_current_raw
+        or suspicious_regular_raw
+        or major_divergence
+    ):
+        should_adopt = True
+        reasons.append("smart scan found no sale pair")
+
+    if should_adopt:
+        previous_current = result_current
+        previous_regular = result_regular
+        logger.info(
+            "Price review replaced extracted pair with smart scan: reasons=%s extracted=(%s,%s) smart=(%s,%s)",
+            ", ".join(dict.fromkeys(reasons)),
+            reviewed.price,
+            reviewed.discounted_price,
+            smart.price,
+            smart.discounted_price,
+        )
+        _adopt_smart_prices(reviewed, smart)
+        reviewed.review_status = "corrected"
+        _add_review_note(
+            reviewed,
+            "Review corrected a suspicious price selection using the main product price scan.",
+        )
+        _add_review_note(
+            reviewed,
+            "Reason: " + ", ".join(dict.fromkeys(reasons)),
+        )
+        if previous_current is not None and not _prices_close(previous_current, smart_current):
+            _add_review_note(
+                reviewed,
+                f"Current price changed from {previous_current:.2f} to {smart_current:.2f}.",
+            )
+        if (
+            smart_regular is not None
+            and previous_regular is not None
+            and not _prices_close(previous_regular, smart_regular)
+        ):
+            _add_review_note(
+                reviewed,
+                f"Regular price changed from {previous_regular:.2f} to {smart_regular:.2f}.",
+            )
+
+    if smart.dealer_price is not None and (
+        reviewed.dealer_price is None
+        or (
+            (_price_ratio(reviewed.dealer_price, smart.dealer_price) >= 1.25)
+            and (has_custom or _raw_price_signal(reviewed.raw_dealer) <= 1)
+        )
+    ):
+        reviewed.dealer_price = smart.dealer_price
+        reviewed.raw_dealer = smart.raw_dealer
+        reviewed.review_status = "corrected"
+        _add_review_note(
+            reviewed,
+            "Review replaced the dealer price with a stronger smart-scan match.",
+        )
+
+    return _normalize_scrape_result(reviewed)
 
 
 def _should_replace_price(
@@ -851,6 +1028,45 @@ _SMART_SCAN_JS = r"""() => {
 
     const priceRe = /^(?:(?:Rs\.?|LKR|USD|AED|SGD|MYR|INR|PHP|BDT|\$|€|£|¥|฿|₹|₽)\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:\/=|Rs\.?|LKR|USD)?$/i;
 
+    function escapeCss(value) {
+        if (window.CSS && typeof window.CSS.escape === 'function') {
+            return window.CSS.escape(value);
+        }
+        return String(value).replace(/([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1');
+    }
+
+    function elementSelector(el) {
+        if (!el || !el.tagName) return '';
+        if (el.id) return '#' + escapeCss(el.id);
+
+        const parts = [];
+        let cur = el;
+        for (let i = 0; i < 4 && cur && cur.tagName; i++, cur = cur.parentElement) {
+            let part = cur.tagName.toLowerCase();
+            const classes = typeof cur.className === 'string'
+                ? cur.className.split(/\s+/).filter(Boolean).slice(0, 2)
+                : [];
+            if (classes.length > 0) {
+                part += '.' + classes.map(escapeCss).join('.');
+            }
+            if (cur.parentElement) {
+                const siblings = Array.from(cur.parentElement.children)
+                    .filter((sibling) => sibling.tagName === cur.tagName);
+                if (siblings.length > 1) {
+                    const index = siblings.indexOf(cur);
+                    if (index >= 0) {
+                        part += `:nth-of-type(${index + 1})`;
+                    }
+                }
+            }
+            parts.unshift(part);
+            if (classes.length > 0) {
+                break;
+            }
+        }
+        return parts.join(' > ');
+    }
+
     let scanRoot = document.body;
     for (const selector of PRODUCT_ROOT_SELECTORS) {
         const found = document.querySelector(selector);
@@ -924,6 +1140,7 @@ _SMART_SCAN_JS = r"""() => {
 
             candidates.push({
                 text: fragment,
+                node_text: normalizedText,
                 value: num,
                 score,
                 font_size: fontSize,
@@ -933,6 +1150,8 @@ _SMART_SCAN_JS = r"""() => {
                 variant_alt: variantAlt(el),
                 near_sale_signal: nearSaleSignal,
                 dom_path: domPath(el),
+                selector: elementSelector(el),
+                tag: el.tagName ? el.tagName.toLowerCase() : null,
             });
         }
     }
@@ -1474,6 +1693,186 @@ def _lab_profile(url: str) -> Optional[SelectorLabProfile]:
     )
 
 
+def _selector_lab_sort_key(candidate: SelectorLabCandidate) -> tuple[Any, ...]:
+    return (
+        -candidate.confidence,
+        0 if candidate.source == "probe" else 1,
+        -(candidate.value or 0),
+        candidate.selector,
+        candidate.sample or candidate.text or "",
+    )
+
+
+def _selector_lab_candidate_from_item(
+    item: dict[str, Any],
+    *,
+    source_fallback: str = "dom",
+) -> Optional[SelectorLabCandidate]:
+    selector = str(item.get("selector") or "").strip()
+    if not selector:
+        return None
+    kind_hints = list(
+        dict.fromkeys(
+            str(kind)
+            for kind in (item.get("kind_hints") or [])
+            if kind
+        )
+    )
+    return SelectorLabCandidate(
+        selector=selector,
+        dom_path=item.get("dom_path"),
+        text=item.get("text"),
+        sample=item.get("sample") or item.get("text"),
+        value=item.get("value"),
+        stock_status=item.get("stock_status"),
+        tag=item.get("tag"),
+        source=str(item.get("source") or source_fallback),
+        confidence=int(item.get("confidence", 0) or 0),
+        kind_hints=kind_hints,
+        reason=item.get("reason"),
+    )
+
+
+def _smart_scan_candidate_matches(
+    item: dict[str, Any],
+    target: Optional[dict[str, Any]],
+) -> bool:
+    if not target:
+        return False
+    item_selector = str(item.get("selector") or "")
+    target_selector = str(target.get("selector") or "")
+    if (
+        item_selector
+        and target_selector
+        and item_selector == target_selector
+        and item.get("value") == target.get("value")
+    ):
+        return True
+    if (
+        item.get("dom_path")
+        and item.get("dom_path") == target.get("dom_path")
+        and item.get("value") == target.get("value")
+    ):
+        return True
+    return (
+        item.get("text") == target.get("text")
+        and item.get("value") == target.get("value")
+    )
+
+
+def _smart_scan_candidate_to_selector_candidate(
+    item: dict[str, Any],
+    *,
+    main: Optional[dict[str, Any]],
+    original: Optional[dict[str, Any]],
+    dealer: Optional[dict[str, Any]],
+) -> Optional[SelectorLabCandidate]:
+    selector = str(item.get("selector") or "").strip()
+    if not selector:
+        return None
+
+    is_main = _smart_scan_candidate_matches(item, main)
+    is_original = _smart_scan_candidate_matches(item, original)
+    is_dealer = _smart_scan_candidate_matches(item, dealer) or bool(item.get("dealer"))
+    has_original = original is not None
+
+    kind_hints: list[str] = []
+    reason_parts: list[str] = []
+    confidence = int(item.get("score", 0) or 0) + 42
+
+    if is_dealer:
+        kind_hints.append("dealer_price")
+        reason_parts.append(
+            "Probe matched dealer price"
+            if _smart_scan_candidate_matches(item, dealer)
+            else "Probe dealer price candidate"
+        )
+        confidence += 18
+    else:
+        if is_original:
+            kind_hints.append("price")
+            reason_parts.append("Probe matched original/compare price")
+            confidence += 20
+        elif is_main:
+            kind_hints.append("discounted_price" if has_original else "price")
+            reason_parts.append(
+                "Probe matched current sale price"
+                if has_original
+                else "Probe matched current main price"
+            )
+            confidence += 24
+        else:
+            if bool(item.get("struck")) or bool(item.get("near_sale_signal")):
+                kind_hints.append("price")
+            if not kind_hints:
+                kind_hints.extend(["price", "discounted_price"])
+            reason_parts.append("Probe price-like node")
+
+    if bool(item.get("variant_alt")) and not (is_main or is_original or is_dealer):
+        confidence -= 14
+        reason_parts.append("variant option")
+
+    kind_hints = list(dict.fromkeys(kind_hints))
+    text = str(item.get("node_text") or "").strip() or None
+    sample = str(item.get("text") or "").strip() or text
+    reason = "; ".join(dict.fromkeys(reason_parts)) or None
+    return SelectorLabCandidate(
+        selector=selector,
+        dom_path=item.get("dom_path"),
+        text=text,
+        sample=sample,
+        value=item.get("value"),
+        stock_status=None,
+        tag=item.get("tag"),
+        source="probe",
+        confidence=max(0, min(99, confidence)),
+        kind_hints=kind_hints,
+        reason=reason,
+    )
+
+
+def _merge_selector_lab_candidates(
+    *candidate_groups: list[SelectorLabCandidate],
+) -> list[SelectorLabCandidate]:
+    merged: dict[tuple[str, Any, Any, str], SelectorLabCandidate] = {}
+    for group in candidate_groups:
+        for candidate in group:
+            key = (
+                candidate.selector,
+                candidate.value,
+                candidate.stock_status,
+                candidate.sample or candidate.text or "",
+            )
+            existing = merged.get(key)
+            if existing is None:
+                merged[key] = candidate.model_copy(deep=True)
+                continue
+
+            existing.kind_hints = list(
+                dict.fromkeys([*existing.kind_hints, *candidate.kind_hints])
+            )
+            existing.confidence = max(existing.confidence, candidate.confidence)
+            if candidate.source == "probe" and existing.source != "probe":
+                existing.source = "probe"
+            if candidate.text and (
+                not existing.text or len(candidate.text) > len(existing.text)
+            ):
+                existing.text = candidate.text
+            if candidate.sample and not existing.sample:
+                existing.sample = candidate.sample
+            if candidate.dom_path and not existing.dom_path:
+                existing.dom_path = candidate.dom_path
+            if candidate.tag and not existing.tag:
+                existing.tag = candidate.tag
+            if candidate.reason and candidate.reason != existing.reason:
+                if existing.reason:
+                    existing.reason = f"{existing.reason}; {candidate.reason}"
+                else:
+                    existing.reason = candidate.reason
+
+    return sorted(merged.values(), key=_selector_lab_sort_key)[:180]
+
+
 def _suggest_selector_assignments(
     candidates: list[SelectorLabCandidate],
     profile: Optional[SelectorLabProfile],
@@ -1497,8 +1896,34 @@ def _suggest_selector_assignments(
 
     def best_candidate(field: str) -> Optional[SelectorLabCandidate]:
         ranked = [candidate for candidate in candidates if field in candidate.kind_hints]
-        preferred = [candidate for candidate in ranked if not is_noise(candidate)]
-        return (preferred or ranked or [None])[0]
+        if not ranked:
+            return None
+
+        def rank(candidate: SelectorLabCandidate) -> tuple[int, ...]:
+            hints = list(dict.fromkeys(candidate.kind_hints))
+            exact = hints == [field]
+            matched = "matched" in (candidate.reason or "").lower()
+            return (
+                0 if is_noise(candidate) else 1,
+                1 if exact else 0,
+                1 if matched else 0,
+                1 if len(hints) == 1 else 0,
+                1 if candidate.source == "probe" else 0,
+                candidate.confidence,
+                int(candidate.value or 0),
+            )
+
+        ranked.sort(key=rank, reverse=True)
+        candidate = ranked[0]
+        hints = list(dict.fromkeys(candidate.kind_hints))
+        reason = (candidate.reason or "").lower()
+        if field == "discounted_price" and hints != [field]:
+            if "current sale price" not in reason:
+                return None
+        if field == "dealer_price" and hints != [field]:
+            if "dealer price" not in reason:
+                return None
+        return candidate
 
     suggested: dict[str, Optional[str]] = {
         "wait_for": profile.wait_for if profile else None,
@@ -1549,29 +1974,34 @@ async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabRespon
         response.current_profile = current_profile
 
         lab = await _run_selector_lab(page)
-        response.platform = lab.get("platform", "generic") or "generic"
+        smart = await _run_smart_scan(page)
+        response.platform = (
+            lab.get("platform")
+            or smart.get("platform")
+            or "generic"
+        )
         response.root_selector = lab.get("root_selector")
-        response.candidates = [
-            SelectorLabCandidate(
-                selector=str(item.get("selector") or ""),
-                dom_path=item.get("dom_path"),
-                text=item.get("text"),
-                sample=item.get("sample"),
-                value=item.get("value"),
-                stock_status=item.get("stock_status"),
-                tag=item.get("tag"),
-                source=str(item.get("source") or "dom"),
-                confidence=int(item.get("confidence", 0) or 0),
-                kind_hints=[
-                    str(kind)
-                    for kind in (item.get("kind_hints") or [])
-                    if kind
-                ],
-                reason=item.get("reason"),
-            )
+        lab_candidates = [
+            candidate
             for item in (lab.get("candidates") or [])
-            if item.get("selector")
+            if (candidate := _selector_lab_candidate_from_item(item))
         ]
+        probe_candidates = [
+            candidate
+            for item in (smart.get("candidates") or [])
+            if (
+                candidate := _smart_scan_candidate_to_selector_candidate(
+                    item,
+                    main=smart.get("main"),
+                    original=smart.get("original"),
+                    dealer=smart.get("dealer"),
+                )
+            )
+        ]
+        response.candidates = _merge_selector_lab_candidates(
+            probe_candidates,
+            lab_candidates,
+        )
 
         effective = _apply_site_profile(url, config)
         response.extracted = await scrape_with_open_page(
@@ -1596,6 +2026,11 @@ async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabRespon
             )
         if response.root_selector:
             response.notes.append(f"Detected product root: {response.root_selector}")
+        if probe_candidates:
+            response.notes.append(
+                f"Merged {len(probe_candidates)} probe smart-scan candidate"
+                f"{'' if len(probe_candidates) == 1 else 's'} into Selector Lab."
+            )
         response.notes.append(
             f"Collected {len(response.candidates)} selector candidate"
             f"{'' if len(response.candidates) == 1 else 's'}."
@@ -1607,9 +2042,8 @@ async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabRespon
         await context.close()
 
 
-async def _try_smart_scan(page: Page) -> ScrapeResult:
+def _smart_scan_result_from_data(data: dict[str, Any]) -> ScrapeResult:
     result = ScrapeResult()
-    data = await _run_smart_scan(page)
     main = data.get("main")
     original = data.get("original")
     dealer = data.get("dealer")
@@ -1631,13 +2065,19 @@ async def _try_smart_scan(page: Page) -> ScrapeResult:
         result.raw_dealer = dealer.get("text")
 
     result.stock_status = data.get("stock", "unknown") or "unknown"
+    return _normalize_scrape_result(result)
+
+
+async def _try_smart_scan(page: Page) -> ScrapeResult:
+    data = await _run_smart_scan(page)
+    result = _smart_scan_result_from_data(data)
 
     if result.price:
         logger.info(
             "Smart scan hit: price=%s disc=%s dealer=%s",
             result.price, result.discounted_price, result.dealer_price,
         )
-    return _normalize_scrape_result(result)
+    return result
 
 
 # ── Strategy 4: Custom selectors (user-configured override) ──────────────────
@@ -1907,10 +2347,12 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
         result = await _try_json_ld(page)
         if not result.price:
             result = await _try_microdata(page)
+        structured_price_locked = result.price is not None
+        smart_data = await _run_smart_scan(page)
+        smart = _smart_scan_result_from_data(smart_data)
 
         # Smart scan fills gaps. Never overwrites a JSON-LD / microdata price.
         if not result.price or result.stock_status in (None, "unknown"):
-            smart = await _try_smart_scan(page)
             if not result.price and smart.price:
                 # Preserve title from earlier strategies if they found one
                 preserved_title = result.title
@@ -1946,6 +2388,13 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
         ])
         if has_custom:
             result = await _apply_custom(page, config, result)
+        result = _review_result_with_smart_scan(
+            result,
+            smart,
+            smart_data,
+            has_custom=has_custom,
+            structured_price_locked=structured_price_locked,
+        )
 
         if not result.stock_status:
             result.stock_status = "unknown"
@@ -2053,9 +2502,11 @@ async def scrape_with_open_page(
     result = await _try_json_ld(page)
     if not result.price:
         result = await _try_microdata(page)
+    structured_price_locked = result.price is not None
+    smart_data = await _run_smart_scan(page)
+    smart = _smart_scan_result_from_data(smart_data)
 
     if not result.price or result.stock_status in (None, "unknown"):
-        smart = await _try_smart_scan(page)
         if not result.price and smart.price:
             preserved_title = result.title
             result = smart
@@ -2087,6 +2538,13 @@ async def scrape_with_open_page(
     ])
     if has_custom:
         result = await _apply_custom(page, config, result)
+    result = _review_result_with_smart_scan(
+        result,
+        smart,
+        smart_data,
+        has_custom=has_custom,
+        structured_price_locked=structured_price_locked,
+    )
 
     if not result.stock_status:
         result.stock_status = "unknown"

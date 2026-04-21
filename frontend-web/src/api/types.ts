@@ -121,6 +121,8 @@ export interface ScrapeResult {
   raw_price: string | null
   raw_discounted: string | null
   raw_dealer: string | null
+  review_status: string
+  review_notes: string[]
   error: string | null
 }
 
