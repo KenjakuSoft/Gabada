@@ -907,6 +907,10 @@ _SMART_SCAN_JS = r"""() => {
             && parseFloat(s.opacity || '1') > 0;
     }
 
+    function normalizeText(value) {
+        return (value || '').replace(/\s+/g, ' ').trim();
+    }
+
     const PRODUCT_ROOT_SELECTORS = [
         'div.summary.entry-summary',
         '.summary.entry-summary',
@@ -925,6 +929,7 @@ _SMART_SCAN_JS = r"""() => {
     ];
 
     const BAD = /cart|basket|total|checkout|order-summary|order-total|mini-cart|ship(?:ping)?|emi|monthly|instalment|installment|per[\s-]?month|easy[\s-]?pay|flexi|interest[\s-]?free|per[\s-]?week|payment[\s-]?plan|visa|mastercard|credit[\s-]?card|debit[\s-]?card|card[\s-]?offer|related|similar|recommend|cross[\s-]?sell|upsell|recently[\s-]?viewed|featured|bundle|combo|accessories|meta|posted_in|nav|menu|header|footer|inst-zone|inst-line|rx-inst|payhere|koko|mintpay|klarna|afterpay|affirm|zippay|downsale|sale-badge|discount-badge|sticker|badge/i;
+    const BAD_TEXT = /\b(related\s+products?|you\s+might\s+also\s+be\s+interested|similar\s+products?|recommended\s+products?|customers\s+also\s+bought|frequently\s+bought\s+together|recently\s+viewed|featured\s+products?|bundle\s+deal|combo\s+deal)\b/i;
     const STRIKE = /\b(retail|was|compare|original|old|regular|strike|crossed|del-price|list-price|ty-list-price|ty-price-retail|mrp|rrp|old-price|price-old|was-price|price-was|sale-was|line-through|strikethrough|previous-price|msrp|rrp-price|price-old-amount)\b/i;
     const DEALER = /dealer|wholesale|trade|b2b|your[\s-]?price|distributor|reseller/i;
     const PRICE_CONTEXT = /\bprice\b|\bcost\b|\bamount\b/i;
@@ -975,6 +980,8 @@ _SMART_SCAN_JS = r"""() => {
         for (let i = 0; i < 6 && cur; i++, cur = cur.parentElement) {
             const info = ((cur.className || '') + ' ' + (cur.id || '')).toString();
             if (BAD.test(info)) return true;
+            const text = normalizeText((cur.innerText || cur.textContent || '').slice(0, 1200));
+            if (text && BAD_TEXT.test(text)) return true;
         }
         return false;
     }
@@ -1012,6 +1019,178 @@ _SMART_SCAN_JS = r"""() => {
             if (PROD_CONTEXT.test(info))  score += 6;
         }
         return score;
+    }
+
+    function structurePart(el) {
+        if (!el || !el.tagName) return '';
+        let part = el.tagName.toLowerCase();
+        const classes = typeof el.className === 'string'
+            ? el.className.split(/\s+/).filter(Boolean).slice(0, 2)
+            : [];
+        if (classes.length > 0) {
+            part += '.' + classes.map(escapeCss).join('.');
+        }
+        if (el.parentElement) {
+            const siblings = Array.from(el.parentElement.children)
+                .filter((sibling) => sibling.tagName === el.tagName);
+            if (siblings.length > 1) {
+                const index = siblings.indexOf(el);
+                if (index >= 0) {
+                    part += `:nth-of-type(${index + 1})`;
+                }
+            }
+        }
+        return part;
+    }
+
+    function lineageKeys(el) {
+        const keys = [];
+        let cur = el ? el.parentElement : null;
+        for (let i = 0; i < 5 && cur; i++, cur = cur.parentElement) {
+            const key = structurePart(cur);
+            if (key) keys.push(key);
+        }
+        return keys;
+    }
+
+    function sharedLineageScore(left, right) {
+        if (!Array.isArray(left) || !Array.isArray(right)) return 0;
+        let best = 0;
+        for (let i = 0; i < left.length; i++) {
+            for (let j = 0; j < right.length; j++) {
+                if (left[i] && left[i] === right[j]) {
+                    const score = Math.max(0, 10 - ((i + j) * 2));
+                    if (score > best) best = score;
+                }
+            }
+        }
+        return best;
+    }
+
+    function relativeGap(mainValue, candidateValue) {
+        if (!(mainValue > 0) || !(candidateValue > 0)) return Number.POSITIVE_INFINITY;
+        return Math.abs(candidateValue - mainValue) / mainValue;
+    }
+
+    function originalPairScore(main, candidate) {
+        if (!main || !candidate) return Number.NEGATIVE_INFINITY;
+        if (candidate.dealer || candidate.variant_alt || !(candidate.value > main.value)) {
+            return Number.NEGATIVE_INFINITY;
+        }
+        const lineage = sharedLineageScore(main.lineage, candidate.lineage);
+        let score = lineage * 12;
+        if (candidate.struck) score += 18;
+        if (candidate.near_sale_signal) score += 10;
+        score += Math.min(candidate.score || 0, main.score || 0) / 3;
+        const gap = relativeGap(main.value, candidate.value);
+        if (gap <= 0.05) score += 14;
+        else if (gap <= 0.15) score += 10;
+        else if (gap <= 0.35) score += 6;
+        else if (gap <= 0.75) score += 2;
+        else score -= Math.min(18, Math.floor(gap * 8));
+        return score;
+    }
+
+    function publicCandidate(candidate) {
+        if (!candidate) return null;
+        return {
+            text: candidate.text,
+            node_text: candidate.node_text,
+            value: candidate.value,
+            score: candidate.score,
+            font_size: candidate.font_size,
+            font_weight: candidate.font_weight,
+            struck: candidate.struck,
+            dealer: candidate.dealer,
+            variant_alt: candidate.variant_alt,
+            near_sale_signal: candidate.near_sale_signal,
+            dom_path: candidate.dom_path,
+            selector: candidate.selector,
+            tag: candidate.tag,
+        };
+    }
+
+    function stockStatusFromText(text, opts = {}) {
+        const disabled = !!opts.disabled;
+        const value = normalizeText(text).toLowerCase();
+        if (!value) return null;
+        if (/pre[\s-]?order|pre[\s-]?sale|coming[\s-]?soon|notify[\s-]?me|notify[\s-]?when/.test(value)) {
+            return 'preorder';
+        }
+        if (/back[\s-]?order|on[\s-]?backorder/.test(value)) {
+            return 'backorder';
+        }
+        if (/out.?of.?stock|sold.?out|unavailable|not available/.test(value)) {
+            return 'out_of_stock';
+        }
+        if (disabled && /add|buy|cart|order|purchase|checkout|shop.?now/.test(value)) {
+            return 'out_of_stock';
+        }
+        if (/limited[\s-]?stock|low[\s-]?stock|few[\s-]?left/.test(value)) {
+            return 'limited';
+        }
+        if (/add|buy|cart|order|purchase|checkout|shop.?now|in[\s-]?stock|\bavailable\b/.test(value)) {
+            return 'in_stock';
+        }
+        return null;
+    }
+
+    function collectStockSignal(scope) {
+        if (!scope || !scope.querySelectorAll) return null;
+        const signals = [];
+        let order = 0;
+        const controlSelectors = [
+            'button',
+            'input[type="submit"]',
+            '[role="button"]',
+            '.add-to-cart',
+            '.buy-now',
+            '#add-to-cart-button',
+            '[data-action*="cart"]',
+            '[class*="add-to-cart"]',
+            '[class*="buy-now"]',
+            'a[href*="cart"]',
+        ];
+        for (const sel of controlSelectors) {
+            for (const el of scope.querySelectorAll(sel)) {
+                if (!visible(el) || inBadContext(el)) continue;
+                const text = normalizeText((el.innerText || el.textContent || el.value || '') + '');
+                if (!text) continue;
+                const disabled = !!el.disabled || el.getAttribute('disabled') !== null || el.getAttribute('aria-disabled') === 'true';
+                const status = stockStatusFromText(text, { disabled });
+                if (!status) continue;
+                let score = 34;
+                if (el.tagName === 'BUTTON' || el.tagName === 'INPUT') score += 18;
+                if (/add[\s-]?to[\s-]?cart|buy[\s-]?now|order[\s-]?now|purchase|checkout|shop.?now/.test(text.toLowerCase())) score += 20;
+                if (/out.?of.?stock|sold.?out|pre[\s-]?order|back[\s-]?order/.test(text.toLowerCase())) score += 20;
+                if (disabled) score += 6;
+                signals.push({ status, score, order: order++ });
+            }
+        }
+
+        const hintSelectors = [
+            '[class*="stock"]',
+            '[class*="avail"]',
+            '[id*="stock"]',
+            '[id*="avail"]',
+            '[data-stock]',
+            '[data-availability]',
+        ];
+        for (const sel of hintSelectors) {
+            for (const el of scope.querySelectorAll(sel)) {
+                if (!visible(el) || inBadContext(el)) continue;
+                const text = normalizeText((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('data-stock') || '') + ' ' + (el.getAttribute('data-availability') || ''));
+                if (!text) continue;
+                const status = stockStatusFromText(text);
+                if (!status) continue;
+                let score = 28;
+                if (/stock|availability/.test(text.toLowerCase())) score += 18;
+                signals.push({ status, score, order: order++ });
+            }
+        }
+
+        signals.sort((a, b) => b.score - a.score || a.order - b.order);
+        return signals[0] || null;
     }
 
     function domPath(el) {
@@ -1152,6 +1331,8 @@ _SMART_SCAN_JS = r"""() => {
                 dom_path: domPath(el),
                 selector: elementSelector(el),
                 tag: el.tagName ? el.tagName.toLowerCase() : null,
+                lineage: lineageKeys(el),
+                _el: el,
             });
         }
     }
@@ -1176,84 +1357,67 @@ _SMART_SCAN_JS = r"""() => {
 
     let original = null;
     if (main) {
-        // Preferred: an explicitly struck candidate greater than main.
-        original = candidates
-            .filter(c => c.struck && !c.dealer && !c.variant_alt && c.value > main.value)
-            .sort((a, b) => b.value - a.value)[0] || null;
-        // Fallback: when no strike was detected (sites that style "was" price
-        // via color/size instead of line-through — e.g. MD store), pick the
-        // largest non-dealer candidate that sits near a sale signal AND is
-        // meaningfully greater than the main price (≥5% higher).
-        if (!original) {
-            original = candidates
-                .filter(c =>
-                    !c.dealer
-                    && !c.variant_alt
-                    && c.near_sale_signal
-                    && c.value > main.value * 1.05
-                    && c.value <= main.value * 10)
-                .sort((a, b) => b.value - a.value)[0] || null;
-        }
+        const rankedOriginals = candidates
+            .map((candidate, index) => ({
+                ...candidate,
+                _i: index,
+                _pair_score: originalPairScore(main, candidate),
+                _lineage_score: sharedLineageScore(main.lineage, candidate.lineage),
+                _gap: relativeGap(main.value, candidate.value),
+            }))
+            .filter(candidate =>
+                !candidate.dealer
+                && !candidate.variant_alt
+                && candidate.value > main.value
+                && candidate.value <= main.value * 10
+                && (candidate.struck || candidate.near_sale_signal))
+            .sort((a, b) =>
+                   b._pair_score - a._pair_score
+                || b._lineage_score - a._lineage_score
+                || Number(a._gap) - Number(b._gap)
+                || b.score - a.score
+                || a._i - b._i
+            );
+        original = rankedOriginals[0] || null;
     }
 
     const dealer = candidates
         .filter(c => c.dealer)
         .sort((a, b) => b.score - a.score || b.font_size - a.font_size)[0] || null;
 
-    // Stock detection (order matters: pre-order/back-order before in-stock,
-    // because preorder buttons often also say "Order now").
     let stock = 'unknown';
-    const btnSelectors = [
-        'button[name*="cart"]', 'button[class*="cart"]', 'button[id*="cart"]',
-        'button[class*="buy"]', 'button[id*="buy"]',
-        'button[class*="preorder"]', 'button[class*="pre-order"]',
-        'input[type="submit"][value*="cart" i]',
-        'input[type="submit"][value*="buy" i]',
-        'input[type="submit"][value*="pre-order" i]',
-        '.add-to-cart', '.buy-now', '#add-to-cart-button',
-        '[data-action="add-to-cart"]', 'button[class*="add"]',
-        'a[class*="add-to-cart"]',
-        '.preorder-button', '.pre-order-button', '.notify-me',
-    ];
-    const buttonRoots = [scanRoot];
-    if (scanRoot !== document.body) buttonRoots.push(document);
-    outer: for (const root of buttonRoots) {
-        for (const sel of btnSelectors) {
-            for (const btn of root.querySelectorAll(sel)) {
-                if (!visible(btn)) continue;
-                const t = ((btn.textContent || btn.value || '') + '').toLowerCase();
-                if (/pre[\s-]?order|pre[\s-]?sale|coming[\s-]?soon|notify[\s-]?me|notify[\s-]?when/.test(t)) {
-                    stock = 'preorder'; break outer;
-                }
-                if (/back[\s-]?order|on[\s-]?backorder/.test(t)) {
-                    stock = 'backorder'; break outer;
-                }
-                if (/out.?of.?stock|sold.?out|unavailable/.test(t)) {
-                    stock = 'out_of_stock'; break outer;
-                }
-                if (btn.disabled || btn.getAttribute('disabled') !== null) {
-                    stock = 'out_of_stock'; break outer;
-                }
-                if (/add|buy|cart|order|purchase|checkout|shop.?now/.test(t)) {
-                    stock = 'in_stock'; break outer;
-                }
-            }
+    const stockScopes = [];
+    const seenScopes = new Set();
+    function pushStockScope(scope) {
+        if (!scope || !scope.querySelectorAll || seenScopes.has(scope)) return;
+        seenScopes.add(scope);
+        stockScopes.push(scope);
+    }
+    if (main && main._el) {
+        let cur = main._el.parentElement;
+        for (let i = 0; i < 6 && cur; i++, cur = cur.parentElement) {
+            pushStockScope(cur);
+        }
+    }
+    pushStockScope(scanRoot);
+    if (document.body) pushStockScope(document.body);
+
+    for (const scope of stockScopes) {
+        const signal = collectStockSignal(scope);
+        if (signal) {
+            stock = signal.status;
+            break;
         }
     }
     if (stock === 'unknown') {
-        const text = (((scanRoot && scanRoot.innerText) || document.body.innerText || '')).toLowerCase();
-        // Order: explicit out-of-stock / preorder signals before "in stock",
-        // because many preorder / back-order pages also advertise "available".
-        if (/\bout[\s-]of[\s-]stock\b|\bsold[\s-]out\b|\bnot available\b/.test(text))
-            stock = 'out_of_stock';
-        else if (/\bpre[\s-]?order\b|\bpre[\s-]?sale\b|\bcoming[\s-]soon\b|\bnotify[\s-]me[\s-]when\b/.test(text))
-            stock = 'preorder';
-        else if (/\bback[\s-]?order\b|\bon[\s-]?backorder\b/.test(text))
-            stock = 'backorder';
-        else if (/\blimited[\s-]stock\b|\blow[\s-]stock\b/.test(text))
-            stock = 'limited';
-        else if (/\bin[\s-]stock\b/.test(text))
-            stock = 'in_stock';
+        for (const scope of stockScopes) {
+            const text = normalizeText((scope.innerText || '')).toLowerCase();
+            const status = stockStatusFromText(text);
+            if (status) {
+                stock = status;
+                break;
+            }
+        }
     }
 
     // Platform fingerprint
@@ -1273,8 +1437,10 @@ _SMART_SCAN_JS = r"""() => {
     } catch (_) {}
 
     return {
-        main, original, dealer,
-        candidates: candidates.slice(0, 30),
+        main: publicCandidate(main),
+        original: publicCandidate(original),
+        dealer: publicCandidate(dealer),
+        candidates: candidates.slice(0, 30).map(publicCandidate),
         stock,
         platform,
     };
@@ -1425,7 +1591,8 @@ _SELECTOR_LAB_JS = r"""() => {
         '[itemtype*="Product"]',
     ];
 
-    const BAD = /cart|basket|checkout|order-summary|order-total|mini-cart|related|similar|recommend|upsell|cross[\s-]?sell|recently[\s-]?viewed|featured|bundle|combo|accessories|meta|nav|menu|header|footer|breadcrumb|review|rating/i;
+    const BAD = /cart|basket|checkout|order-summary|order-total|mini-cart|related|similar|recommend|upsell|cross[\s-]?sell|recently[\s-]?viewed|featured|bundle|combo|accessories|meta|nav|menu|header|footer|breadcrumb|review|rating|contact|whatsapp|call|delivery|follow|support|social|topbar|banner|modal|popup|drawer|payment|koko|mintpay|payhere|webxpay|hidden|fixed/i;
+    const BAD_TEXT = /\b(related\s+products?|you\s+might\s+also\s+be\s+interested|call\s+us\s+anytime|quick\s+response\s+available|island\s+wide\s+express\s+delivery|contact\s+us|product\s+inquiry|expert\s+support|frequently\s+bought\s+together|customers\s+also\s+bought)\b/i;
     const PRICE_FRAGMENT_RE = /(?:rs\.?|lkr|\u0dbb\u0dd4|\/=|\$|€|£|¥|฿|₹|₽)?\s*\d[\d,]*(?:\.\d{1,2})?(?:\s*(?:\/=|rs\.?|lkr))?/ig;
     const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|aed|sgd|myr|inr|php|bdt)\b|\u0dbb\u0dd4|\/=|\$|€|£|¥|฿|₹|₽)/i;
     const PRICE_HINT = /\b(?:price|amount|cost|now|current|selling|our[\s-]?price|unit[\s-]?price|per[\s-]?unit|offer)\b/i;
@@ -1436,9 +1603,10 @@ _SELECTOR_LAB_JS = r"""() => {
     const STOCK_HINT = /\b(?:stock|availability|available|sold[\s-]?out|out[\s-]?of[\s-]?stock|pre[\s-]?order|back[\s-]?order|limited|low[\s-]?stock|notify me)\b/i;
     const STOCK_OUT = /\b(?:out[\s-]?of[\s-]?stock|sold[\s-]?out|unavailable|not available)\b/i;
     const STOCK_IN = /\b(?:in[\s-]?stock|available|add[\s-]?to[\s-]?cart|buy[\s-]?now|order[\s-]?now|purchase)\b/i;
-    const STOCK_LIMITED = /\b(?:limited|low[\s-]?stock|few left)\b/i;
+    const STOCK_LIMITED = /\b(?:limited[\s-]?stock|limited[\s-]?availability|low[\s-]?stock|few[\s-]?left|only\s+\d+\s+left|last\s+\d+)\b/i;
     const STOCK_PREORDER = /\b(?:pre[\s-]?order|pre[\s-]?sale|coming soon|notify me)\b/i;
     const STOCK_BACKORDER = /\b(?:back[\s-]?order|on[\s-]?backorder)\b/i;
+    const STOCK_PAYMENT_NOISE = /\b(?:installments?|credit[\s-]?card|debit[\s-]?card|webxpay|bank[\s-]?rates|buy[\s-]?now,\s*pay[\s-]?later|koko|mintpay|payhere)\b/i;
     const IMAGE_HINT = /product|gallery|main|primary|featured|zoom|hero/i;
 
     let root = document.body;
@@ -1449,6 +1617,39 @@ _SELECTOR_LAB_JS = r"""() => {
             root = found;
             rootSelector = selector;
             break;
+        }
+    }
+
+    function looksLikeFocusedRoot(el) {
+        if (!el || !el.querySelectorAll) return false;
+        const text = normalizeText(el.innerText || '');
+        if (!text || text.length < 80 || text.length > 15000) return false;
+        if (!el.querySelector('h1, [itemprop="name"], .product_title, .product-title, .product-name')) {
+            return false;
+        }
+        if (!el.querySelector('button, input[type="submit"], [role="button"], .add-to-cart, .buy-now, #add-to-cart-button, [data-action*="cart"]')) {
+            return false;
+        }
+        return /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/.test(text) || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d{3,}/i.test(text);
+    }
+
+    if (root === document.body) {
+        const titleCandidates = Array.from(document.querySelectorAll('h1, [itemprop="name"], .product_title, .product-title, .product-name'))
+            .filter((el) => visible(el))
+            .map((el) => ({
+                el,
+                text: normalizeText(el.textContent || ''),
+            }))
+            .filter((item) => item.text.length >= 12)
+            .sort((a, b) => b.text.length - a.text.length);
+        const anchor = titleCandidates.length > 0 ? titleCandidates[0].el : null;
+        let cur = anchor;
+        for (let i = 0; i < 6 && cur; i += 1, cur = cur.parentElement) {
+            if (looksLikeFocusedRoot(cur)) {
+                root = cur;
+                rootSelector = elementSelector(cur) || 'focused-product-root';
+                break;
+            }
         }
     }
 
@@ -1470,12 +1671,28 @@ _SELECTOR_LAB_JS = r"""() => {
     function parseStock(text) {
         const value = normalizeText(text).toLowerCase();
         if (!value) return null;
+        if (STOCK_PAYMENT_NOISE.test(value)) return null;
         if (STOCK_OUT.test(value)) return 'out_of_stock';
         if (STOCK_PREORDER.test(value)) return 'preorder';
         if (STOCK_BACKORDER.test(value)) return 'backorder';
         if (STOCK_LIMITED.test(value)) return 'limited';
         if (STOCK_IN.test(value)) return 'in_stock';
         return null;
+    }
+
+    function inBadContext(el) {
+        let cur = el;
+        for (let i = 0; i < 6 && cur; i += 1, cur = cur.parentElement) {
+            const meta = [
+                cur.className || '',
+                cur.id || '',
+                cur.getAttribute && cur.getAttribute('aria-label') || '',
+            ].join(' ');
+            if (BAD.test(meta)) return true;
+            const text = normalizeText((cur.innerText || cur.textContent || '').slice(0, 1200));
+            if (text && BAD_TEXT.test(text)) return true;
+        }
+        return false;
     }
 
     function addCandidate(store, seen, el, data) {
@@ -1576,14 +1793,24 @@ _SELECTOR_LAB_JS = r"""() => {
             el.getAttribute('name') || '',
         ].join(' ');
 
-        if (BAD.test(meta)) continue;
+        if (BAD.test(meta) || inBadContext(el)) continue;
 
         if (text && (STOCK_HINT.test(text) || tag === 'button' || tag === 'a' || tag === 'input')) {
-            const stockStatus = parseStock(text + ' ' + meta);
+            const disabled = !!el.disabled || el.getAttribute('disabled') !== null || el.getAttribute('aria-disabled') === 'true';
+            let stockStatus = parseStock(text + ' ' + meta);
+            if (!stockStatus && disabled && /add[\s-]?to[\s-]?cart|buy[\s-]?now|order[\s-]?now|purchase|checkout/i.test(text)) {
+                stockStatus = 'out_of_stock';
+            }
             if (stockStatus) {
                 let confidence = 44;
                 if (/stock|availability/i.test(text)) confidence += 22;
                 if (tag === 'button' || tag === 'input') confidence += 12;
+                if (/add[\s-]?to[\s-]?cart|buy[\s-]?now|order[\s-]?now|purchase|checkout|out[\s-]?of[\s-]?stock|sold[\s-]?out|pre[\s-]?order|notify me/i.test(text)) {
+                    confidence += 22;
+                }
+                if (/\bavailable\b/i.test(text) && !/\bstock|availability\b/i.test(text) && tag !== 'button' && tag !== 'input') {
+                    confidence -= 12;
+                }
                 addCandidate(candidates, seen, el, {
                     text,
                     sample: text,
