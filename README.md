@@ -102,7 +102,8 @@ Double-click [start_gabada.bat](./start_gabada.bat).
 
 What it does:
 - uses `backend\.venv\Scripts\python.exe`
-- checks `http://127.0.0.1:8000/health`
+- runs the desktop launcher at `backend\desktop_launcher.py`
+- reuses an already running Gabada window if one is active
 - opens the app in your browser after the backend is ready
 
 **Manual start**
@@ -112,10 +113,50 @@ cd backend
 .\.venv\Scripts\python.exe -m uvicorn main:app --port 8000
 ```
 
+**Desktop-style local launcher**
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe desktop_launcher.py
+```
+
 Open:
 - App: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 - API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - Health: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
+
+## Installer Builds
+
+Gabada now has a Windows packaging setup for a real desktop-style install flow.
+
+Packaging files live in [packaging/windows](./packaging/windows):
+- `gabada.spec` - PyInstaller app bundle definition
+- `build_installer.ps1` - build script for the app bundle and installer
+- `gabada.iss` - Inno Setup installer definition
+
+Build a Windows installer with:
+
+```powershell
+cd packaging\windows
+.\build_installer.ps1
+```
+
+What the script does:
+- builds the frontend bundle
+- installs packaging requirements
+- downloads a local Playwright Chromium bundle for packaging
+- creates a desktop app bundle with PyInstaller
+- creates `GabadaSetup.exe` if Inno Setup 6 is installed
+
+Installed app behavior:
+- runs as a normal desktop app and opens the browser automatically
+- keeps user data in a writable app-data folder instead of the install folder
+- bundles the frontend and default scraper profiles with the app
+
+Typical runtime data locations:
+- Windows: `%APPDATA%\Gabada`
+- macOS: `~/Library/Application Support/Gabada`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/Gabada`
 
 ## Selector Lab
 
