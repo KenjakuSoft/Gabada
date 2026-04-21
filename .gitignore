@@ -39,3 +39,9 @@ desktop.ini
 # Logs
 *.log
 gcm-diagnose.log
+
+# Packaging outputs
+.cache/playwright-browsers/
+packaging/windows/build/
+packaging/windows/dist/
+packaging/windows/output/

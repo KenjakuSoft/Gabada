@@ -39,6 +39,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import urlparse
 
+from app_paths import site_profiles_path
+
 if sys.version_info >= (3, 11):
     import tomllib  # type: ignore[import-not-found]
 else:  # pragma: no cover - project targets 3.11+
@@ -48,7 +50,7 @@ from database.models import ScrapeConfig, ScrapeSelectors
 
 logger = logging.getLogger(__name__)
 
-SITES_TOML_PATH = os.path.join(os.path.dirname(__file__), "sites.toml")
+SITES_TOML_PATH = str(site_profiles_path())
 
 
 # ── Platform defaults ────────────────────────────────────────────────────────

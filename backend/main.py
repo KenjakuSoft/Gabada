@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
+from app_paths import configure_runtime_environment, frontend_dist_dir
 from database.db import init_db
 from scraper.engine import start_browser, stop_browser
 from scheduler.jobs import start_scheduler, stop_scheduler
@@ -51,16 +52,23 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_runtime_environment()
+    logger.info("Lifespan startup: begin")
     await init_db()
+    logger.info("Lifespan startup: database ready")
     await start_browser()
+    logger.info("Lifespan startup: Playwright ready")
     await start_scheduler()
+    logger.info("Lifespan startup: scheduler ready")
     yield
     stop_scheduler()
     await stop_browser()
+    logger.info("Lifespan shutdown: complete")
 
 
 app = FastAPI(title="Gabada API", version="0.1.0", lifespan=lifespan)
@@ -88,8 +96,7 @@ app.include_router(settings.router, prefix=API_PREFIX)
 async def health():
     return {"status": "ok"}
 
-
-_FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend-web" / "dist"
+_FRONTEND_DIST = frontend_dist_dir()
 if _FRONTEND_DIST.is_dir():
     app.mount(
         "/",

@@ -21,6 +21,7 @@ import asyncio
 import logging
 from typing import Any, Optional
 
+from app_paths import configure_runtime_environment, resolve_storage_state_path
 from playwright.async_api import (
     async_playwright,
     Browser,
@@ -55,6 +56,7 @@ _lock = asyncio.Lock()
 
 async def start_browser() -> None:
     global _playwright, _browser
+    configure_runtime_environment()
     _playwright = await async_playwright().start()
     _browser = await _playwright.chromium.launch(
         headless=True,
@@ -2447,9 +2449,14 @@ async def _open_context(config: ScrapeConfig) -> BrowserContext:
         },
     )
 
-    if config.storage_state_path and os.path.exists(config.storage_state_path):
-        options["storage_state"] = config.storage_state_path
-        logger.info("Using storage_state from %s", config.storage_state_path)
+    if config.storage_state_path:
+        try:
+            storage_state = resolve_storage_state_path(config.storage_state_path)
+        except Exception:
+            storage_state = None
+        if storage_state and storage_state.exists():
+            options["storage_state"] = str(storage_state)
+            logger.info("Using storage_state from %s", storage_state)
 
     context = await _browser.new_context(**options)
     try:
@@ -2816,10 +2823,10 @@ async def save_login_state(
         # Give the user up to wait_seconds to complete login in the opened window.
         await asyncio.sleep(wait_seconds)
 
-        os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
-        await context.storage_state(path=save_path)
+        target_path = resolve_storage_state_path(save_path, for_write=True)
+        await context.storage_state(path=str(target_path))
         final_url = page.url
-        return {"saved_to": save_path, "final_url": final_url}
+        return {"saved_to": str(target_path), "final_url": final_url}
     finally:
         await browser.close()
         await pw.stop()

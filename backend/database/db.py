@@ -1,7 +1,7 @@
 import aiosqlite
-import os
+from app_paths import database_path
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "gabada.db")
+DB_PATH = str(database_path())
 
 async def get_db() -> aiosqlite.Connection:
     db = await aiosqlite.connect(DB_PATH)
