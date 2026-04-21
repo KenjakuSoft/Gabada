@@ -148,6 +148,18 @@ What the script does:
 - creates a desktop app bundle with PyInstaller
 - creates `GabadaSetup.exe` if Inno Setup 6 is installed
 
+GitHub Releases can also attach the Windows installer and a portable ZIP automatically through the workflow at [.github/workflows/windows-release.yml](./.github/workflows/windows-release.yml).
+
+### GitHub Releases
+
+Publishing a GitHub Release triggers the Windows packaging workflow automatically.
+
+Release assets:
+- `GabadaSetup-<tag>-windows-x64.exe`
+- `Gabada-<tag>-windows-x64.zip`
+
+You can also run the workflow manually from GitHub Actions and provide an existing tag.
+
 Installed app behavior:
 - runs as a normal desktop app and opens the browser automatically
 - keeps user data in a writable app-data folder instead of the install folder
