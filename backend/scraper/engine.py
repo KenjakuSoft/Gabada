@@ -141,9 +141,23 @@ _STOCK_BACKORDER_RE = re.compile(
     r"\b(back[\s-]?order(?:ed)?|on\s+back\s*order|onbackorder)\b",
     re.IGNORECASE,
 )
+_STOCK_CALL_PRICE_RE = re.compile(
+    r"\b(call\s+for\s+price|call\s+us\s+for\s+price|ask\s+for\s+price|"
+    r"price\s+on\s+request)\b",
+    re.IGNORECASE,
+)
+_STOCK_CONTACT_RE = re.compile(
+    r"\b(contact\s+us|contact\s+for\s+price|message\s+us|whatsapp\s+us|"
+    r"inquire\s+now|send\s+inquiry)\b",
+    re.IGNORECASE,
+)
+_STOCK_DISCONTINUED_RE = re.compile(
+    r"\b(discontinued|end\s+of\s+life|eol)\b",
+    re.IGNORECASE,
+)
 _STOCK_OUT_RE = re.compile(
     r"\b(out[\s-]?of[\s-]?stock|sold[\s-]?out|no\s+stock|not\s+available|"
-    r"unavailable|discontinued|outofstock|notify\s+me\s+when|"
+    r"unavailable|outofstock|notify\s+me\s+when|"
     r"email\s+me\s+when)\b",
     re.IGNORECASE,
 )
@@ -169,6 +183,12 @@ def _parse_stock(raw: Optional[str]) -> str:
         return "in_stock"
     # Order matters: preorder / backorder BEFORE in-stock, because those pages
     # often also show "available" / "add to cart" copy.
+    if _STOCK_CALL_PRICE_RE.search(t):
+        return "call_for_price"
+    if _STOCK_CONTACT_RE.search(t):
+        return "contact_store"
+    if _STOCK_DISCONTINUED_RE.search(t):
+        return "discontinued"
     if _STOCK_PREORDER_RE.search(t):
         return "preorder"
     if _STOCK_BACKORDER_RE.search(t):
@@ -188,6 +208,8 @@ def _parse_stock(raw: Optional[str]) -> str:
 
 def _stock_from_schema_url(url: str) -> str:
     url = url.lower()
+    if "discontinued" in url:
+        return "discontinued"
     if "preorder" in url or "presale" in url:
         return "preorder"
     if "backorder" in url:
@@ -1735,6 +1757,9 @@ _SELECTOR_LAB_JS = r"""() => {
     const DEALER_HINT = /\b(?:dealer|trade|wholesale|b2b|distributor|reseller)\b/i;
     const SPEC_HINT = /\b(?:weight|warranty|model|sku|code|serial|capacity|voltage|memory|mhz|ghz|gb|tb|cm|mm|inch|size|days?|years?|weeks?|months?|spec|specifications?)\b/i;
     const STOCK_HINT = /\b(?:stock|availability|available|sold[\s-]?out|out[\s-]?of[\s-]?stock|pre[\s-]?order|back[\s-]?order|limited|low[\s-]?stock|notify me)\b/i;
+    const STOCK_CALL_PRICE = /\b(?:call\s+for\s+price|ask\s+for\s+price|price\s+on\s+request)\b/i;
+    const STOCK_CONTACT = /\b(?:contact\s+us|contact\s+for\s+price|message\s+us|whatsapp\s+us|inquire\s+now|send\s+inquiry)\b/i;
+    const STOCK_DISCONTINUED = /\b(?:discontinued|end\s+of\s+life|eol)\b/i;
     const STOCK_OUT = /\b(?:out[\s-]?of[\s-]?stock|sold[\s-]?out|unavailable|not available)\b/i;
     const STOCK_IN = /\b(?:in[\s-]?stock|available|add[\s-]?to[\s-]?cart|buy[\s-]?now|order[\s-]?now|purchase)\b/i;
     const STOCK_LIMITED = /\b(?:limited[\s-]?stock|limited[\s-]?availability|low[\s-]?stock|few[\s-]?left|only\s+\d+\s+left|last\s+\d+)\b/i;
@@ -1806,6 +1831,9 @@ _SELECTOR_LAB_JS = r"""() => {
         const value = normalizeText(text).toLowerCase();
         if (!value) return null;
         if (STOCK_PAYMENT_NOISE.test(value)) return null;
+        if (STOCK_CALL_PRICE.test(value)) return 'call_for_price';
+        if (STOCK_CONTACT.test(value)) return 'contact_store';
+        if (STOCK_DISCONTINUED.test(value)) return 'discontinued';
         if (STOCK_OUT.test(value)) return 'out_of_stock';
         if (STOCK_PREORDER.test(value)) return 'preorder';
         if (STOCK_BACKORDER.test(value)) return 'backorder';

@@ -43,6 +43,11 @@ export function WooImport() {
   }
 
   const previewMutation = useMutation({
+    onMutate: () => {
+      setPreview([])
+      setSelected(new Set())
+      toast.info('Checking WooCommerce catalog', 'This can take a bit on large stores')
+    },
     mutationFn: () =>
       importApi.wooPreview({
         credentials,
@@ -55,8 +60,22 @@ export function WooImport() {
       setSelected(new Set(data.map((p) => p.woo_id)))
       toast.success(`Found ${data.length} products across the full catalog`)
     },
-    onError: () =>
-      toast.error('Preview failed', 'Check credentials and site URL'),
+    onError: (error) => {
+      const detail =
+        typeof error === 'object' &&
+        error &&
+        'response' in error &&
+        typeof error.response === 'object' &&
+        error.response &&
+        'data' in error.response &&
+        typeof error.response.data === 'object' &&
+        error.response.data &&
+        'detail' in error.response.data &&
+        typeof error.response.data.detail === 'string'
+          ? error.response.data.detail
+          : 'Check credentials and site URL'
+      toast.error('Preview failed', detail)
+    },
   })
 
   const importMutation = useMutation({
@@ -168,7 +187,13 @@ export function WooImport() {
           label="Found"
           value={preview.length}
           icon={<Package className="h-4 w-4" />}
-          hint={preview.length > 0 ? 'in full catalog preview' : 'run preview'}
+          hint={
+            previewMutation.isPending
+              ? 'loading full catalog'
+              : preview.length > 0
+                ? 'in full catalog preview'
+                : 'run preview'
+          }
           tone={preview.length > 0 ? 'primary' : 'default'}
         />
         <StatTile

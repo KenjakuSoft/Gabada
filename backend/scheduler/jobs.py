@@ -69,6 +69,18 @@ async def reschedule() -> None:
     _install_job(cron_expr, timezone, enabled)
 
 
+def pause_scheduler() -> None:
+    if _scheduler.running:
+        _scheduler.pause()
+
+
+async def resume_scheduler() -> None:
+    if _scheduler.running:
+        _scheduler.resume()
+    else:
+        await start_scheduler()
+
+
 def stop_scheduler() -> None:
     if _scheduler.running:
         _scheduler.shutdown(wait=False)

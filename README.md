@@ -21,9 +21,11 @@ Gabada is a local-first product price and stock tracker for online stores. It sc
 
 - Track the same product across multiple stores
 - Log regular, sale, and dealer pricing over time
+- Store document-only details such as warranty alongside price snapshots
 - Review stock changes in a live activity feed
 - Import from WooCommerce, CSV, Excel, and PDF
-- Preview document rows before importing anything
+- Match document rows to existing Gabada products before importing anything
+- Export or import a shareable backup when moving or updating an install
 - Use Probe and Selector Lab to diagnose and fix scraper issues
 - Save selector profiles per domain for more reliable future syncs
 - Run locally with a simple launcher or Windows release build
@@ -36,7 +38,8 @@ Gabada is a local-first product price and stock tracker for online stores. It sc
 | Price history | Save each scrape and surface meaningful price and stock changes in Activity. |
 | Selector Lab | Inspect selectors, assign fields, test extraction, and save reusable domain profiles. |
 | Probe | Preview what the scraper sees before you commit a product or profile change. |
-| Import tools | Bring in large catalogs from WooCommerce or product documents with live preview. |
+| Import tools | Bring in large catalogs from WooCommerce or product documents with full preview, row targeting, and selective updates. |
+| Backup & restore | Export a shareable backup archive and import it into another Gabada install with a safety copy first. |
 | Safer extraction | Cross-check suspicious price or stock matches against stronger page signals before saving them. |
 | Categories | Organize products with category names and colors. |
 | Windows launcher | Start the app with [start_gabada.bat](./start_gabada.bat) after setup. |
@@ -51,7 +54,7 @@ Gabada is a local-first product price and stock tracker for online stores. It sc
 - `Probe` for scrape diagnostics
 - `Selector Lab` for selector discovery, testing, and profile saving
 - `Activity` for recent price and stock changes
-- `Settings` for app settings and site profile editing
+- `Settings` for app settings, backups, and site profile editing
 
 ## Import Workflow
 
@@ -61,12 +64,14 @@ Gabada now supports full-catalog style imports for both WooCommerce and document
 
 - preview the store catalog before importing
 - fetch more than the first page instead of stopping at 100
+- handle broken or repeating Woo pagination more safely
 - select only the products you want to bring in
 
 ### Document import
 
 - upload `CSV`, `XLSX`, `XLS`, or `PDF`
-- parse the full table instead of only a tiny sample
+- parse the full document instead of only a tiny sample
+- search across the parsed document before committing anything
 - map columns for:
   - product name
   - product URL
@@ -74,12 +79,15 @@ Gabada now supports full-catalog style imports for both WooCommerce and document
   - retail price
   - sale price
   - dealer price
+  - warranty
   - stock
 - choose the destination store and optional category
 - select exactly which rows should be imported
-- update an existing product/store match when the document row belongs to the same store
+- attach each row to an existing Gabada product when needed
+- update the exact product/store link when the selected store already exists on that product
+- create a new store link on an existing product if the store is not linked yet
 
-Rows without a real product URL can still be imported as inactive store links for price-list style tracking until a live product page is attached later.
+Rows without a real product URL can still be imported as inactive store links for price-list style tracking until a live product page is attached later. Availability text such as `call for price`, `contact us`, or `discontinued` is also preserved instead of collapsing into plain `unknown`.
 
 ## Selector Lab
 
@@ -104,6 +112,18 @@ Typical flow:
 7. Save it for the domain
 
 If Gabada auto-corrects a suspicious scrape, Probe and Selector Lab surface a review warning so you can confirm what changed.
+
+## Backup & Restore
+
+Gabada can now move a filled setup between installs without starting over.
+
+- `Settings -> Backup, restore, and share` exports a shareable backup archive
+- the archive includes the SQLite database and saved scraper profiles
+- importing a backup replaces the current local library on that machine
+- before import, Gabada creates a safety copy of the current database
+- plain `.db` / `.sqlite` files can also be imported when that is all you have
+
+Installed desktop builds already keep user data in the app-data folder, so upgrading to a newer release should continue using the same library automatically.
 
 ## Quick Start
 
@@ -240,6 +260,7 @@ Stack:
 - Backend: FastAPI, Playwright, APScheduler, aiosqlite, Pydantic
 - Frontend: React 19, Vite 8, TypeScript, Tailwind v4, TanStack Query
 - Database: SQLite at `backend/gabada.db`
+- Installed builds move the database into the platform app-data folder automatically
 
 ## Scraping Model
 
@@ -257,6 +278,7 @@ Important behavior:
 - per-domain selector overrides can be saved
 - `price` is treated as the regular or original price
 - `discounted_price` is treated as the current sale price
+- extended status values such as `call_for_price`, `contact_store`, and `discontinued` can be preserved
 - suspicious results can be reviewed and auto-corrected before saving
 
 ## Site Profiles
@@ -287,6 +309,9 @@ Common endpoints:
 - `GET /api/products/`
 - `GET /api/stores/`
 - `GET /api/categories/`
+- `GET /api/settings/database/info`
+- `GET /api/settings/database/export`
+- `POST /api/settings/database/import`
 - `POST /api/import/woo/preview`
 - `POST /api/import/woo/import`
 - `POST /api/import/file/preview`
@@ -304,7 +329,7 @@ Interactive docs are available at `/docs`.
 
 ### Latest stable release
 
-- `v0.1.1` is the current published Windows release line.
+- `v0.1.3` is the current published Windows release line.
 
 ### Windows installer builds
 
@@ -344,6 +369,7 @@ Installed app behavior:
 
 - runs as a normal desktop app and opens the browser automatically
 - stores user data in a writable app-data folder instead of the install folder
+- keeps using that same data folder when you install a newer version over the old one
 - bundles the frontend and default scraper profiles with the app
 
 Typical runtime data locations:
@@ -382,9 +408,17 @@ py -3.11 -m venv .venv
 
 ### A document import looks incomplete
 
-- confirm the correct sheet or table is present in the preview
+- confirm the correct sheet or table is present in the workbench
 - remap columns before committing
+- attach rows to the existing Gabada products you want to update
 - for PDF price lists, make sure the product data appears in a table or column layout
+
+### I want to move or share my Gabada library
+
+- open `Settings -> Backup, restore, and share`
+- export a backup archive from the source machine
+- import that file on the destination machine
+- if anything goes wrong, use the safety copy path shown after import
 
 ### API requests fail in development
 

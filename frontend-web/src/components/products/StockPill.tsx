@@ -7,10 +7,19 @@ const LABEL: Record<StockStatus, string> = {
   limited: 'Limited',
   preorder: 'Pre-order',
   backorder: 'Backorder',
+  call_for_price: 'Call for price',
+  contact_store: 'Contact store',
+  discontinued: 'Discontinued',
   unknown: 'Unknown',
 }
 
-type BadgeVariant = 'success' | 'destructive' | 'warning' | 'info' | 'muted'
+type BadgeVariant =
+  | 'success'
+  | 'destructive'
+  | 'warning'
+  | 'info'
+  | 'muted'
+  | 'outline'
 
 const VARIANT: Record<StockStatus, BadgeVariant> = {
   in_stock: 'success',
@@ -18,6 +27,9 @@ const VARIANT: Record<StockStatus, BadgeVariant> = {
   limited: 'warning',
   preorder: 'info',
   backorder: 'warning',
+  call_for_price: 'outline',
+  contact_store: 'outline',
+  discontinued: 'destructive',
   unknown: 'muted',
 }
 
