@@ -2,15 +2,21 @@ import { useMemo, useState, type ChangeEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
+  AlertTriangle,
   CheckCircle2,
   Columns3,
   Download,
+  Eye,
+  EyeOff,
   FileSearch,
   FileUp,
+  Link2,
   Loader2,
   Package,
   Rows3,
   Search,
+  Sparkles,
+  Target,
   Upload,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -44,6 +50,8 @@ interface MappedPreviewRow extends FileImportRow {
   targetMode: 'auto' | 'manual' | 'new'
   targetScore: number | null
 }
+
+type ReviewFilter = 'all' | 'linked' | 'match' | 'new' | 'invalid'
 
 const OPTIONAL_COLUMN = ''
 const NEW_TARGET = '__new__'
@@ -144,6 +152,43 @@ function findSuggestedTarget(
   return { product: bestProduct, score: Math.min(bestScore, 1) }
 }
 
+function reviewStateOf(row: MappedPreviewRow): ReviewFilter {
+  if (!row.valid) return 'invalid'
+  if (row.targetProductStoreId != null) return 'linked'
+  if (row.targetProduct != null) return 'match'
+  return 'new'
+}
+
+function reviewStateMeta(row: MappedPreviewRow): {
+  label: string
+  variant: 'success' | 'info' | 'warning' | 'secondary'
+} {
+  const state = reviewStateOf(row)
+  if (state === 'linked') {
+    return { label: 'Linked', variant: 'success' }
+  }
+  if (state === 'match') {
+    return { label: 'Match found', variant: 'secondary' }
+  }
+  if (state === 'new') {
+    return { label: 'New product', variant: 'info' }
+  }
+  return { label: 'Needs name', variant: 'warning' }
+}
+
+function describeStoreAction(row: MappedPreviewRow): string {
+  if (row.targetProductStoreId != null) {
+    return 'Update this store link directly'
+  }
+  if (row.product_id != null) {
+    return 'Attach the chosen store to that existing product'
+  }
+  if (row.url) {
+    return 'Create a new tracked product with this URL'
+  }
+  return 'Create a new inactive price-list row'
+}
+
 export function FileImport() {
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -161,6 +206,8 @@ export function FileImport() {
   const [storeId, setStoreId] = useState<string>('')
   const [categoryId, setCategoryId] = useState<string>('')
   const [rowSearch, setRowSearch] = useState('')
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
+  const [showSourceColumns, setShowSourceColumns] = useState(false)
   const [showSelectedOnly, setShowSelectedOnly] = useState(false)
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set())
   const [targetOverrides, setTargetOverrides] = useState<Record<number, string>>({})
@@ -220,6 +267,8 @@ export function FileImport() {
         pickColumn(columns, [/stock/i, /availability/i, /status/i]),
       )
       setRowSearch('')
+      setReviewFilter('all')
+      setShowSourceColumns(false)
       setTargetOverrides({})
       setSelectedRows(new Set(data.rows.map((_, index) => index)))
       toast.success(
@@ -331,6 +380,9 @@ export function FileImport() {
   const visibleRows = useMemo(() => {
     const term = normalizeSearchText(rowSearch)
     return mappedRows.filter((row) => {
+      if (reviewFilter !== 'all' && reviewStateOf(row) !== reviewFilter) {
+        return false
+      }
       if (showSelectedOnly) {
         if (row.source_index == null || !selectedRows.has(row.source_index)) {
           return false
@@ -346,7 +398,7 @@ export function FileImport() {
       )
       return haystack.includes(term)
     })
-  }, [mappedRows, rowSearch, selectedRows, showSelectedOnly])
+  }, [mappedRows, reviewFilter, rowSearch, selectedRows, showSelectedOnly])
 
   const rowsWithUrls = useMemo(
     () => validRows.filter((row) => row.url).length,
@@ -369,6 +421,16 @@ export function FileImport() {
   const linkedStoreRows = useMemo(
     () => validRows.filter((row) => row.targetProductStoreId != null).length,
     [validRows],
+  )
+  const reviewCounts = useMemo(
+    () => ({
+      all: mappedRows.length,
+      linked: mappedRows.filter((row) => reviewStateOf(row) === 'linked').length,
+      match: mappedRows.filter((row) => reviewStateOf(row) === 'match').length,
+      new: mappedRows.filter((row) => reviewStateOf(row) === 'new').length,
+      invalid: mappedRows.filter((row) => reviewStateOf(row) === 'invalid').length,
+    }),
+    [mappedRows],
   )
 
   const commitMutation = useMutation({
@@ -478,7 +540,7 @@ export function FileImport() {
               <div className="text-xs text-muted-foreground">
                 {file
                   ? `${(file.size / 1024).toFixed(1)} KB`
-                  : 'Build a full document workbench, not just a tiny sample.'}
+                  : 'Upload the full file, review every row, then choose exactly what to update.'}
               </div>
             </div>
             <input
@@ -533,7 +595,7 @@ export function FileImport() {
             <BentoTile colSpan={6}>
               <TileHeader
                 eyebrow="Step 2"
-                title="Map columns and choose destination"
+                title="Map the essentials"
                 icon={<Columns3 className="h-4 w-4" />}
                 action={
                   <Badge variant="secondary" className="font-mono text-xs">
@@ -543,91 +605,170 @@ export function FileImport() {
                   </Badge>
                 }
               />
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <ColSelect
-                  label="Name column"
-                  value={nameCol}
-                  onChange={setNameCol}
-                  columns={preview.columns}
-                />
-                <ColSelect
-                  label="URL column"
-                  value={urlCol}
-                  onChange={setUrlCol}
-                  columns={preview.columns}
-                  allowEmpty
-                />
-                <ColSelect
-                  label="Image column"
-                  value={imageCol}
-                  onChange={setImageCol}
-                  columns={preview.columns}
-                  allowEmpty
-                />
-                <ColSelect
-                  label="Retail price column"
-                  value={priceCol}
-                  onChange={setPriceCol}
-                  columns={preview.columns}
-                  allowEmpty
-                />
-                <ColSelect
-                  label="Sale price column"
-                  value={discountedCol}
-                  onChange={setDiscountedCol}
-                  columns={preview.columns}
-                  allowEmpty
-                />
-                <ColSelect
-                  label="Dealer price column"
-                  value={dealerCol}
-                  onChange={setDealerCol}
-                  columns={preview.columns}
-                  allowEmpty
-                />
-                <ColSelect
-                  label="Warranty column"
-                  value={warrantyCol}
-                  onChange={setWarrantyCol}
-                  columns={preview.columns}
-                  allowEmpty
-                />
-                <ColSelect
-                  label="Stock / status column"
-                  value={stockCol}
-                  onChange={setStockCol}
-                  columns={preview.columns}
-                  allowEmpty
-                />
-                <div className="space-y-1.5">
-                  <Label htmlFor="file-store">Store</Label>
-                  <Select
-                    id="file-store"
-                    value={storeId}
-                    onChange={(event) => setStoreId(event.target.value)}
-                  >
-                    <option value="">Select store</option>
-                    {(stores.data ?? []).map((store) => (
-                      <option key={store.id} value={store.id}>
-                        {store.name}
-                      </option>
-                    ))}
-                  </Select>
+              <p className="mt-3 text-sm text-muted-foreground">
+                Only a document name and destination store are required. Every
+                other mapping is optional and can stay blank if the source file
+                does not have it.
+              </p>
+              <div className="mt-3 rounded-xl border border-border/70 bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
+                Import destination:{' '}
+                <span className="font-medium text-foreground">
+                  {storeId
+                    ? (stores.data ?? []).find((store) => store.id === Number(storeId))
+                        ?.name ?? 'Selected store'
+                    : 'Choose the store this document belongs to'}
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,1fr)]">
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-border/70 bg-background/60 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      Required first
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <ColSelect
+                        label="Name column"
+                        value={nameCol}
+                        onChange={setNameCol}
+                        columns={preview.columns}
+                      />
+                      <div className="space-y-1.5">
+                        <Label htmlFor="file-store">Store</Label>
+                        <Select
+                          id="file-store"
+                          value={storeId}
+                          onChange={(event) => setStoreId(event.target.value)}
+                        >
+                          <option value="">Select store</option>
+                          {(stores.data ?? []).map((store) => (
+                            <option key={store.id} value={store.id}>
+                              {store.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <Label htmlFor="file-category">Category (optional)</Label>
+                        <Select
+                          id="file-category"
+                          value={categoryId}
+                          onChange={(event) => setCategoryId(event.target.value)}
+                        >
+                          <option value="">No category</option>
+                          {(categories.data ?? []).map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border/70 bg-background/60 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Target className="h-4 w-4 text-primary" />
+                      Common import fields
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <ColSelect
+                        label="URL column"
+                        value={urlCol}
+                        onChange={setUrlCol}
+                        columns={preview.columns}
+                        allowEmpty
+                      />
+                      <ColSelect
+                        label="Retail price column"
+                        value={priceCol}
+                        onChange={setPriceCol}
+                        columns={preview.columns}
+                        allowEmpty
+                      />
+                      <ColSelect
+                        label="Sale price column"
+                        value={discountedCol}
+                        onChange={setDiscountedCol}
+                        columns={preview.columns}
+                        allowEmpty
+                      />
+                      <ColSelect
+                        label="Dealer price column"
+                        value={dealerCol}
+                        onChange={setDealerCol}
+                        columns={preview.columns}
+                        allowEmpty
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border/70 bg-background/60 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Link2 className="h-4 w-4 text-primary" />
+                      Extra details
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <ColSelect
+                        label="Image column"
+                        value={imageCol}
+                        onChange={setImageCol}
+                        columns={preview.columns}
+                        allowEmpty
+                      />
+                      <ColSelect
+                        label="Warranty column"
+                        value={warrantyCol}
+                        onChange={setWarrantyCol}
+                        columns={preview.columns}
+                        allowEmpty
+                      />
+                      <ColSelect
+                        label="Stock / status column"
+                        value={stockCol}
+                        onChange={setStockCol}
+                        columns={preview.columns}
+                        allowEmpty
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="file-category">Category (optional)</Label>
-                  <Select
-                    id="file-category"
-                    value={categoryId}
-                    onChange={(event) => setCategoryId(event.target.value)}
-                  >
-                    <option value="">No category</option>
-                    {(categories.data ?? []).map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </Select>
+
+                <div className="rounded-xl border border-border/70 bg-background/60 p-4">
+                  <div className="text-sm font-medium text-foreground">
+                    How row matching works
+                  </div>
+                  <div className="mt-3 space-y-3 text-sm text-muted-foreground">
+                    <div>
+                      <Badge variant="success" className="mr-2 text-[10px]">
+                        Linked
+                      </Badge>
+                      Existing product already has this store linked. Import will
+                      update that exact row.
+                    </div>
+                    <div>
+                      <Badge variant="secondary" className="mr-2 text-[10px]">
+                        Match found
+                      </Badge>
+                      Gabada found a likely existing product, but this store is
+                      not linked yet.
+                    </div>
+                    <div>
+                      <Badge variant="info" className="mr-2 text-[10px]">
+                        New product
+                      </Badge>
+                      No confident match was found, so the row can create a new
+                      product.
+                    </div>
+                    <div>
+                      <Badge variant="warning" className="mr-2 text-[10px]">
+                        Needs name
+                      </Badge>
+                      The document row still needs either a mapped name or a
+                      chosen Gabada target.
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -674,11 +815,23 @@ export function FileImport() {
             <BentoTile colSpan={6}>
               <TileHeader
                 eyebrow="Step 3"
-                title={`${selectedMappedRows.length} selected - ${visibleRows.length} visible rows`}
+                title="Review rows and import"
                 action={
                   <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" onClick={toggleAllVisible}>
                       Select visible
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowSourceColumns((current) => !current)}
+                    >
+                      {showSourceColumns ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                      {showSourceColumns ? 'Hide source columns' : 'Show source columns'}
                     </Button>
                     <Button
                       size="sm"
@@ -696,13 +849,13 @@ export function FileImport() {
                 }
               />
 
-              <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={rowSearch}
                     onChange={(event) => setRowSearch(event.target.value)}
-                    placeholder="Search the full document and matched Gabada products"
+                    placeholder="Search document rows, source values, or matched Gabada products"
                     className="pl-9"
                   />
                 </div>
@@ -717,6 +870,71 @@ export function FileImport() {
                 </label>
               </div>
 
+              <div className="mt-3 flex flex-wrap gap-2">
+                <ReviewFilterChip
+                  active={reviewFilter === 'all'}
+                  label={`All ${reviewCounts.all}`}
+                  onClick={() => setReviewFilter('all')}
+                />
+                <ReviewFilterChip
+                  active={reviewFilter === 'linked'}
+                  label={`Linked ${reviewCounts.linked}`}
+                  onClick={() => setReviewFilter('linked')}
+                />
+                <ReviewFilterChip
+                  active={reviewFilter === 'match'}
+                  label={`Match found ${reviewCounts.match}`}
+                  onClick={() => setReviewFilter('match')}
+                />
+                <ReviewFilterChip
+                  active={reviewFilter === 'new'}
+                  label={`New ${reviewCounts.new}`}
+                  onClick={() => setReviewFilter('new')}
+                />
+                <ReviewFilterChip
+                  active={reviewFilter === 'invalid'}
+                  label={`Needs name ${reviewCounts.invalid}`}
+                  onClick={() => setReviewFilter('invalid')}
+                />
+              </div>
+
+              <p className="mt-3 text-xs text-muted-foreground">
+                The default review table focuses on what Gabada will do. Turn on
+                source columns only when you need to inspect the original file
+                values in full.
+              </p>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                <StatTile
+                  label="Selected"
+                  value={selectedMappedRows.length}
+                  icon={<CheckCircle2 className="h-4 w-4" />}
+                  hint={`${visibleRows.length} visible in current filter`}
+                  tone={selectedMappedRows.length > 0 ? 'success' : 'default'}
+                />
+                <StatTile
+                  label="Linked"
+                  value={reviewCounts.linked}
+                  icon={<Link2 className="h-4 w-4" />}
+                  hint="updates exact store rows"
+                  tone={reviewCounts.linked > 0 ? 'success' : 'default'}
+                />
+                <StatTile
+                  label="New"
+                  value={reviewCounts.new}
+                  icon={<Sparkles className="h-4 w-4" />}
+                  hint="creates new Gabada products"
+                  tone={reviewCounts.new > 0 ? 'accent' : 'default'}
+                />
+                <StatTile
+                  label="Needs name"
+                  value={reviewCounts.invalid}
+                  icon={<AlertTriangle className="h-4 w-4" />}
+                  hint="cannot import yet"
+                  tone={reviewCounts.invalid > 0 ? 'warning' : 'default'}
+                />
+              </div>
+
               <div className="mt-3 overflow-hidden rounded-md border border-border">
                 <div className="max-h-[72vh] overflow-auto">
                   <table className="w-full text-xs">
@@ -728,48 +946,44 @@ export function FileImport() {
                         <th className="w-12 px-2 py-2 text-left font-medium">
                           #
                         </th>
-                        <th className="min-w-[220px] px-2 py-2 text-left font-medium">
-                          Document product
+                        <th className="w-32 px-2 py-2 text-left font-medium">
+                          Status
+                        </th>
+                        <th className="min-w-[240px] px-2 py-2 text-left font-medium">
+                          Document row
                         </th>
                         <th className="min-w-[260px] px-2 py-2 text-left font-medium">
                           Gabada target
                         </th>
+                        <th className="min-w-[180px] px-2 py-2 text-left font-medium">
+                          Import action
+                        </th>
+                        <th className="min-w-[180px] px-2 py-2 text-left font-medium">
+                          Prices
+                        </th>
                         <th className="min-w-[160px] px-2 py-2 text-left font-medium">
-                          Store target
+                          Stock and extras
                         </th>
-                        <th className="w-28 px-2 py-2 text-left font-medium">
-                          Retail
-                        </th>
-                        <th className="w-28 px-2 py-2 text-left font-medium">
-                          Sale
-                        </th>
-                        <th className="w-28 px-2 py-2 text-left font-medium">
-                          Dealer
-                        </th>
-                        <th className="w-36 px-2 py-2 text-left font-medium">
-                          Warranty
-                        </th>
-                        <th className="w-28 px-2 py-2 text-left font-medium">
-                          Stock
-                        </th>
-                        {preview.columns.map((column) => (
-                          <th
-                            key={column}
-                            className="min-w-[160px] px-2 py-2 text-left font-medium"
-                          >
-                            <div className="flex items-center gap-1.5">
-                              <span>{column}</span>
-                              {mappedColumnBadges[column] ? (
-                                <Badge
-                                  variant="secondary"
-                                  className="text-[10px]"
-                                >
-                                  {mappedColumnBadges[column]}
-                                </Badge>
-                              ) : null}
-                            </div>
-                          </th>
-                        ))}
+                        {showSourceColumns
+                          ? preview.columns.map((column) => (
+                              <th
+                                key={column}
+                                className="min-w-[160px] px-2 py-2 text-left font-medium"
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  <span>{column}</span>
+                                  {mappedColumnBadges[column] ? (
+                                    <Badge
+                                      variant="secondary"
+                                      className="text-[10px]"
+                                    >
+                                      {mappedColumnBadges[column]}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </th>
+                            ))
+                          : null}
                       </tr>
                     </thead>
                     <tbody>
@@ -779,6 +993,7 @@ export function FileImport() {
                           row.source_index != null &&
                           selectedRows.has(row.source_index)
                         const overrideValue = targetOverrides[rowIndex] ?? ''
+                        const stateMeta = reviewStateMeta(row)
                         const targetSummary = row.targetProduct ? (
                           <div className="space-y-1">
                             <Select
@@ -868,10 +1083,31 @@ export function FileImport() {
                               {rowIndex + 1}
                             </td>
                             <td className="px-2 py-2 align-top">
-                              <div className="min-w-0">
+                              <div className="space-y-1">
+                                <Badge variant={stateMeta.variant} className="text-[10px]">
+                                  {stateMeta.label}
+                                </Badge>
+                                {row.targetScore != null && row.targetMode === 'auto' ? (
+                                  <div className="text-[11px] text-muted-foreground">
+                                    {Math.round(row.targetScore * 100)}% match confidence
+                                  </div>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td className="px-2 py-2 align-top">
+                              <div className="min-w-0 space-y-1">
                                 <div className="truncate font-medium">
                                   {row.displayName || 'Missing name'}
                                 </div>
+                                {row.url ? (
+                                  <div className="truncate text-[11px] text-muted-foreground">
+                                    {row.url}
+                                  </div>
+                                ) : (
+                                  <div className="text-[11px] text-muted-foreground">
+                                    No product URL in this row
+                                  </div>
+                                )}
                                 {!row.valid ? (
                                   <span className="text-[11px] text-destructive">
                                     Map a name column or choose a Gabada product.
@@ -881,48 +1117,54 @@ export function FileImport() {
                             </td>
                             <td className="px-2 py-2 align-top">{targetSummary}</td>
                             <td className="px-2 py-2 align-top text-muted-foreground">
-                              {row.targetProductStoreId ? (
-                                <span className="text-[11px]">
-                                  Updating linked store entry
-                                </span>
-                              ) : row.product_id ? (
-                                <span className="text-[11px]">
-                                  Will add this store to the chosen product
-                                </span>
-                              ) : row.url ? (
-                                <span className="text-[11px]">
-                                  New tracked row with product URL
-                                </span>
-                              ) : (
-                                <span className="text-[11px]">
-                                  New inactive price-list row
-                                </span>
-                              )}
+                              <div className="space-y-1 text-[11px]">
+                                <div>{describeStoreAction(row)}</div>
+                                {row.targetProductStoreId == null &&
+                                row.product_id == null &&
+                                !row.url ? (
+                                  <div>Useful for dealer lists and offline price sheets.</div>
+                                ) : null}
+                              </div>
                             </td>
                             <td className="px-2 py-2 align-top">
-                              {formatMappedValue(row.price)}
+                              <div className="space-y-1">
+                                <div>
+                                  <span className="text-muted-foreground">Retail:</span>{' '}
+                                  {formatMappedValue(row.price)}
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Sale:</span>{' '}
+                                  {formatMappedValue(row.discounted_price)}
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Dealer:</span>{' '}
+                                  {formatMappedValue(row.dealer_price)}
+                                </div>
+                              </div>
                             </td>
                             <td className="px-2 py-2 align-top">
-                              {formatMappedValue(row.discounted_price)}
+                              <div className="space-y-1">
+                                <div>
+                                  <span className="text-muted-foreground">Stock:</span>{' '}
+                                  {formatMappedValue(row.stock_status)}
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Warranty:</span>{' '}
+                                  {formatMappedValue(row.warranty)}
+                                </div>
+                              </div>
                             </td>
-                            <td className="px-2 py-2 align-top">
-                              {formatMappedValue(row.dealer_price)}
-                            </td>
-                            <td className="px-2 py-2 align-top">
-                              {formatMappedValue(row.warranty)}
-                            </td>
-                            <td className="px-2 py-2 align-top">
-                              {formatMappedValue(row.stock_status)}
-                            </td>
-                            {row.original.map((value, cellIndex) => (
-                              <td
-                                key={`${rowIndex}-${cellIndex}`}
-                                className="max-w-[220px] truncate px-2 py-2 align-top"
-                                title={value}
-                              >
-                                {value || '-'}
-                              </td>
-                            ))}
+                            {showSourceColumns
+                              ? row.original.map((value, cellIndex) => (
+                                  <td
+                                    key={`${rowIndex}-${cellIndex}`}
+                                    className="max-w-[220px] truncate px-2 py-2 align-top"
+                                    title={value}
+                                  >
+                                    {value || '-'}
+                                  </td>
+                                ))
+                              : null}
                           </tr>
                         )
                       })}
@@ -965,5 +1207,31 @@ function ColSelect({
         ))}
       </Select>
     </div>
+  )
+}
+
+interface ReviewFilterChipProps {
+  active: boolean
+  label: string
+  onClick: () => void
+}
+
+function ReviewFilterChip({
+  active,
+  label,
+  onClick,
+}: ReviewFilterChipProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+        active
+          ? 'border-primary bg-primary/15 text-foreground'
+          : 'border-border bg-muted/40 text-muted-foreground hover:bg-accent'
+      }`}
+    >
+      {label}
+    </button>
   )
 }
