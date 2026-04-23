@@ -20,11 +20,37 @@ class Category(CategoryCreate):
 class StoreCreate(BaseModel):
     name: str
     base_url: str
+    woo_enabled: bool = False
+    woo_site_url: Optional[str] = None
+    woo_consumer_key: Optional[str] = None
+    woo_consumer_secret: Optional[str] = None
+    woo_auto_import_new: bool = False
+
+
+class StoreUpdate(BaseModel):
+    name: Optional[str] = None
+    base_url: Optional[str] = None
+    woo_enabled: Optional[bool] = None
+    woo_site_url: Optional[str] = None
+    woo_consumer_key: Optional[str] = None
+    woo_consumer_secret: Optional[str] = None
+    woo_auto_import_new: Optional[bool] = None
 
 class Store(StoreCreate):
     id: int
     created_at: datetime
+    woo_last_synced_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
+
+
+class WooSyncResult(BaseModel):
+    store_id: int
+    store_name: str
+    discovered: int = 0
+    created: int = 0
+    existing: int = 0
+    auto_import_new: bool = False
+    synced_at: Optional[datetime] = None
 
 
 # ── Scrape config ─────────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ Gabada is a local-first product price and stock tracker for online stores. It sc
 - Import from WooCommerce, CSV, Excel, and PDF
 - Match document rows to existing Gabada products before importing anything
 - Export or import a shareable backup when moving or updating an install
+- Save Woo credentials on a store and auto-sync new catalog products later
 - Use Probe and Selector Lab to diagnose and fix scraper issues
 - Save selector profiles per domain for more reliable future syncs
 - Run locally with a simple launcher or Windows release build
@@ -38,7 +39,7 @@ Gabada is a local-first product price and stock tracker for online stores. It sc
 | Price history | Save each scrape and surface meaningful price and stock changes in Activity. |
 | Selector Lab | Inspect selectors, assign fields, test extraction, and save reusable domain profiles. |
 | Probe | Preview what the scraper sees before you commit a product or profile change. |
-| Import tools | Bring in large catalogs from WooCommerce or product documents with full preview, row targeting, and selective updates. |
+| Import tools | Bring in large catalogs from WooCommerce or product documents with full preview, row targeting, selective updates, and optional scheduled Woo sync. |
 | Backup & restore | Export a shareable backup archive and import it into another Gabada install with a safety copy first. |
 | Safer extraction | Cross-check suspicious price or stock matches against stronger page signals before saving them. |
 | Categories | Organize products with category names and colors. |
@@ -66,6 +67,8 @@ Gabada now supports full-catalog style imports for both WooCommerce and document
 - fetch more than the first page instead of stopping at 100
 - handle broken or repeating Woo pagination more safely
 - select only the products you want to bring in
+- optionally save Woo credentials on the destination store
+- optionally auto-add new Woo products during future scheduled syncs
 
 ### Document import
 
@@ -88,6 +91,8 @@ Gabada now supports full-catalog style imports for both WooCommerce and document
 - create a new store link on an existing product if the store is not linked yet
 
 Rows without a real product URL can still be imported as inactive store links for price-list style tracking until a live product page is attached later. Availability text such as `call for price`, `contact us`, or `discontinued` is also preserved instead of collapsing into plain `unknown`.
+
+When Woo sync is enabled on a store, Gabada checks that catalog before scheduled scrapes and can add newly discovered products automatically.
 
 ## Selector Lab
 

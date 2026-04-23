@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Globe,
   Plus,
+  RefreshCw,
   Store as StoreIcon,
   Trash2,
   TrendingDown,
@@ -140,6 +141,25 @@ export function StoresPage() {
     onError: () => toast.error('Delete failed'),
   })
 
+  const syncWoo = useMutation({
+    mutationFn: (id: number) => storesApi.syncWoo(id),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['stores'] })
+      qc.invalidateQueries({ queryKey: ['products'] })
+      toast.success(
+        `${result.store_name} synced`,
+        result.auto_import_new
+          ? `Created ${result.created} new Woo products from ${result.discovered} catalog items.`
+          : `Checked ${result.discovered} Woo catalog items. Auto-add is currently off.`,
+      )
+    },
+    onError: (error) => {
+      const detail =
+        error instanceof Error ? error.message : 'Could not sync Woo catalog'
+      toast.error('Woo sync failed', detail)
+    },
+  })
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -261,6 +281,12 @@ export function StoresPage() {
             <StoreTile
               key={agg.store.id}
               agg={agg}
+              onSyncWoo={
+                agg.store.woo_enabled
+                  ? () => syncWoo.mutate(agg.store.id)
+                  : undefined
+              }
+              syncingWoo={syncWoo.isPending}
               onDelete={() => {
                 if (
                   confirm(
@@ -281,12 +307,15 @@ export function StoresPage() {
 
 interface StoreTileProps {
   agg: StoreAggregate
+  onSyncWoo?: () => void
+  syncingWoo: boolean
   onDelete: () => void
   deleting: boolean
 }
 
-function StoreTile({ agg, onDelete, deleting }: StoreTileProps) {
+function StoreTile({ agg, onSyncWoo, syncingWoo, onDelete, deleting }: StoreTileProps) {
   const live = useLiveTime(agg.lastScrapedAt)
+  const wooLive = useLiveTime(agg.store.woo_last_synced_at)
   const { store, productCount, inStockCount, dropsCount } = agg
   const coverage =
     productCount > 0 ? Math.round((inStockCount / productCount) * 100) : 0
@@ -326,6 +355,31 @@ function StoreTile({ agg, onDelete, deleting }: StoreTileProps) {
         </Button>
       </div>
 
+      {store.woo_enabled ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="text-[10px]">
+            Woo sync on
+          </Badge>
+          <Badge variant="muted" className="text-[10px]">
+            {store.woo_auto_import_new ? 'auto-add new items' : 'catalog check only'}
+          </Badge>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onSyncWoo}
+            disabled={syncingWoo || !onSyncWoo}
+            className="h-7 px-2 text-[11px]"
+          >
+            {syncingWoo ? (
+              <LoaderIcon />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Sync now
+          </Button>
+        </div>
+      ) : null}
+
       <div className="mt-4 grid grid-cols-3 gap-3 text-center">
         <StoreStat
           value={productCount}
@@ -361,10 +415,18 @@ function StoreTile({ agg, onDelete, deleting }: StoreTileProps) {
       ) : null}
 
       <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-[11px] text-muted-foreground">
-        <span className="inline-flex items-center gap-1">
-          <Clock className="h-3 w-3" />
-          {agg.lastScrapedAt ? live : 'never scraped'}
-        </span>
+        <div className="space-y-1">
+          <span className="inline-flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {agg.lastScrapedAt ? live : 'never scraped'}
+          </span>
+          {store.woo_enabled ? (
+            <div className="inline-flex items-center gap-1">
+              <RefreshCw className="h-3 w-3" />
+              {store.woo_last_synced_at ? wooLive : 'never synced'}
+            </div>
+          ) : null}
+        </div>
         {productCount === 0 ? (
           <Badge variant="muted" className="text-[10px]">
             unused
@@ -373,6 +435,10 @@ function StoreTile({ agg, onDelete, deleting }: StoreTileProps) {
       </div>
     </BentoTile>
   )
+}
+
+function LoaderIcon() {
+  return <RefreshCw className="h-3.5 w-3.5 animate-spin" />
 }
 
 interface StoreStatProps {

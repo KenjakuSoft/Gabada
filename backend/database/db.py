@@ -32,6 +32,12 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 base_url TEXT NOT NULL UNIQUE,
+                woo_enabled INTEGER NOT NULL DEFAULT 0,
+                woo_site_url TEXT,
+                woo_consumer_key TEXT,
+                woo_consumer_secret TEXT,
+                woo_auto_import_new INTEGER NOT NULL DEFAULT 0,
+                woo_last_synced_at DATETIME,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -96,6 +102,20 @@ async def init_db():
             await db.commit()
         except Exception:
             pass
+
+        for col_sql in [
+            "ALTER TABLE stores ADD COLUMN woo_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE stores ADD COLUMN woo_site_url TEXT",
+            "ALTER TABLE stores ADD COLUMN woo_consumer_key TEXT",
+            "ALTER TABLE stores ADD COLUMN woo_consumer_secret TEXT",
+            "ALTER TABLE stores ADD COLUMN woo_auto_import_new INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE stores ADD COLUMN woo_last_synced_at DATETIME",
+        ]:
+            try:
+                await db.execute(col_sql)
+                await db.commit()
+            except Exception:
+                pass
 
         for col_sql in [
             "ALTER TABLE price_logs ADD COLUMN change_type TEXT",

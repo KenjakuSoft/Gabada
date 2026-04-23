@@ -161,6 +161,13 @@ async def _do_scrape(product_store_id: int):
 
 async def scrape_all_active():
     """Called by the scheduler. Scrapes every active product_store."""
+    try:
+        from api.import_routes import sync_all_enabled_woo_stores
+
+        await sync_all_enabled_woo_stores()
+    except Exception as exc:
+        logger.error("Failed syncing Woo stores before scrape-all: %s", exc)
+
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
