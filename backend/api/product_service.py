@@ -103,17 +103,21 @@ async def create_store_link(
     store_id: int,
     product_url: str,
     scrape_config_json: Optional[str] = None,
+    is_active: bool = True,
 ) -> int:
     if scrape_config_json is None:
         cur = await db.execute(
-            "INSERT INTO product_stores (product_id, store_id, product_url) VALUES (?, ?, ?)",
-            (product_id, store_id, product_url),
+            """INSERT INTO product_stores
+                   (product_id, store_id, product_url, is_active)
+               VALUES (?, ?, ?, ?)""",
+            (product_id, store_id, product_url, int(is_active)),
         )
     else:
         cur = await db.execute(
-            """INSERT INTO product_stores (product_id, store_id, product_url, scrape_config)
-               VALUES (?, ?, ?, ?)""",
-            (product_id, store_id, product_url, scrape_config_json),
+            """INSERT INTO product_stores
+                   (product_id, store_id, product_url, scrape_config, is_active)
+               VALUES (?, ?, ?, ?, ?)""",
+            (product_id, store_id, product_url, scrape_config_json, int(is_active)),
         )
     return cur.lastrowid
 
@@ -127,6 +131,7 @@ async def create_product_with_store(
     store_id: int,
     product_url: str,
     scrape_config_json: Optional[str] = None,
+    is_active: bool = True,
 ) -> tuple[int, int]:
     product_id = await create_product_record(
         db,
@@ -140,6 +145,7 @@ async def create_product_with_store(
         store_id=store_id,
         product_url=product_url,
         scrape_config_json=scrape_config_json,
+        is_active=is_active,
     )
     return product_id, product_store_id
 

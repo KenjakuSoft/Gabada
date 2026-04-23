@@ -202,12 +202,25 @@ export interface WooProductPreview {
 export interface FileImportPreviewResponse {
   columns: string[]
   sample_rows: string[][]
+  rows: string[][]
   total_rows: number
   file_format: 'csv' | 'excel' | 'pdf'
+  source_name?: string | null
 }
 
 export interface FileImportRow {
   name: string
-  url: string
+  source_index?: number | null
+  url?: string | null
   image_url?: string | null
+  price?: number | string | null
+  discounted_price?: number | string | null
+  dealer_price?: number | string | null
+  stock_status?: string | null
+}
+
+export interface FileImportCommitResponse {
+  imported: number
+  created: number
+  updated: number
 }
