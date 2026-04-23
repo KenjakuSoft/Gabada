@@ -5,33 +5,60 @@ import {
   CheckCircle2,
   Columns3,
   Download,
+  FileSearch,
   FileUp,
   Loader2,
   Package,
   Rows3,
+  Search,
   Upload,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { StatTile } from '@/components/ui/stat-tile'
 import { toast } from '@/components/ui/toast-store'
-import { categoriesApi, importApi, storesApi } from '@/api'
+import { categoriesApi, importApi, productsApi, storesApi } from '@/api'
 import type {
   Category,
   FileImportPreviewResponse,
   FileImportRow,
+  Product,
   Store,
 } from '@/api'
 
+interface SuggestedTarget {
+  product: Product | null
+  score: number | null
+}
+
 interface MappedPreviewRow extends FileImportRow {
   original: string[]
+  displayName: string
   valid: boolean
+  targetProduct: Product | null
+  targetProductStoreId: number | null
+  targetMode: 'auto' | 'manual' | 'new'
+  targetScore: number | null
 }
 
 const OPTIONAL_COLUMN = ''
+const NEW_TARGET = '__new__'
+const SEARCH_STOP_WORDS = new Set([
+  'the',
+  'and',
+  'for',
+  'with',
+  'inch',
+  'inches',
+  'laptop',
+  'desktop',
+  'gaming',
+  'pc',
+])
 
 function pickColumn(
   columns: string[],
@@ -54,6 +81,69 @@ function formatMappedValue(value: string | number | null | undefined): string {
   return String(value)
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function tokenizeProductName(value: string): string[] {
+  return normalizeSearchText(value)
+    .split(' ')
+    .filter((token) => token.length > 1 && !SEARCH_STOP_WORDS.has(token))
+}
+
+function scoreProductMatch(sourceName: string, product: Product): number {
+  const source = normalizeSearchText(sourceName)
+  const target = normalizeSearchText(product.canonical_name)
+  if (!source || !target) return 0
+  if (source === target) return 1
+  if (source.includes(target) || target.includes(source)) return 0.92
+
+  const sourceTokens = tokenizeProductName(sourceName)
+  const targetTokens = tokenizeProductName(product.canonical_name)
+  if (sourceTokens.length === 0 || targetTokens.length === 0) return 0
+
+  const targetSet = new Set(targetTokens)
+  const overlap = sourceTokens.filter((token) => targetSet.has(token)).length
+  if (overlap === 0) return 0
+
+  return overlap / Math.max(sourceTokens.length, targetTokens.length)
+}
+
+function findSuggestedTarget(
+  rowName: string,
+  products: Product[],
+  selectedStoreId: number | null,
+): SuggestedTarget {
+  if (!rowName.trim()) return { product: null, score: null }
+
+  let bestProduct: Product | null = null
+  let bestScore = 0
+
+  for (const product of products) {
+    let score = scoreProductMatch(rowName, product)
+    if (score === 0) continue
+    if (
+      selectedStoreId != null &&
+      product.stores.some((store) => store.store_id === selectedStoreId)
+    ) {
+      score += 0.08
+    }
+    if (score > bestScore) {
+      bestScore = score
+      bestProduct = product
+    }
+  }
+
+  if (bestScore < 0.52 || bestProduct == null) {
+    return { product: null, score: null }
+  }
+  return { product: bestProduct, score: Math.min(bestScore, 1) }
+}
+
 export function FileImport() {
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -66,10 +156,16 @@ export function FileImport() {
   const [priceCol, setPriceCol] = useState<string>(OPTIONAL_COLUMN)
   const [discountedCol, setDiscountedCol] = useState<string>(OPTIONAL_COLUMN)
   const [dealerCol, setDealerCol] = useState<string>(OPTIONAL_COLUMN)
+  const [warrantyCol, setWarrantyCol] = useState<string>(OPTIONAL_COLUMN)
   const [stockCol, setStockCol] = useState<string>(OPTIONAL_COLUMN)
   const [storeId, setStoreId] = useState<string>('')
   const [categoryId, setCategoryId] = useState<string>('')
+  const [rowSearch, setRowSearch] = useState('')
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false)
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set())
+  const [targetOverrides, setTargetOverrides] = useState<Record<number, string>>({})
+
+  const selectedStoreId = storeId === '' ? null : Number(storeId)
 
   const stores = useQuery<Store[]>({
     queryKey: ['stores'],
@@ -79,6 +175,18 @@ export function FileImport() {
     queryKey: ['categories'],
     queryFn: () => categoriesApi.list(),
   })
+  const products = useQuery<Product[]>({
+    queryKey: ['products'],
+    queryFn: () => productsApi.list(),
+  })
+
+  const productOptions = useMemo(
+    () =>
+      [...(products.data ?? [])].sort((a, b) =>
+        a.canonical_name.localeCompare(b.canonical_name),
+      ),
+    [products.data],
+  )
 
   const previewMutation = useMutation({
     mutationFn: () => importApi.filePreview(file!),
@@ -105,13 +213,20 @@ export function FileImport() {
       setDealerCol(
         pickColumn(columns, [/dealer/i, /wholesale/i, /trade/i, /reseller/i]),
       )
+      setWarrantyCol(
+        pickColumn(columns, [/warranty/i, /guarantee/i, /service/i]),
+      )
       setStockCol(
         pickColumn(columns, [/stock/i, /availability/i, /status/i]),
       )
+      setRowSearch('')
+      setTargetOverrides({})
       setSelectedRows(new Set(data.rows.map((_, index) => index)))
       toast.success(
         `Parsed ${data.total_rows} rows`,
-        data.source_name ? `${data.file_format} - ${data.source_name}` : data.file_format,
+        data.source_name
+          ? `${data.file_format} - ${data.source_name}`
+          : data.file_format,
       )
     },
     onError: () => toast.error('Could not read that file'),
@@ -128,20 +243,59 @@ export function FileImport() {
     }
 
     return preview.rows.map((row, index) => {
-      const mapped: MappedPreviewRow = {
+      const mappedName = (cell(row, nameCol) ?? '').trim()
+      const override = targetOverrides[index]
+      const suggestion =
+        !override || override === NEW_TARGET
+          ? findSuggestedTarget(
+              mappedName,
+              productOptions,
+              selectedStoreId,
+            )
+          : { product: null, score: null }
+
+      let targetProduct: Product | null = null
+      let targetMode: 'auto' | 'manual' | 'new' = 'new'
+      let targetScore: number | null = null
+
+      if (override && override !== NEW_TARGET) {
+        targetProduct =
+          productOptions.find((product) => product.id === Number(override)) ?? null
+        targetMode = targetProduct ? 'manual' : 'new'
+      } else if (suggestion.product) {
+        targetProduct = suggestion.product
+        targetMode = 'auto'
+        targetScore = suggestion.score
+      }
+
+      const targetStore =
+        selectedStoreId != null && targetProduct
+          ? targetProduct.stores.find(
+              (store) => store.store_id === selectedStoreId,
+            ) ?? null
+          : null
+      const displayName = mappedName || targetProduct?.canonical_name || ''
+
+      return {
         source_index: index,
-        name: (cell(row, nameCol) ?? '').trim(),
+        name: displayName,
+        product_id: targetProduct?.id ?? null,
+        product_store_id: targetStore?.id ?? null,
         url: (cell(row, urlCol) ?? '').trim() || null,
         image_url: (cell(row, imageCol) ?? '').trim() || null,
         price: cell(row, priceCol),
         discounted_price: cell(row, discountedCol),
         dealer_price: cell(row, dealerCol),
+        warranty: (cell(row, warrantyCol) ?? '').trim() || null,
         stock_status: (cell(row, stockCol) ?? '').trim() || null,
         original: row,
-        valid: false,
+        displayName,
+        valid: displayName.length > 0,
+        targetProduct,
+        targetProductStoreId: targetStore?.id ?? null,
+        targetMode,
+        targetScore,
       }
-      mapped.valid = mapped.name.length > 0
-      return mapped
     })
   }, [
     preview,
@@ -151,7 +305,11 @@ export function FileImport() {
     priceCol,
     discountedCol,
     dealerCol,
+    warrantyCol,
     stockCol,
+    productOptions,
+    selectedStoreId,
+    targetOverrides,
   ])
 
   const validRows = useMemo(
@@ -161,11 +319,34 @@ export function FileImport() {
 
   const selectedMappedRows = useMemo(
     () =>
-      validRows.filter(
-        (row) => row.source_index != null && selectedRows.has(row.source_index),
+      mappedRows.filter(
+        (row) =>
+          row.valid &&
+          row.source_index != null &&
+          selectedRows.has(row.source_index),
       ),
-    [selectedRows, validRows],
+    [mappedRows, selectedRows],
   )
+
+  const visibleRows = useMemo(() => {
+    const term = normalizeSearchText(rowSearch)
+    return mappedRows.filter((row) => {
+      if (showSelectedOnly) {
+        if (row.source_index == null || !selectedRows.has(row.source_index)) {
+          return false
+        }
+      }
+      if (!term) return true
+      const haystack = normalizeSearchText(
+        [
+          row.displayName,
+          row.targetProduct?.canonical_name ?? '',
+          row.original.join(' '),
+        ].join(' '),
+      )
+      return haystack.includes(term)
+    })
+  }, [mappedRows, rowSearch, selectedRows, showSelectedOnly])
 
   const rowsWithUrls = useMemo(
     () => validRows.filter((row) => row.url).length,
@@ -181,18 +362,29 @@ export function FileImport() {
       ).length,
     [validRows],
   )
+  const matchedRows = useMemo(
+    () => validRows.filter((row) => row.targetProduct != null).length,
+    [validRows],
+  )
+  const linkedStoreRows = useMemo(
+    () => validRows.filter((row) => row.targetProductStoreId != null).length,
+    [validRows],
+  )
 
   const commitMutation = useMutation({
     mutationFn: () =>
       importApi.fileCommit({
         rows: selectedMappedRows.map((row) => ({
           source_index: row.source_index ?? null,
-          name: row.name,
+          name: row.displayName,
+          product_id: row.product_id,
+          product_store_id: row.product_store_id,
           url: row.url,
           image_url: row.image_url,
           price: row.price,
           discounted_price: row.discounted_price,
           dealer_price: row.dealer_price,
+          warranty: row.warranty,
           stock_status: row.stock_status,
         })),
         store_id: Number(storeId),
@@ -215,6 +407,8 @@ export function FileImport() {
     const nextFile = event.target.files?.[0] ?? null
     setFile(nextFile)
     setPreview(null)
+    setRowSearch('')
+    setTargetOverrides({})
     setSelectedRows(new Set())
   }
 
@@ -225,16 +419,33 @@ export function FileImport() {
     setSelectedRows(next)
   }
 
-  function toggleAllValid() {
-    const validIndexes = validRows
+  function toggleAllVisible() {
+    const visibleIndexes = visibleRows
       .map((row) => row.source_index)
-      .filter((index): index is number => index != null)
-    const allSelected = validIndexes.every((index) => selectedRows.has(index))
+      .filter((index): index is number => index != null && mappedRows[index]?.valid)
+    const allSelected =
+      visibleIndexes.length > 0 &&
+      visibleIndexes.every((index) => selectedRows.has(index))
+
     if (allSelected) {
-      setSelectedRows(new Set())
+      const next = new Set(selectedRows)
+      for (const index of visibleIndexes) next.delete(index)
+      setSelectedRows(next)
       return
     }
-    setSelectedRows(new Set(validIndexes))
+
+    const next = new Set(selectedRows)
+    for (const index of visibleIndexes) next.add(index)
+    setSelectedRows(next)
+  }
+
+  function setRowTarget(rowIndex: number, value: string) {
+    setTargetOverrides((current) => {
+      const next = { ...current }
+      if (value === '') delete next[rowIndex]
+      else next[rowIndex] = value
+      return next
+    })
   }
 
   const canCommit = selectedMappedRows.length > 0 && storeId !== ''
@@ -245,6 +456,7 @@ export function FileImport() {
     ...(priceCol ? { [priceCol]: 'Retail' } : {}),
     ...(discountedCol ? { [discountedCol]: 'Sale' } : {}),
     ...(dealerCol ? { [dealerCol]: 'Dealer' } : {}),
+    ...(warrantyCol ? { [warrantyCol]: 'Warranty' } : {}),
     ...(stockCol ? { [stockCol]: 'Stock' } : {}),
   }
 
@@ -266,7 +478,7 @@ export function FileImport() {
               <div className="text-xs text-muted-foreground">
                 {file
                   ? `${(file.size / 1024).toFixed(1)} KB`
-                  : 'Full tables are parsed for live row selection.'}
+                  : 'Build a full document workbench, not just a tiny sample.'}
               </div>
             </div>
             <input
@@ -284,7 +496,7 @@ export function FileImport() {
               {previewMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : null}
-              Build live preview
+              Build full workbench
             </Button>
           </div>
         </BentoTile>
@@ -308,8 +520,8 @@ export function FileImport() {
           icon={<CheckCircle2 className="h-4 w-4" />}
           hint={
             validRows.length > 0
-              ? `${validRows.length} mappable rows`
-              : 'set a name column'
+              ? `${validRows.length} rows are ready`
+              : 'set a name or target product'
           }
           tone={selectedMappedRows.length > 0 ? 'success' : 'default'}
         />
@@ -339,14 +551,14 @@ export function FileImport() {
                   columns={preview.columns}
                 />
                 <ColSelect
-                  label="URL column (optional)"
+                  label="URL column"
                   value={urlCol}
                   onChange={setUrlCol}
                   columns={preview.columns}
                   allowEmpty
                 />
                 <ColSelect
-                  label="Image column (optional)"
+                  label="Image column"
                   value={imageCol}
                   onChange={setImageCol}
                   columns={preview.columns}
@@ -374,7 +586,14 @@ export function FileImport() {
                   allowEmpty
                 />
                 <ColSelect
-                  label="Stock column"
+                  label="Warranty column"
+                  value={warrantyCol}
+                  onChange={setWarrantyCol}
+                  columns={preview.columns}
+                  allowEmpty
+                />
+                <ColSelect
+                  label="Stock / status column"
                   value={stockCol}
                   onChange={setStockCol}
                   columns={preview.columns}
@@ -412,7 +631,14 @@ export function FileImport() {
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                <StatTile
+                  label="Matched"
+                  value={matchedRows}
+                  icon={<FileSearch className="h-4 w-4" />}
+                  hint={`${linkedStoreRows} already linked to this store`}
+                  tone={matchedRows > 0 ? 'success' : 'default'}
+                />
                 <StatTile
                   label="With URL"
                   value={rowsWithUrls}
@@ -428,19 +654,18 @@ export function FileImport() {
                   tone={rowsWithPrices > 0 ? 'success' : 'default'}
                 />
                 <StatTile
-                  label="Ready"
-                  value={validRows.length}
-                  icon={<CheckCircle2 className="h-4 w-4" />}
-                  hint="rows with names"
-                  tone={validRows.length > 0 ? 'success' : 'default'}
+                  label="Product targets"
+                  value={productOptions.length}
+                  icon={<Columns3 className="h-4 w-4" />}
+                  hint="existing Gabada products"
                 />
               </div>
 
               <p className="mt-3 text-xs text-muted-foreground">
-                Rows without a URL can still be imported as price-list entries
-                for the selected store. They will be created as inactive
-                non-scraping store links until you attach a real product URL
-                later.
+                Each row can either update an existing Gabada product for the
+                chosen store or create a new entry by document name. If the
+                selected product already has this store linked, the importer
+                updates that store record directly.
               </p>
             </BentoTile>
           </BentoGrid>
@@ -449,14 +674,11 @@ export function FileImport() {
             <BentoTile colSpan={6}>
               <TileHeader
                 eyebrow="Step 3"
-                title={`${selectedMappedRows.length} selected - ${validRows.length} ready to import`}
+                title={`${selectedMappedRows.length} selected - ${visibleRows.length} visible rows`}
                 action={
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={toggleAllValid}>
-                      {selectedMappedRows.length === validRows.length &&
-                      validRows.length > 0
-                        ? 'Clear all'
-                        : 'Select all ready'}
+                    <Button variant="outline" size="sm" onClick={toggleAllVisible}>
+                      Select visible
                     </Button>
                     <Button
                       size="sm"
@@ -468,14 +690,35 @@ export function FileImport() {
                       ) : (
                         <Download className="h-4 w-4" />
                       )}
-                      Import {selectedMappedRows.length}
+                      Update Gabada
                     </Button>
                   </div>
                 }
               />
 
+              <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={rowSearch}
+                    onChange={(event) => setRowSearch(event.target.value)}
+                    placeholder="Search the full document and matched Gabada products"
+                    className="pl-9"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={showSelectedOnly}
+                    onChange={(event) => setShowSelectedOnly(event.target.checked)}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  Show selected only
+                </label>
+              </div>
+
               <div className="mt-3 overflow-hidden rounded-md border border-border">
-                <div className="max-h-[520px] overflow-auto">
+                <div className="max-h-[72vh] overflow-auto">
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 z-10 bg-muted/90 text-muted-foreground backdrop-blur">
                       <tr>
@@ -486,10 +729,13 @@ export function FileImport() {
                           #
                         </th>
                         <th className="min-w-[220px] px-2 py-2 text-left font-medium">
-                          Name
+                          Document product
                         </th>
-                        <th className="min-w-[200px] px-2 py-2 text-left font-medium">
-                          URL
+                        <th className="min-w-[260px] px-2 py-2 text-left font-medium">
+                          Gabada target
+                        </th>
+                        <th className="min-w-[160px] px-2 py-2 text-left font-medium">
+                          Store target
                         </th>
                         <th className="w-28 px-2 py-2 text-left font-medium">
                           Retail
@@ -499,6 +745,9 @@ export function FileImport() {
                         </th>
                         <th className="w-28 px-2 py-2 text-left font-medium">
                           Dealer
+                        </th>
+                        <th className="w-36 px-2 py-2 text-left font-medium">
+                          Warranty
                         </th>
                         <th className="w-28 px-2 py-2 text-left font-medium">
                           Stock
@@ -524,10 +773,83 @@ export function FileImport() {
                       </tr>
                     </thead>
                     <tbody>
-                      {mappedRows.map((row) => {
+                      {visibleRows.map((row) => {
                         const rowIndex = row.source_index ?? -1
                         const checked =
-                          row.source_index != null && selectedRows.has(row.source_index)
+                          row.source_index != null &&
+                          selectedRows.has(row.source_index)
+                        const overrideValue = targetOverrides[rowIndex] ?? ''
+                        const targetSummary = row.targetProduct ? (
+                          <div className="space-y-1">
+                            <Select
+                              value={overrideValue}
+                              onChange={(event) =>
+                                setRowTarget(rowIndex, event.target.value)
+                              }
+                            >
+                              <option value="">
+                                {row.targetMode === 'auto' && row.targetProduct
+                                  ? 'Use auto match'
+                                  : 'Auto / create by row name'}
+                              </option>
+                              <option value={NEW_TARGET}>
+                                Create / update by row name
+                              </option>
+                              {productOptions.map((product) => (
+                                <option key={product.id} value={String(product.id)}>
+                                  {product.canonical_name}
+                                </option>
+                              ))}
+                            </Select>
+                            <div className="truncate text-[11px] text-muted-foreground">
+                              {row.targetProduct.canonical_name}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1">
+                              <Badge
+                                variant={
+                                  row.targetMode === 'auto'
+                                    ? 'success'
+                                    : row.targetMode === 'manual'
+                                      ? 'info'
+                                      : 'outline'
+                                }
+                                className="text-[10px]"
+                              >
+                                {row.targetMode === 'auto'
+                                  ? `Auto ${Math.round((row.targetScore ?? 0) * 100)}%`
+                                  : 'Manual'}
+                              </Badge>
+                              {row.targetProductStoreId ? (
+                                <Badge variant="secondary" className="text-[10px]">
+                                  store linked
+                                </Badge>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <Select
+                              value={overrideValue}
+                              onChange={(event) =>
+                                setRowTarget(rowIndex, event.target.value)
+                              }
+                            >
+                              <option value="">Auto / create by row name</option>
+                              <option value={NEW_TARGET}>
+                                Create / update by row name
+                              </option>
+                              {productOptions.map((product) => (
+                                <option key={product.id} value={String(product.id)}>
+                                  {product.canonical_name}
+                                </option>
+                              ))}
+                            </Select>
+                            <div className="text-[11px] text-muted-foreground">
+                              No confident Gabada match yet
+                            </div>
+                          </div>
+                        )
+
                         return (
                           <tr
                             key={rowIndex}
@@ -548,20 +870,34 @@ export function FileImport() {
                             <td className="px-2 py-2 align-top">
                               <div className="min-w-0">
                                 <div className="truncate font-medium">
-                                  {row.name || 'Missing name'}
+                                  {row.displayName || 'Missing name'}
                                 </div>
                                 {!row.valid ? (
                                   <span className="text-[11px] text-destructive">
-                                    This row will be skipped unless you map a
-                                    name column.
+                                    Map a name column or choose a Gabada product.
                                   </span>
                                 ) : null}
                               </div>
                             </td>
+                            <td className="px-2 py-2 align-top">{targetSummary}</td>
                             <td className="px-2 py-2 align-top text-muted-foreground">
-                              <div className="max-w-[200px] truncate">
-                                {row.url || 'Will create inactive import entry'}
-                              </div>
+                              {row.targetProductStoreId ? (
+                                <span className="text-[11px]">
+                                  Updating linked store entry
+                                </span>
+                              ) : row.product_id ? (
+                                <span className="text-[11px]">
+                                  Will add this store to the chosen product
+                                </span>
+                              ) : row.url ? (
+                                <span className="text-[11px]">
+                                  New tracked row with product URL
+                                </span>
+                              ) : (
+                                <span className="text-[11px]">
+                                  New inactive price-list row
+                                </span>
+                              )}
                             </td>
                             <td className="px-2 py-2 align-top">
                               {formatMappedValue(row.price)}
@@ -573,12 +909,16 @@ export function FileImport() {
                               {formatMappedValue(row.dealer_price)}
                             </td>
                             <td className="px-2 py-2 align-top">
+                              {formatMappedValue(row.warranty)}
+                            </td>
+                            <td className="px-2 py-2 align-top">
                               {formatMappedValue(row.stock_status)}
                             </td>
                             {row.original.map((value, cellIndex) => (
                               <td
                                 key={`${rowIndex}-${cellIndex}`}
                                 className="max-w-[220px] truncate px-2 py-2 align-top"
+                                title={value}
                               >
                                 {value || '-'}
                               </td>

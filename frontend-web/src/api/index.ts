@@ -2,6 +2,8 @@ import { http } from './client'
 import type {
   ActivityEntry,
   Category,
+  DatabaseImportResponse,
+  DatabaseTransferInfo,
   FileImportPreviewResponse,
   FileImportRow,
   FileImportCommitResponse,
@@ -90,6 +92,36 @@ export const settingsApi = {
   },
   nextRun: async (): Promise<{ next_run_time: string | null }> => {
     const { data } = await http.get('/settings/schedule/next')
+    return data
+  },
+  databaseInfo: async (): Promise<DatabaseTransferInfo> => {
+    const { data } = await http.get<DatabaseTransferInfo>('/settings/database/info')
+    return data
+  },
+  exportDatabase: async (): Promise<{ blob: Blob; filename: string }> => {
+    const response = await http.get<Blob>('/settings/database/export', {
+      responseType: 'blob',
+    })
+    const disposition =
+      response.headers['content-disposition'] ??
+      response.headers['Content-Disposition']
+    const match =
+      typeof disposition === 'string'
+        ? /filename="?([^"]+)"?/.exec(disposition)
+        : null
+    return {
+      blob: response.data,
+      filename: match?.[1] ?? 'gabada-backup.zip',
+    }
+  },
+  importDatabase: async (file: File): Promise<DatabaseImportResponse> => {
+    const form = new FormData()
+    form.append('file', file)
+    const { data } = await http.post<DatabaseImportResponse>(
+      '/settings/database/import',
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    )
     return data
   },
 }

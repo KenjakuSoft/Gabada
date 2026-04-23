@@ -2,7 +2,7 @@
 #define MyAppPublisher "Gabada"
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0"
+  #define MyAppVersion "0.1.3"
 #endif
 
 #ifndef SourceDir

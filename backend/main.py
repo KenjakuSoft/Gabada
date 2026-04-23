@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
     logger.info("Lifespan shutdown: complete")
 
 
-app = FastAPI(title="Gabada API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Gabada API", version="0.1.3", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

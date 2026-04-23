@@ -55,6 +55,11 @@ export function StoreRow({ store, symbol, productId }: StoreRowProps) {
         <span className="truncate text-xs text-muted-foreground">
           {safeHost(store.product_url)}
         </span>
+        {store.latest_warranty ? (
+          <span className="truncate text-xs text-muted-foreground">
+            Warranty: {store.latest_warranty}
+          </span>
+        ) : null}
       </div>
 
       <PriceCell store={store} symbol={symbol} />

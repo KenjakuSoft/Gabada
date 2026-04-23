@@ -89,6 +89,7 @@ class ProductStoreSummary(BaseModel):
     latest_price: Optional[float] = None
     latest_discounted_price: Optional[float] = None
     latest_dealer_price: Optional[float] = None
+    latest_warranty: Optional[str] = None
     latest_stock_status: Optional[str] = None
     latest_scraped_at: Optional[datetime] = None
     latest_change_type: Optional[str] = None
@@ -122,6 +123,7 @@ class PriceLog(BaseModel):
     price: Optional[float] = None
     discounted_price: Optional[float] = None
     dealer_price: Optional[float] = None
+    warranty: Optional[str] = None
     stock_status: Optional[str] = None
     change_type: Optional[str] = None
     price_delta: Optional[float] = None
@@ -204,11 +206,14 @@ class FileImportPreviewResponse(BaseModel):
 class FileImportRow(BaseModel):
     name: str
     source_index: Optional[int] = None
+    product_id: Optional[int] = None
+    product_store_id: Optional[int] = None
     url: Optional[str] = None
     image_url: Optional[str] = None
     price: Optional[str | float] = None
     discounted_price: Optional[str | float] = None
     dealer_price: Optional[str | float] = None
+    warranty: Optional[str] = None
     stock_status: Optional[str] = None
 
 class FileImportCommitRequest(BaseModel):
@@ -385,3 +390,29 @@ class SettingsUpdate(BaseModel):
     scrape_enabled: Optional[bool] = None
     locale: Optional[str] = None
     theme: Optional[str] = None
+
+
+class DatabaseCounts(BaseModel):
+    products: int = 0
+    stores: int = 0
+    categories: int = 0
+    product_stores: int = 0
+    price_logs: int = 0
+
+
+class DatabaseTransferInfo(BaseModel):
+    data_dir: str
+    database_path: str
+    site_profiles_path: str
+    site_profiles_exists: bool
+    install_mode: str
+    recommended_export_name: str
+    counts: DatabaseCounts = DatabaseCounts()
+    database_modified_at: Optional[datetime] = None
+
+
+class DatabaseImportResponse(BaseModel):
+    source_name: str
+    backup_path: str
+    site_profiles_restored: bool = False
+    counts: DatabaseCounts = DatabaseCounts()

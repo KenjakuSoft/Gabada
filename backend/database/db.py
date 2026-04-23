@@ -54,6 +54,7 @@ async def init_db():
                 price REAL,
                 discounted_price REAL,
                 dealer_price REAL,
+                warranty TEXT,
                 stock_status TEXT DEFAULT 'unknown',
                 raw_price TEXT,
                 raw_discounted TEXT,
@@ -103,6 +104,7 @@ async def init_db():
             "ALTER TABLE price_logs ADD COLUMN previous_stock_status TEXT",
             "ALTER TABLE price_logs ADD COLUMN dealer_price REAL",
             "ALTER TABLE price_logs ADD COLUMN raw_dealer TEXT",
+            "ALTER TABLE price_logs ADD COLUMN warranty TEXT",
         ]:
             try:
                 await db.execute(col_sql)

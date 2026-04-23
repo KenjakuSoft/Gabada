@@ -1,14 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Check,
   Clock,
+  Database,
+  Download,
   FileCode,
   Globe2,
   Loader2,
   Radio,
   RefreshCw,
+  ShieldCheck,
   Timer,
+  Upload,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -20,7 +24,7 @@ import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { toast } from '@/components/ui/toast-store'
 import { useLiveTime } from '@/hooks/useLiveTime'
 import { scraperApi, settingsApi } from '@/api'
-import type { Settings, SitesConfigResponse } from '@/api'
+import type { DatabaseTransferInfo, Settings, SitesConfigResponse } from '@/api'
 
 // Full ISO 4217 set of actively-circulating national currencies plus a few
 // widely-used dependent-territory currencies. Sorted alphabetically by code
@@ -493,6 +497,7 @@ export function SettingsPage() {
         </BentoTile>
       </BentoGrid>
 
+      <DataPortabilityCard />
       <SiteProfilesCard />
     </div>
   )
@@ -595,5 +600,208 @@ function SiteProfilesCard() {
         />
       </BentoTile>
     </BentoGrid>
+  )
+}
+
+function DataPortabilityCard() {
+  const qc = useQueryClient()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const info = useQuery<DatabaseTransferInfo>({
+    queryKey: ['settings', 'database-info'],
+    queryFn: () => settingsApi.databaseInfo(),
+  })
+
+  const downloadBackup = useMutation({
+    mutationFn: () => settingsApi.exportDatabase(),
+    onSuccess: ({ blob, filename }) => {
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = filename
+      document.body.append(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectUrl)
+      toast.success(
+        'Backup downloaded',
+        'Share this file or keep it before reinstalling or updating.',
+      )
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'Failed to export backup'
+      toast.error('Export failed', detail)
+    },
+  })
+
+  const importBackup = useMutation({
+    mutationFn: (file: File) => settingsApi.importDatabase(file),
+    onSuccess: (result) => {
+      qc.invalidateQueries()
+      toast.success(
+        'Backup restored',
+        `Imported ${result.counts.products} products and saved a safety backup at ${result.backup_path}. Reloading the app.`,
+      )
+      window.setTimeout(() => window.location.reload(), 900)
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'Failed to import backup'
+      toast.error('Import failed', detail)
+    },
+  })
+
+  function pickImportFile() {
+    fileInputRef.current?.click()
+  }
+
+  function onImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const selected = event.target.files?.[0] ?? null
+    event.target.value = ''
+    if (!selected) return
+    const confirmed = window.confirm(
+      'Importing a backup replaces your current local Gabada data on this machine. A safety backup will be created first. Continue?',
+    )
+    if (!confirmed) return
+    importBackup.mutate(selected)
+  }
+
+  const counts = info.data?.counts
+  const modifiedLabel = info.data?.database_modified_at
+    ? new Date(info.data.database_modified_at).toLocaleString()
+    : 'not yet saved'
+
+  return (
+    <BentoGrid cols={6}>
+      <BentoTile colSpan={6} tone="success">
+        <TileHeader
+          eyebrow="Data & upgrades"
+          title="Backup, restore, and share"
+          icon={<Database className="h-4 w-4" />}
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".zip,.db,.sqlite,.sqlite3"
+                className="hidden"
+                onChange={onImportFile}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={pickImportFile}
+                disabled={importBackup.isPending || downloadBackup.isPending}
+              >
+                {importBackup.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                Import backup
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => downloadBackup.mutate()}
+                disabled={downloadBackup.isPending || importBackup.isPending}
+              >
+                {downloadBackup.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                Export backup
+              </Button>
+            </div>
+          }
+        />
+
+        <div className="mt-3 space-y-3">
+          <div className="rounded-2xl border border-border/70 bg-background/60 p-4 text-sm text-muted-foreground">
+            Installed builds already keep their data outside the app folder, so
+            updating to a newer release should reuse the same library. Export a
+            backup when you want something portable to share, move to another
+            machine, or restore later.
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <TransferStat
+              label="Products"
+              value={counts ? counts.products.toLocaleString() : '—'}
+            />
+            <TransferStat
+              label="Stores"
+              value={counts ? counts.stores.toLocaleString() : '—'}
+            />
+            <TransferStat
+              label="Store links"
+              value={counts ? counts.product_stores.toLocaleString() : '—'}
+            />
+            <TransferStat
+              label="Snapshots"
+              value={counts ? counts.price_logs.toLocaleString() : '—'}
+            />
+            <TransferStat label="Last DB update" value={modifiedLabel} />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <ShieldCheck className="h-4 w-4 text-primary" />
+                Upgrade-safe storage
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {info.data?.install_mode === 'desktop'
+                  ? 'This installed copy stores its data in your user app-data folder, so installing a new version should keep your products, stores, and history.'
+                  : 'This source checkout stores data inside the backend folder unless you override the data directory.'}
+              </p>
+              <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+                <div>
+                  <span className="font-medium text-foreground">Data folder</span>
+                  <div className="mt-1 rounded-md bg-muted/60 px-2 py-1 font-mono text-[11px] break-all">
+                    {info.data?.data_dir ?? 'Loading…'}
+                  </div>
+                </div>
+                <div>
+                  <span className="font-medium text-foreground">Database</span>
+                  <div className="mt-1 rounded-md bg-muted/60 px-2 py-1 font-mono text-[11px] break-all">
+                    {info.data?.database_path ?? 'Loading…'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Upload className="h-4 w-4 text-primary" />
+                What import/export covers
+              </div>
+              <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
+                <li>Export creates a shareable backup archive with the SQLite database.</li>
+                <li>If scraper profiles were customized, they travel in the same backup.</li>
+                <li>Import replaces this machine’s current data and makes a safety copy first.</li>
+                <li>You can also import a plain `.db` file if that is all you have.</li>
+              </ul>
+              <div className="mt-3 rounded-md bg-muted/60 px-2 py-1 font-mono text-[11px] text-muted-foreground break-all">
+                {info.data?.recommended_export_name ?? 'gabada-backup.zip'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </BentoTile>
+    </BentoGrid>
+  )
+}
+
+function TransferStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-border/70 bg-background/60 p-3">
+      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
+    </div>
   )
 }

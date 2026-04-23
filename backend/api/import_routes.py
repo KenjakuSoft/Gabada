@@ -14,7 +14,7 @@ try:
 except Exception:  # pragma: no cover - optional dependency during local setup
     xlrd = None
 
-from api.product_service import create_product_with_store
+from api.product_service import create_product_with_store, create_store_link
 from database.db import get_db
 from database.models import (
     FileImportCommitRequest,
@@ -29,6 +29,7 @@ from database.models import (
 router = APIRouter(prefix="/import", tags=["import"])
 
 _WOO_API_MAX_PER_PAGE = 100
+_WOO_MAX_PREVIEW_PAGES = 500
 
 
 def _map_woo_stock(status: str) -> str:
@@ -110,10 +111,17 @@ async def _woo_fetch_preview_products(body: WooPreviewRequest) -> list[WooProduc
             return [_woo_preview_item(product) for product in resp.json()]
 
         previews: list[WooProductPreview] = []
+        seen_ids: set[int] = set()
+        repeated_pages = 0
         page = 1
         total_pages: int | None = None
 
         while True:
+            if page > _WOO_MAX_PREVIEW_PAGES:
+                raise HTTPException(
+                    status_code=502,
+                    detail="WooCommerce preview exceeded the safe page limit",
+                )
             resp = await _woo_get_products(
                 client,
                 site_url=body.credentials.site_url,
@@ -122,13 +130,25 @@ async def _woo_fetch_preview_products(body: WooPreviewRequest) -> list[WooProduc
                 params={"per_page": per_page, "page": page},
             )
             products = resp.json()
-            previews.extend(_woo_preview_item(product) for product in products)
+            new_products = [
+                product
+                for product in products
+                if product.get("id") not in seen_ids
+            ]
+            if new_products:
+                previews.extend(_woo_preview_item(product) for product in new_products)
+                seen_ids.update(product["id"] for product in new_products)
+                repeated_pages = 0
+            else:
+                repeated_pages += 1
 
             if total_pages is None:
                 total_pages = _woo_total_pages(resp)
             if total_pages is not None and page >= total_pages:
                 break
             if len(products) < per_page:
+                break
+            if repeated_pages >= 1:
                 break
             page += 1
 
@@ -598,6 +618,12 @@ def _normalize_import_stock(status: Optional[str]) -> str:
     text = (status or "").strip().lower()
     if not text:
         return "unknown"
+    if any(token in text for token in ("call for price", "call us", "call for availability", "ask for price", "price on request")):
+        return "call_for_price"
+    if any(token in text for token in ("contact for price", "contact us", "inquire", "inquiry", "whatsapp us", "message us")):
+        return "contact_store"
+    if any(token in text for token in ("discontinued", "end of life", "eol")):
+        return "discontinued"
     if any(token in text for token in ("preorder", "pre-order", "coming soon")):
         return "preorder"
     if any(token in text for token in ("backorder", "back-order")):
@@ -659,6 +685,19 @@ def _placeholder_product_url(store_id: int, row: FileImportRow) -> str:
     return f"import://store-{store_id}/{quote(base)}-{suffix}"
 
 
+def _stock_hint_from_row(row: FileImportRow) -> str:
+    for candidate in (
+        row.stock_status,
+        row.price if isinstance(row.price, str) else None,
+        row.discounted_price if isinstance(row.discounted_price, str) else None,
+        row.dealer_price if isinstance(row.dealer_price, str) else None,
+    ):
+        status = _normalize_import_stock(candidate)
+        if status != "unknown":
+            return status
+    return "unknown"
+
+
 @router.post("/file/preview", response_model=FileImportPreviewResponse)
 async def file_preview(file: UploadFile = File(...)):
     content = await file.read()
@@ -696,6 +735,47 @@ async def _find_import_target(db, *, canonical_name: str, store_id: int):
     return rows[0] if rows else None
 
 
+async def _find_import_target_by_product(db, *, product_id: int, store_id: int):
+    rows = await db.execute_fetchall(
+        """SELECT
+               p.id AS product_id,
+               p.canonical_name,
+               p.image_url,
+               p.category_id,
+               ps.id AS product_store_id,
+               ps.store_id,
+               ps.product_url,
+               ps.is_active
+           FROM products p
+           LEFT JOIN product_stores ps
+             ON ps.product_id = p.id AND ps.store_id = ?
+           WHERE p.id = ?
+           LIMIT 1""",
+        (store_id, product_id),
+    )
+    return rows[0] if rows else None
+
+
+async def _find_import_target_by_store_link(db, *, product_store_id: int):
+    rows = await db.execute_fetchall(
+        """SELECT
+               p.id AS product_id,
+               p.canonical_name,
+               p.image_url,
+               p.category_id,
+               ps.id AS product_store_id,
+               ps.store_id,
+               ps.product_url,
+               ps.is_active
+           FROM product_stores ps
+           JOIN products p ON p.id = ps.product_id
+           WHERE ps.id = ?
+           LIMIT 1""",
+        (product_store_id,),
+    )
+    return rows[0] if rows else None
+
+
 async def _latest_price_log(db, product_store_id: int):
     rows = await db.execute_fetchall(
         """SELECT price, discounted_price, stock_status
@@ -715,11 +795,40 @@ async def _upsert_import_target(
     store_id: int,
     category_id: Optional[int],
 ) -> tuple[int, int, str]:
-    canonical_name = row.name.strip()
     provided_url = (row.url or "").strip()
     has_real_url = bool(provided_url)
+    entered_name = row.name.strip()
+    explicit_target = None
+    if row.product_store_id is not None:
+        explicit_target = await _find_import_target_by_store_link(
+            db,
+            product_store_id=row.product_store_id,
+        )
+        if explicit_target is None:
+            raise HTTPException(400, f"Product store {row.product_store_id} was not found")
+        if explicit_target["store_id"] != store_id:
+            raise HTTPException(400, "Selected product store does not belong to the chosen store")
+    elif row.product_id is not None:
+        explicit_target = await _find_import_target_by_product(
+            db,
+            product_id=row.product_id,
+            store_id=store_id,
+        )
+        if explicit_target is None:
+            raise HTTPException(400, f"Product {row.product_id} was not found")
+
+    canonical_name = (
+        (explicit_target["canonical_name"] if explicit_target is not None else None)
+        or entered_name
+    )
+    if not canonical_name:
+        raise HTTPException(400, "Imported rows must include a product name or an existing product target")
+
+    row.name = entered_name or canonical_name
     resolved_url = provided_url or _placeholder_product_url(store_id, row)
-    target = await _find_import_target(db, canonical_name=canonical_name, store_id=store_id)
+    target = explicit_target
+    if target is None:
+        target = await _find_import_target(db, canonical_name=canonical_name, store_id=store_id)
 
     if target is None:
         product_id, product_store_id = await create_product_with_store(
@@ -735,6 +844,16 @@ async def _upsert_import_target(
 
     product_id = target["product_id"]
     product_store_id = target["product_store_id"]
+
+    if product_store_id is None:
+        product_store_id = await create_store_link(
+            db,
+            product_id=product_id,
+            store_id=store_id,
+            product_url=resolved_url,
+            is_active=has_real_url,
+        )
+        return product_id, product_store_id, "updated"
 
     if row.image_url and not target["image_url"]:
         await db.execute(
@@ -771,6 +890,7 @@ async def _insert_import_snapshot(db, *, product_store_id: int, row: FileImportR
         row.price is not None
         or row.discounted_price is not None
         or row.dealer_price is not None
+        or row.warranty not in (None, "")
         or row.stock_status not in (None, "", "unknown")
     )
     if not has_snapshot:
@@ -781,16 +901,17 @@ async def _insert_import_snapshot(db, *, product_store_id: int, row: FileImportR
 
     await db.execute(
         """INSERT INTO price_logs
-           (product_store_id, title, price, discounted_price, dealer_price,
+           (product_store_id, title, price, discounted_price, dealer_price, warranty,
             stock_status, raw_price, raw_discounted, raw_dealer,
             change_type, price_delta, previous_price, previous_stock_status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             product_store_id,
             row.name,
             row.price,
             row.discounted_price,
             row.dealer_price,
+            row.warranty,
             row.stock_status or "unknown",
             str(row.price) if row.price is not None else None,
             str(row.discounted_price) if row.discounted_price is not None else None,
@@ -811,9 +932,11 @@ async def file_commit(body: FileImportCommitRequest):
     updated = 0
     try:
         for row in body.rows:
-            if not row.name.strip():
+            if not row.name.strip() and row.product_id is None and row.product_store_id is None:
                 continue
 
+            row.warranty = (row.warranty or "").strip() or None
+            hinted_stock = _stock_hint_from_row(row)
             row.price = _parse_import_price(row.price)
             row.discounted_price = _parse_import_price(row.discounted_price)
             row.dealer_price = _parse_import_price(row.dealer_price)
@@ -822,6 +945,8 @@ async def file_commit(body: FileImportCommitRequest):
                 row.discounted_price,
             )
             row.stock_status = _normalize_import_stock(row.stock_status)
+            if row.stock_status == "unknown":
+                row.stock_status = hinted_stock
 
             _, product_store_id, action = await _upsert_import_target(
                 db,

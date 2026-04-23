@@ -4,6 +4,9 @@ export type StockStatus =
   | 'limited'
   | 'preorder'
   | 'backorder'
+  | 'call_for_price'
+  | 'contact_store'
+  | 'discontinued'
   | 'unknown'
 
 export interface Category {
@@ -30,6 +33,7 @@ export interface ProductStoreSummary {
   latest_price: number | null
   latest_discounted_price: number | null
   latest_dealer_price: number | null
+  latest_warranty: string | null
   latest_stock_status: StockStatus | null
   latest_scraped_at: string | null
   latest_change_type: string | null
@@ -58,6 +62,7 @@ export interface PriceLog {
   price: number | null
   discounted_price: number | null
   dealer_price: number | null
+  warranty: string | null
   stock_status: StockStatus | null
   change_type: string | null
   price_delta: number | null
@@ -88,6 +93,32 @@ export interface Settings {
   locale: string
   theme: 'light' | 'dark' | 'system'
   updated_at: string | null
+}
+
+export interface DatabaseCounts {
+  products: number
+  stores: number
+  categories: number
+  product_stores: number
+  price_logs: number
+}
+
+export interface DatabaseTransferInfo {
+  data_dir: string
+  database_path: string
+  site_profiles_path: string
+  site_profiles_exists: boolean
+  install_mode: 'desktop' | 'source'
+  recommended_export_name: string
+  counts: DatabaseCounts
+  database_modified_at: string | null
+}
+
+export interface DatabaseImportResponse {
+  source_name: string
+  backup_path: string
+  site_profiles_restored: boolean
+  counts: DatabaseCounts
 }
 
 export interface ProbeCandidate {
@@ -211,11 +242,14 @@ export interface FileImportPreviewResponse {
 export interface FileImportRow {
   name: string
   source_index?: number | null
+  product_id?: number | null
+  product_store_id?: number | null
   url?: string | null
   image_url?: string | null
   price?: number | string | null
   discounted_price?: number | string | null
   dealer_price?: number | string | null
+  warranty?: string | null
   stock_status?: string | null
 }
 
