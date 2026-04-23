@@ -367,6 +367,16 @@ _RAW_PRICE_NOISE_RE = re.compile(
     re.IGNORECASE,
 )
 _RAW_PHONE_RE = re.compile(r"(?:\+\d{1,3}\s*)?(?:\d[\s-]?){7,}")
+_SMART_PRICE_CONTEXT_RE = re.compile(
+    r"(price|amount|cost|sale|offer|regular|current|discount|money|"
+    r"woocommerce-price|special|compare|now|was)",
+    re.IGNORECASE,
+)
+_SMART_TITLE_CONTEXT_RE = re.compile(
+    r"(product[_\s-]*title|entry-title|page-title|post-title|"
+    r"product[_\s-]*name|item[_\s-]*name|heading|title)",
+    re.IGNORECASE,
+)
 
 
 def _raw_price_signal(raw: Optional[str]) -> int:
@@ -391,6 +401,97 @@ def _raw_price_signal(raw: Optional[str]) -> int:
     if _RAW_PRICE_SPEC_RE.search(text) and not _RAW_PRICE_HINT_RE.search(text):
         score -= 5
     return score
+
+
+def _smart_candidate_has_price_context(candidate: Optional[dict[str, Any]]) -> bool:
+    if not candidate:
+        return False
+    blob = " ".join(
+        str(candidate.get(field) or "")
+        for field in ("selector", "dom_path", "tag")
+    )
+    return bool(_SMART_PRICE_CONTEXT_RE.search(blob))
+
+
+def _smart_candidate_looks_like_title(candidate: Optional[dict[str, Any]]) -> bool:
+    if not candidate:
+        return False
+    tag = str(candidate.get("tag") or "").lower()
+    selector_blob = " ".join(
+        str(candidate.get(field) or "")
+        for field in ("selector", "dom_path")
+    )
+    if _SMART_TITLE_CONTEXT_RE.search(selector_blob):
+        return True
+    node_text = str(candidate.get("node_text") or "")
+    return tag in {"h1", "h2", "h3"} and bool(re.search(r"[A-Za-z]", node_text))
+
+
+def _smart_candidate_is_weak_price(
+    candidate: Optional[dict[str, Any]],
+    raw: Optional[str],
+    value: Optional[float],
+) -> bool:
+    if not candidate or raw is None or value is None:
+        return False
+
+    text = raw.strip()
+    if not text:
+        return False
+
+    signal = _raw_price_signal(text)
+    score = int(candidate.get("score", 0) or 0)
+    plain_number = bool(_RAW_PLAIN_NUMBER_RE.fullmatch(text))
+    has_price_context = _smart_candidate_has_price_context(candidate)
+    title_like = _smart_candidate_looks_like_title(candidate)
+
+    if title_like and signal <= 1 and not has_price_context:
+        return True
+    if value < 100 and signal <= 1 and not has_price_context and score < 36:
+        return True
+    if plain_number and signal <= 1 and not has_price_context and score < 28:
+        return True
+    return False
+
+
+def _sanitize_smart_scan_result(
+    smart: ScrapeResult,
+    smart_data: dict[str, Any],
+) -> ScrapeResult:
+    sanitized = smart.model_copy(deep=True)
+    main = smart_data.get("main") or None
+    original = smart_data.get("original") or None
+
+    current_value, current_raw = _current_price_pair(sanitized)
+    if _smart_candidate_is_weak_price(main, current_raw, current_value):
+        sanitized.price = None
+        sanitized.discounted_price = None
+        sanitized.raw_price = None
+        sanitized.raw_discounted = None
+        return _normalize_scrape_result(sanitized)
+
+    if (
+        sanitized.discounted_price is not None
+        and sanitized.price is not None
+        and _smart_candidate_is_weak_price(original, sanitized.raw_price, sanitized.price)
+    ):
+        sanitized.price = sanitized.discounted_price
+        sanitized.raw_price = sanitized.raw_discounted
+        _clear_discount(sanitized)
+
+    return _normalize_scrape_result(sanitized)
+
+
+def _current_price_pair(result: ScrapeResult) -> tuple[Optional[float], Optional[str]]:
+    if result.discounted_price is not None:
+        return result.discounted_price, result.raw_discounted
+    return result.price, result.raw_price
+
+
+def _regular_price_pair(result: ScrapeResult) -> tuple[Optional[float], Optional[str]]:
+    if result.discounted_price is None:
+        return None, None
+    return result.price, result.raw_price
 
 
 def _prices_close(left: Optional[float], right: Optional[float]) -> bool:
@@ -441,15 +542,14 @@ def _review_result_with_smart_scan(
         return _normalize_scrape_result(result)
 
     reviewed = result.model_copy(deep=True)
-    smart_current = smart.discounted_price if smart.discounted_price is not None else smart.price
-    result_current = (
-        reviewed.discounted_price if reviewed.discounted_price is not None else reviewed.price
-    )
-    smart_regular = smart.price if smart.discounted_price is not None else None
-    result_regular = reviewed.price if reviewed.discounted_price is not None else None
-    current_raw = (
-        reviewed.raw_discounted if reviewed.discounted_price is not None else reviewed.raw_price
-    )
+    smart_current, smart_current_raw = _current_price_pair(smart)
+    result_current, current_raw = _current_price_pair(reviewed)
+    smart_regular, smart_regular_raw = _regular_price_pair(smart)
+    result_regular, result_regular_raw = _regular_price_pair(reviewed)
+    current_signal = _raw_price_signal(current_raw)
+    smart_current_signal = _raw_price_signal(smart_current_raw)
+    result_regular_signal = _raw_price_signal(result_regular_raw)
+    smart_regular_signal = _raw_price_signal(smart_regular_raw)
 
     current_mismatch = result_current is None or not _prices_close(result_current, smart_current)
     regular_mismatch = False
@@ -467,6 +567,21 @@ def _review_result_with_smart_scan(
     )
     suspicious_current_raw = _raw_price_signal(current_raw) <= 1
     suspicious_regular_raw = reviewed.discounted_price is not None and _raw_price_signal(reviewed.raw_price) <= 1
+    smart_supports_current = (
+        result_current is None
+        or suspicious_current_raw
+        or smart_current_signal >= current_signal + 1
+        or (
+            smart_regular is not None
+            and smart_current_signal >= current_signal
+            and smart_regular_signal >= max(2, result_regular_signal)
+        )
+    )
+    smart_supports_regular = (
+        result_regular is None
+        or suspicious_regular_raw
+        or smart_regular_signal >= result_regular_signal + 1
+    )
 
     should_adopt = False
     reasons: list[str] = []
@@ -479,7 +594,7 @@ def _review_result_with_smart_scan(
         or not structured_price_locked
         or suspicious_current_raw
         or major_divergence
-    ):
+    ) and smart_supports_current:
         should_adopt = True
         reasons.append("current price disagrees with smart scan")
 
@@ -492,15 +607,12 @@ def _review_result_with_smart_scan(
             or not structured_price_locked
             or suspicious_regular_raw
             or major_divergence
-        ):
+        ) and smart_supports_regular:
             should_adopt = True
             reasons.append("regular price disagrees with smart scan")
     elif reviewed.discounted_price is not None and (
-        has_custom
-        or not structured_price_locked
-        or suspicious_current_raw
+        suspicious_current_raw
         or suspicious_regular_raw
-        or major_divergence
     ):
         should_adopt = True
         reasons.append("smart scan found no sale pair")
@@ -1023,6 +1135,19 @@ _SMART_SCAN_JS = r"""() => {
         return score;
     }
 
+    function looksTitleLike(el, text) {
+        if (!el) return false;
+        const tag = el.tagName ? el.tagName.toLowerCase() : '';
+        let cur = el;
+        for (let i = 0; i < 3 && cur; i++, cur = cur.parentElement) {
+            const info = ((cur.className || '') + ' ' + (cur.id || '')).toString();
+            if (/(product[_\s-]?title|entry-title|page-title|post-title|product[_\s-]?name|item[_\s-]?name|heading)/i.test(info)) {
+                return true;
+            }
+        }
+        return /^h[1-3]$/.test(tag) && /[A-Za-z]/.test(text || '');
+    }
+
     function structurePart(el) {
         if (!el || !el.tagName) return '';
         let part = el.tagName.toLowerCase();
@@ -1278,6 +1403,7 @@ _SMART_SCAN_JS = r"""() => {
         const textHasCurrency = CURRENCY_SIGNAL.test(normalizedText);
         const textHasPriceSignal = INLINE_PRICE_SIGNAL.test(normalizedText);
         const textLooksSpec = INLINE_SPEC_SIGNAL.test(normalizedText);
+        const titleLike = looksTitleLike(el, normalizedText);
         if (PHONE_LIKE.test(normalizedText) && !textHasCurrency && !textHasPriceSignal) continue;
         const matches = Array.from(normalizedText.matchAll(PRICE_FRAGMENT_RE));
         if (matches.length === 0) continue;
@@ -1308,9 +1434,15 @@ _SMART_SCAN_JS = r"""() => {
             const hasCurrency = textHasCurrency || CURRENCY_SIGNAL.test(fragment);
             const hasPriceSignal = textHasPriceSignal || INLINE_PRICE_SIGNAL.test(local);
             const hasMeasureUnit = MEASURE_UNIT.test(local);
+            const prevChar = idx > 0 ? normalizedText[idx - 1] : '';
+            const nextPos = idx + fragment.length;
+            const nextChar = nextPos < normalizedText.length ? normalizedText[nextPos] : '';
+            const embeddedToken = /[A-Za-z0-9]/.test(prevChar) || /[A-Za-z0-9]/.test(nextChar);
 
             if (textLooksSpec && !hasPriceSignal && !hasCurrency && context < 20) continue;
             if (hasMeasureUnit && !hasPriceSignal && !hasCurrency && context < 20) continue;
+            if (!hasCurrency && !hasPriceSignal && embeddedToken) continue;
+            if (!hasCurrency && !hasPriceSignal && titleLike) continue;
             if (!hasCurrency && !hasPriceSignal && context < 20) continue;
 
             let score = context;
@@ -2299,7 +2431,7 @@ def _smart_scan_result_from_data(data: dict[str, Any]) -> ScrapeResult:
 
 async def _try_smart_scan(page: Page) -> ScrapeResult:
     data = await _run_smart_scan(page)
-    result = _smart_scan_result_from_data(data)
+    result = _sanitize_smart_scan_result(_smart_scan_result_from_data(data), data)
 
     if result.price:
         logger.info(
@@ -2583,7 +2715,7 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
             result = await _try_microdata(page)
         structured_price_locked = result.price is not None
         smart_data = await _run_smart_scan(page)
-        smart = _smart_scan_result_from_data(smart_data)
+        smart = _sanitize_smart_scan_result(_smart_scan_result_from_data(smart_data), smart_data)
 
         # Smart scan fills gaps. Never overwrites a JSON-LD / microdata price.
         if not result.price or result.stock_status in (None, "unknown"):
@@ -2738,7 +2870,7 @@ async def scrape_with_open_page(
         result = await _try_microdata(page)
     structured_price_locked = result.price is not None
     smart_data = await _run_smart_scan(page)
-    smart = _smart_scan_result_from_data(smart_data)
+    smart = _sanitize_smart_scan_result(_smart_scan_result_from_data(smart_data), smart_data)
 
     if not result.price or result.stock_status in (None, "unknown"):
         if not result.price and smart.price:
