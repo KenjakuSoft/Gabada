@@ -1,8 +1,10 @@
 import csv
 import io
+import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 import openpyxl
@@ -21,15 +23,20 @@ from database.models import (
     FileImportCommitResponse,
     FileImportPreviewResponse,
     FileImportRow,
+    ScrapeConfig,
+    Store,
     WooImportRequest,
-    WooPreviewRequest,
     WooProductPreview,
+    WooPreviewRequest,
+    WooSyncResult,
 )
 
 router = APIRouter(prefix="/import", tags=["import"])
+logger = logging.getLogger(__name__)
 
 _WOO_API_MAX_PER_PAGE = 100
 _WOO_MAX_PREVIEW_PAGES = 500
+_WOO_TIMEOUT = httpx.Timeout(60.0, connect=20.0)
 
 
 def _map_woo_stock(status: str) -> str:
@@ -42,6 +49,63 @@ def _map_woo_stock(status: str) -> str:
 
 def _woo_products_url(site_url: str) -> str:
     return f"{site_url.rstrip('/')}/wp-json/wc/v3/products"
+
+
+def _woo_preview_error_detail(exc: Exception) -> str:
+    if isinstance(exc, HTTPException) and isinstance(exc.detail, str):
+        return exc.detail
+    return str(exc)
+
+
+def _clip_woo_body(text: str, *, limit: int = 220) -> str:
+    collapsed = " ".join((text or "").split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 3].rstrip() + "..."
+
+
+def _normalize_woo_site_url(site_url: str) -> str:
+    raw = (site_url or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Site URL is required")
+    if not re.match(r"^https?://", raw, re.I):
+        raw = f"https://{raw}"
+    parsed = urlparse(raw)
+    if not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Enter a valid WooCommerce site URL")
+    cleaned_path = parsed.path.rstrip("/")
+    for suffix in ("/wp-json/wc/v3/products", "/wp-json/wc/v3"):
+        if cleaned_path.endswith(suffix):
+            cleaned_path = cleaned_path[: -len(suffix)]
+            break
+    if cleaned_path.endswith("/index.php"):
+        cleaned_path = cleaned_path[: -len("/index.php")]
+    return urlunparse(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc,
+            cleaned_path,
+            "",
+            "",
+            "",
+        )
+    ).rstrip("/")
+
+
+def _woo_products_urls(site_url: str) -> list[str]:
+    base = _normalize_woo_site_url(site_url)
+    candidates = [
+        f"{base}/wp-json/wc/v3/products",
+        f"{base}/index.php?rest_route=/wc/v3/products",
+        f"{base}/?rest_route=/wc/v3/products",
+    ]
+    unique: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate not in seen:
+            unique.append(candidate)
+            seen.add(candidate)
+    return unique
 
 
 def _woo_per_page(value: int) -> int:
@@ -83,30 +147,80 @@ async def _woo_get_products(
     consumer_key: str,
     consumer_secret: str,
     params: dict,
-) -> httpx.Response:
-    try:
-        resp = await client.get(
-            _woo_products_url(site_url),
-            auth=(consumer_key, consumer_secret),
-            params=params,
-        )
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"Cannot reach WooCommerce: {exc}")
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail="WooCommerce API error")
-    return resp
+    preferred_endpoint: Optional[str] = None,
+    preferred_auth_mode: Optional[str] = None,
+) -> tuple[httpx.Response, str, str]:
+    attempts: list[str] = []
+    last_request_error: Optional[httpx.RequestError] = None
+    endpoints = _woo_products_urls(site_url)
+    if preferred_endpoint in endpoints:
+        endpoints = [preferred_endpoint] + [
+            endpoint for endpoint in endpoints if endpoint != preferred_endpoint
+        ]
+
+    auth_modes: list[tuple[str, dict[str, Any]]] = [
+        (
+            "basic auth",
+            {
+                "auth": (consumer_key, consumer_secret),
+                "params": params,
+            },
+        ),
+        (
+            "query auth",
+            {
+                "auth": None,
+                "params": {
+                    **params,
+                    "consumer_key": consumer_key,
+                    "consumer_secret": consumer_secret,
+                },
+            },
+        ),
+    ]
+    if preferred_auth_mode:
+        auth_modes.sort(key=lambda item: 0 if item[0] == preferred_auth_mode else 1)
+
+    for endpoint in endpoints:
+        for label, request_kwargs in auth_modes:
+            try:
+                resp = await client.get(endpoint, **request_kwargs)
+            except httpx.RequestError as exc:
+                last_request_error = exc
+                attempts.append(f"{label} via {endpoint} unreachable: {exc}")
+                continue
+
+            if resp.status_code == 200:
+                return resp, endpoint, label
+
+            body_detail = _clip_woo_body(resp.text)
+            status_detail = f"{resp.status_code} {resp.reason_phrase}".strip()
+            if body_detail:
+                attempts.append(f"{label} via {endpoint}: {status_detail} - {body_detail}")
+            else:
+                attempts.append(f"{label} via {endpoint}: {status_detail}")
+
+    if last_request_error is not None and not attempts:
+        raise HTTPException(status_code=502, detail=f"Cannot reach WooCommerce: {last_request_error}")
+
+    detail = "WooCommerce API preview failed. " + " | ".join(attempts[:4])
+    raise HTTPException(status_code=502, detail=detail)
 
 
 async def _woo_fetch_preview_products(body: WooPreviewRequest) -> list[WooProductPreview]:
     per_page = _woo_per_page(body.per_page)
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=_WOO_TIMEOUT) as client:
+        resolved_endpoint: Optional[str] = None
+        resolved_auth_mode: Optional[str] = None
         if not body.fetch_all:
-            resp = await _woo_get_products(
+            resp, _, _ = await _woo_get_products(
                 client,
                 site_url=body.credentials.site_url,
                 consumer_key=body.credentials.consumer_key,
                 consumer_secret=body.credentials.consumer_secret,
                 params={"per_page": per_page, "page": max(1, body.page)},
+                preferred_endpoint=resolved_endpoint,
+                preferred_auth_mode=resolved_auth_mode,
             )
             return [_woo_preview_item(product) for product in resp.json()]
 
@@ -122,12 +236,14 @@ async def _woo_fetch_preview_products(body: WooPreviewRequest) -> list[WooProduc
                     status_code=502,
                     detail="WooCommerce preview exceeded the safe page limit",
                 )
-            resp = await _woo_get_products(
+            resp, resolved_endpoint, resolved_auth_mode = await _woo_get_products(
                 client,
                 site_url=body.credentials.site_url,
                 consumer_key=body.credentials.consumer_key,
                 consumer_secret=body.credentials.consumer_secret,
                 params={"per_page": per_page, "page": page},
+                preferred_endpoint=resolved_endpoint,
+                preferred_auth_mode=resolved_auth_mode,
             )
             products = resp.json()
             new_products = [
@@ -155,15 +271,251 @@ async def _woo_fetch_preview_products(body: WooPreviewRequest) -> list[WooProduc
         return previews
 
 
+async def _woo_validate_preview_request(body: WooPreviewRequest) -> None:
+    if not body.credentials.consumer_key.strip() or not body.credentials.consumer_secret.strip():
+        raise HTTPException(status_code=400, detail="Consumer key and secret are required")
+    _normalize_woo_site_url(body.credentials.site_url)
+
+
+async def _woo_validate_import_request(body: WooImportRequest) -> None:
+    if not body.credentials.consumer_key.strip() or not body.credentials.consumer_secret.strip():
+        raise HTTPException(status_code=400, detail="Consumer key and secret are required")
+    _normalize_woo_site_url(body.credentials.site_url)
+
+
+def _normalize_store_product_url(url: str) -> str:
+    text = (url or "").strip()
+    if not text:
+        return ""
+    parsed = urlparse(text)
+    path = parsed.path.rstrip("/")
+    return urlunparse(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            path,
+            "",
+            parsed.query,
+            "",
+        )
+    )
+
+
+def _normalize_store_product_name(name: str) -> str:
+    return re.sub(r"\s+", " ", (name or "").strip()).lower()
+
+
+def _row_to_store(row) -> Store:
+    return Store(
+        id=row["id"],
+        name=row["name"],
+        base_url=row["base_url"],
+        woo_enabled=bool(row["woo_enabled"]),
+        woo_site_url=row["woo_site_url"],
+        woo_consumer_key=row["woo_consumer_key"],
+        woo_consumer_secret=row["woo_consumer_secret"],
+        woo_auto_import_new=bool(row["woo_auto_import_new"]),
+        woo_last_synced_at=row["woo_last_synced_at"],
+        created_at=row["created_at"],
+    )
+
+
+async def _get_store_or_404(db, store_id: int) -> Store:
+    rows = await db.execute_fetchall(
+        """SELECT
+               id,
+               name,
+               base_url,
+               woo_enabled,
+               woo_site_url,
+               woo_consumer_key,
+               woo_consumer_secret,
+               woo_auto_import_new,
+               woo_last_synced_at,
+               created_at
+           FROM stores
+           WHERE id = ?""",
+        (store_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Store not found")
+    return _row_to_store(rows[0])
+
+
+def _woo_credentials_from_store(store: Store) -> WooPreviewRequest:
+    if not store.woo_enabled:
+        raise HTTPException(status_code=400, detail="Woo sync is not enabled for this store")
+    if not store.woo_site_url or not store.woo_consumer_key or not store.woo_consumer_secret:
+        raise HTTPException(status_code=400, detail="Store is missing Woo sync credentials")
+    return WooPreviewRequest(
+        credentials={
+            "site_url": store.woo_site_url,
+            "consumer_key": store.woo_consumer_key,
+            "consumer_secret": store.woo_consumer_secret,
+        },
+        per_page=_WOO_API_MAX_PER_PAGE,
+        page=1,
+        fetch_all=True,
+    )
+
+
+async def _existing_store_product_maps(db, store_id: int) -> tuple[dict[str, dict], dict[str, dict]]:
+    rows = await db.execute_fetchall(
+        """SELECT
+               p.id AS product_id,
+               p.canonical_name,
+               p.image_url,
+               ps.id AS product_store_id,
+               ps.product_url
+           FROM product_stores ps
+           JOIN products p ON p.id = ps.product_id
+           WHERE ps.store_id = ?""",
+        (store_id,),
+    )
+    by_url: dict[str, dict] = {}
+    by_name: dict[str, dict] = {}
+    for row in rows:
+        normalized_url = _normalize_store_product_url(row["product_url"])
+        normalized_name = _normalize_store_product_name(row["canonical_name"])
+        payload = dict(row)
+        if normalized_url and normalized_url not in by_url:
+            by_url[normalized_url] = payload
+        if normalized_name and normalized_name not in by_name:
+            by_name[normalized_name] = payload
+    return by_url, by_name
+
+
+async def _find_any_product_by_name(db, canonical_name: str) -> Optional[dict]:
+    rows = await db.execute_fetchall(
+        """SELECT id, canonical_name, image_url
+           FROM products
+           WHERE lower(trim(canonical_name)) = lower(trim(?))
+           ORDER BY id
+           LIMIT 1""",
+        (canonical_name,),
+    )
+    return dict(rows[0]) if rows else None
+
+
+async def sync_store_woo_catalog(store_id: int) -> WooSyncResult:
+    db = await get_db()
+    try:
+        store = await _get_store_or_404(db, store_id)
+        preview_request = _woo_credentials_from_store(store)
+        await _woo_validate_preview_request(preview_request)
+        previews = await _woo_fetch_preview_products(preview_request)
+        existing_by_url, existing_by_name = await _existing_store_product_maps(db, store_id)
+
+        created = 0
+        existing = 0
+        auto_import_new = bool(store.woo_auto_import_new)
+        for preview in previews:
+            normalized_url = _normalize_store_product_url(preview.permalink)
+            normalized_name = _normalize_store_product_name(preview.name)
+            match = existing_by_url.get(normalized_url) or existing_by_name.get(normalized_name)
+            if match is not None:
+                existing += 1
+                if normalized_url and match.get("product_url") != preview.permalink:
+                    await db.execute(
+                        "UPDATE product_stores SET product_url = ?, is_active = 1 WHERE id = ?",
+                        (preview.permalink, match["product_store_id"]),
+                    )
+                if preview.image_url and not match.get("image_url"):
+                    await db.execute(
+                        "UPDATE products SET image_url = ? WHERE id = ?",
+                        (preview.image_url, match["product_id"]),
+                    )
+                continue
+
+            if not auto_import_new:
+                continue
+
+            existing_product = await _find_any_product_by_name(db, preview.name)
+            if existing_product is not None:
+                await create_store_link(
+                    db,
+                    product_id=existing_product["id"],
+                    store_id=store_id,
+                    product_url=preview.permalink,
+                    scrape_config_json=ScrapeConfig(platform="woocommerce").model_dump_json(),
+                    is_active=True,
+                )
+                if preview.image_url and not existing_product.get("image_url"):
+                    await db.execute(
+                        "UPDATE products SET image_url = ? WHERE id = ?",
+                        (preview.image_url, existing_product["id"]),
+                    )
+            else:
+                await create_product_with_store(
+                    db,
+                    canonical_name=preview.name,
+                    image_url=preview.image_url,
+                    category_id=None,
+                    store_id=store_id,
+                    product_url=preview.permalink,
+                    scrape_config_json=ScrapeConfig(platform="woocommerce").model_dump_json(),
+                )
+            created += 1
+            if normalized_url:
+                existing_by_url[normalized_url] = {"product_url": preview.permalink}
+            if normalized_name:
+                existing_by_name[normalized_name] = {"canonical_name": preview.name}
+
+        await db.execute(
+            "UPDATE stores SET woo_last_synced_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (store_id,),
+        )
+        await db.commit()
+        refreshed = await _get_store_or_404(db, store_id)
+        return WooSyncResult(
+            store_id=store_id,
+            store_name=store.name,
+            discovered=len(previews),
+            created=created,
+            existing=existing,
+            auto_import_new=auto_import_new,
+            synced_at=refreshed.woo_last_synced_at,
+        )
+    finally:
+        await db.close()
+
+
+async def sync_all_enabled_woo_stores() -> list[WooSyncResult]:
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            """SELECT id
+               FROM stores
+               WHERE woo_enabled = 1
+                 AND woo_site_url IS NOT NULL
+                 AND woo_consumer_key IS NOT NULL
+                 AND woo_consumer_secret IS NOT NULL
+               ORDER BY name"""
+        )
+        store_ids = [row["id"] for row in rows]
+    finally:
+        await db.close()
+
+    results: list[WooSyncResult] = []
+    for store_id in store_ids:
+        try:
+            results.append(await sync_store_woo_catalog(store_id))
+        except Exception as exc:
+            logger.error("Woo sync failed for store_id=%d: %s", store_id, exc)
+    return results
+
+
 async def _woo_fetch_products_by_ids(body: WooImportRequest) -> list[dict]:
     product_ids = list(dict.fromkeys(body.product_ids))
     if not product_ids:
         return []
 
     products_by_id: dict[int, dict] = {}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=_WOO_TIMEOUT) as client:
+        resolved_endpoint: Optional[str] = None
+        resolved_auth_mode: Optional[str] = None
         for chunk in _chunked(product_ids, _WOO_API_MAX_PER_PAGE):
-            resp = await _woo_get_products(
+            resp, resolved_endpoint, resolved_auth_mode = await _woo_get_products(
                 client,
                 site_url=body.credentials.site_url,
                 consumer_key=body.credentials.consumer_key,
@@ -172,6 +524,8 @@ async def _woo_fetch_products_by_ids(body: WooImportRequest) -> list[dict]:
                     "include": ",".join(str(product_id) for product_id in chunk),
                     "per_page": len(chunk),
                 },
+                preferred_endpoint=resolved_endpoint,
+                preferred_auth_mode=resolved_auth_mode,
             )
             for product in resp.json():
                 products_by_id[product["id"]] = product
@@ -181,11 +535,13 @@ async def _woo_fetch_products_by_ids(body: WooImportRequest) -> list[dict]:
 
 @router.post("/woo/preview", response_model=list[WooProductPreview])
 async def woo_preview(body: WooPreviewRequest):
+    await _woo_validate_preview_request(body)
     return await _woo_fetch_preview_products(body)
 
 
 @router.post("/woo/import")
 async def woo_import(body: WooImportRequest):
+    await _woo_validate_import_request(body)
     products = await _woo_fetch_products_by_ids(body)
 
     db = await get_db()

@@ -20,7 +20,23 @@ export interface Store {
   id: number
   name: string
   base_url: string
+  woo_enabled: boolean
+  woo_site_url: string | null
+  woo_consumer_key: string | null
+  woo_consumer_secret: string | null
+  woo_auto_import_new: boolean
+  woo_last_synced_at: string | null
   created_at: string
+}
+
+export interface WooSyncResult {
+  store_id: number
+  store_name: string
+  discovered: number
+  created: number
+  existing: number
+  auto_import_new: boolean
+  synced_at: string | null
 }
 
 export interface ProductStoreSummary {

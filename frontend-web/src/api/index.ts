@@ -15,6 +15,7 @@ import type {
   SelectorLabSaveResponse,
   Settings,
   Store,
+  WooSyncResult,
   WooCredentials,
   WooProductPreview,
 } from './types'
@@ -28,8 +29,37 @@ export const storesApi = {
     const { data } = await http.get<Store[]>('/stores/')
     return data
   },
-  create: async (body: { name: string; base_url: string }): Promise<Store> => {
+  create: async (body: {
+    name: string
+    base_url: string
+    woo_enabled?: boolean
+    woo_site_url?: string | null
+    woo_consumer_key?: string | null
+    woo_consumer_secret?: string | null
+    woo_auto_import_new?: boolean
+  }): Promise<Store> => {
     const { data } = await http.post<Store>('/stores/', body)
+    return data
+  },
+  update: async (
+    id: number,
+    body: {
+      name?: string
+      base_url?: string
+      woo_enabled?: boolean
+      woo_site_url?: string | null
+      woo_consumer_key?: string | null
+      woo_consumer_secret?: string | null
+      woo_auto_import_new?: boolean
+    },
+  ): Promise<Store> => {
+    const { data } = await http.patch<Store>(`/stores/${id}`, body)
+    return data
+  },
+  syncWoo: async (id: number): Promise<WooSyncResult> => {
+    const { data } = await http.post<WooSyncResult>(`/stores/${id}/woo-sync`, undefined, {
+      timeout: 300_000,
+    })
     return data
   },
   remove: async (id: number): Promise<void> => {
@@ -233,6 +263,7 @@ export const importApi = {
     const { data } = await http.post<WooProductPreview[]>(
       '/import/woo/preview',
       body,
+      { timeout: 300_000 },
     )
     return data
   },
@@ -241,7 +272,9 @@ export const importApi = {
     store_id: number
     product_ids: number[]
   }): Promise<{ imported: number }> => {
-    const { data } = await http.post('/import/woo/import', body)
+    const { data } = await http.post('/import/woo/import', body, {
+      timeout: 300_000,
+    })
     return data
   },
   filePreview: async (file: File): Promise<FileImportPreviewResponse> => {

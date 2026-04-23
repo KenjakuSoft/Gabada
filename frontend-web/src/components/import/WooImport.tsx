@@ -7,6 +7,7 @@ import {
   KeyRound,
   Loader2,
   Package,
+  RefreshCw,
   Search,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -28,6 +29,8 @@ export function WooImport() {
   const [consumerKey, setConsumerKey] = useState('')
   const [consumerSecret, setConsumerSecret] = useState('')
   const [storeId, setStoreId] = useState<string>('')
+  const [enableWooSync, setEnableWooSync] = useState(false)
+  const [autoAddNew, setAutoAddNew] = useState(true)
   const [preview, setPreview] = useState<WooProductPreview[]>([])
   const [selected, setSelected] = useState<Set<number>>(new Set())
 
@@ -42,11 +45,27 @@ export function WooImport() {
     consumer_secret: consumerSecret.trim(),
   }
 
+  async function persistWooSyncSettings() {
+    if (!storeId) {
+      throw new Error('Select a store first')
+    }
+    return storesApi.update(Number(storeId), {
+      woo_enabled: enableWooSync,
+      woo_site_url: credentials.site_url || null,
+      woo_consumer_key: credentials.consumer_key || null,
+      woo_consumer_secret: credentials.consumer_secret || null,
+      woo_auto_import_new: enableWooSync ? autoAddNew : false,
+    })
+  }
+
   const previewMutation = useMutation({
     onMutate: () => {
       setPreview([])
       setSelected(new Set())
-      toast.info('Checking WooCommerce catalog', 'This can take a bit on large stores')
+      toast.info(
+        'Checking WooCommerce catalog',
+        'This can take a bit on large stores',
+      )
     },
     mutationFn: () =>
       importApi.wooPreview({
@@ -57,7 +76,7 @@ export function WooImport() {
       }),
     onSuccess: (data) => {
       setPreview(data)
-      setSelected(new Set(data.map((p) => p.woo_id)))
+      setSelected(new Set(data.map((product) => product.woo_id)))
       toast.success(`Found ${data.length} products across the full catalog`)
     },
     onError: (error) => {
@@ -73,30 +92,82 @@ export function WooImport() {
         'detail' in error.response.data &&
         typeof error.response.data.detail === 'string'
           ? error.response.data.detail
-          : 'Check credentials and site URL'
+          : error instanceof Error && error.message
+            ? error.message
+            : 'Check credentials and site URL'
       toast.error('Preview failed', detail)
     },
   })
 
   const importMutation = useMutation({
-    mutationFn: () =>
-      importApi.wooImport({
+    mutationFn: async () => {
+      const data = await importApi.wooImport({
         credentials,
         store_id: Number(storeId),
         product_ids: Array.from(selected),
-      }),
+      })
+      let syncError: string | null = null
+      try {
+        await persistWooSyncSettings()
+      } catch (error) {
+        syncError =
+          error instanceof Error
+            ? error.message
+            : 'Could not save Woo sync settings'
+      }
+      return { ...data, syncError }
+    },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['products'] })
       qc.invalidateQueries({ queryKey: ['stores'] })
-      toast.success(`Imported ${data.imported} products`)
+      if (data.syncError) {
+        toast.info(
+          `Imported ${data.imported} products`,
+          `Woo sync settings were not saved: ${data.syncError}`,
+        )
+      } else if (enableWooSync) {
+        toast.success(
+          `Imported ${data.imported} products`,
+          autoAddNew
+            ? 'Scheduled Woo sync is on and new catalog products will be auto-added later.'
+            : 'Scheduled Woo sync is on without auto-adding new products yet.',
+        )
+      } else {
+        toast.success(`Imported ${data.imported} products`)
+      }
       navigate('/')
     },
     onError: () => toast.error('Import failed'),
   })
 
+  const saveSyncMutation = useMutation({
+    mutationFn: persistWooSyncSettings,
+    onSuccess: (store) => {
+      qc.invalidateQueries({ queryKey: ['stores'] })
+      if (store.woo_enabled) {
+        toast.success(
+          'Woo sync saved',
+          store.woo_auto_import_new
+            ? 'New Woo products will be auto-added during scheduled syncs.'
+            : 'Woo catalog sync is enabled without auto-adding new products yet.',
+        )
+      } else {
+        toast.info('Woo sync disabled for this store')
+      }
+    },
+    onError: (error) => {
+      const detail =
+        error instanceof Error
+          ? error.message
+          : 'Could not save Woo sync settings'
+      toast.error('Save failed', detail)
+    },
+  })
+
   const canPreview =
     siteUrl.length > 8 && consumerKey.length > 0 && consumerSecret.length > 0
   const canImport = selected.size > 0 && storeId !== ''
+  const canSaveSync = canPreview && storeId !== ''
 
   function toggle(id: number) {
     const next = new Set(selected)
@@ -107,7 +178,21 @@ export function WooImport() {
 
   function toggleAll() {
     if (selected.size === preview.length) setSelected(new Set())
-    else setSelected(new Set(preview.map((p) => p.woo_id)))
+    else setSelected(new Set(preview.map((product) => product.woo_id)))
+  }
+
+  function handleStoreChange(nextStoreId: string) {
+    setStoreId(nextStoreId)
+    const store =
+      (stores.data ?? []).find((item) => String(item.id) === nextStoreId) ?? null
+    if (!store) return
+    setEnableWooSync(store.woo_enabled)
+    setAutoAddNew(store.woo_enabled ? store.woo_auto_import_new : true)
+    if (store.woo_site_url) setSiteUrl(store.woo_site_url)
+    if (store.woo_consumer_key) setConsumerKey(store.woo_consumer_key)
+    if (store.woo_consumer_secret) {
+      setConsumerSecret(store.woo_consumer_secret)
+    }
   }
 
   return (
@@ -125,18 +210,22 @@ export function WooImport() {
               <Input
                 id="woo-site"
                 value={siteUrl}
-                onChange={(e) => setSiteUrl(e.target.value)}
+                onChange={(event) => setSiteUrl(event.target.value)}
                 placeholder="https://shop.example.com"
                 disabled={previewMutation.isPending}
               />
+              <p className="text-xs text-muted-foreground">
+                Use the main store URL. Gabada will try both standard Woo REST
+                endpoints and fallback auth modes automatically.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="woo-key">Consumer key</Label>
               <Input
                 id="woo-key"
                 value={consumerKey}
-                onChange={(e) => setConsumerKey(e.target.value)}
-                placeholder="ck_…"
+                onChange={(event) => setConsumerKey(event.target.value)}
+                placeholder="ck_..."
                 disabled={previewMutation.isPending}
               />
             </div>
@@ -146,8 +235,8 @@ export function WooImport() {
                 id="woo-secret"
                 type="password"
                 value={consumerSecret}
-                onChange={(e) => setConsumerSecret(e.target.value)}
-                placeholder="cs_…"
+                onChange={(event) => setConsumerSecret(event.target.value)}
+                placeholder="cs_..."
                 disabled={previewMutation.isPending}
               />
             </div>
@@ -156,18 +245,65 @@ export function WooImport() {
               <Select
                 id="woo-store"
                 value={storeId}
-                onChange={(e) => setStoreId(e.target.value)}
-                disabled={importMutation.isPending}
+                onChange={(event) => handleStoreChange(event.target.value)}
+                disabled={importMutation.isPending || saveSyncMutation.isPending}
               >
-                <option value="">— select —</option>
-                {(stores.data ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
+                <option value="">- select -</option>
+                {(stores.data ?? []).map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
                   </option>
                 ))}
               </Select>
             </div>
-            <div className="sm:col-span-2 flex justify-end">
+            <div className="space-y-2 rounded-xl border border-border/70 bg-background/60 p-3 sm:col-span-2">
+              <label className="flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={enableWooSync}
+                  onChange={(event) => setEnableWooSync(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                  disabled={saveSyncMutation.isPending || importMutation.isPending}
+                />
+                <span className="text-sm text-foreground">
+                  Enable scheduled Woo sync for this store
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={autoAddNew}
+                  onChange={(event) => setAutoAddNew(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                  disabled={
+                    !enableWooSync ||
+                    saveSyncMutation.isPending ||
+                    importMutation.isPending
+                  }
+                />
+                <span className="text-sm text-muted-foreground">
+                  Automatically add newly discovered Woo products to Gabada
+                </span>
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Scheduled Woo sync checks the catalog during future scrape runs.
+                Turn on auto-add if you want new Woo products to appear in
+                Gabada automatically later.
+              </p>
+            </div>
+            <div className="sm:col-span-2 flex flex-wrap justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => saveSyncMutation.mutate()}
+                disabled={!canSaveSync || saveSyncMutation.isPending}
+              >
+                {saveSyncMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Save sync settings
+              </Button>
               <Button
                 onClick={() => previewMutation.mutate()}
                 disabled={!canPreview || previewMutation.isPending}
@@ -207,6 +343,19 @@ export function WooImport() {
           }
           tone={selected.size > 0 ? 'success' : 'default'}
         />
+        <StatTile
+          label="Woo sync"
+          value={enableWooSync ? 'On' : 'Off'}
+          icon={<RefreshCw className="h-4 w-4" />}
+          hint={
+            enableWooSync
+              ? autoAddNew
+                ? 'auto-add new products'
+                : 'catalog sync only'
+              : 'manual import only'
+          }
+          tone={enableWooSync ? 'accent' : 'default'}
+        />
       </BentoGrid>
 
       {preview.length > 0 ? (
@@ -214,13 +363,11 @@ export function WooImport() {
           <BentoTile colSpan={6}>
             <TileHeader
               eyebrow="Review"
-              title={`${preview.length} products · ${selected.size} selected`}
+              title={`${preview.length} products - ${selected.size} selected`}
               action={
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={toggleAll}>
-                    {selected.size === preview.length
-                      ? 'Clear all'
-                      : 'Select all'}
+                    {selected.size === preview.length ? 'Clear all' : 'Select all'}
                   </Button>
                   <Button
                     size="sm"
@@ -238,22 +385,22 @@ export function WooImport() {
               }
             />
             <div className="mt-3 max-h-[500px] space-y-1.5 overflow-y-auto pr-1">
-              {preview.map((p) => {
-                const checked = selected.has(p.woo_id)
+              {preview.map((product) => {
+                const checked = selected.has(product.woo_id)
                 return (
                   <label
-                    key={p.woo_id}
+                    key={product.woo_id}
                     className="flex cursor-pointer items-center gap-3 rounded-md border border-border p-2 transition-colors hover:bg-accent/30"
                   >
                     <input
                       type="checkbox"
                       checked={checked}
-                      onChange={() => toggle(p.woo_id)}
+                      onChange={() => toggle(product.woo_id)}
                       className="h-4 w-4 accent-primary"
                     />
-                    {p.image_url ? (
+                    {product.image_url ? (
                       <img
-                        src={p.image_url}
+                        src={product.image_url}
                         alt=""
                         className="h-10 w-10 rounded-sm object-cover"
                         loading="lazy"
@@ -263,17 +410,17 @@ export function WooImport() {
                     )}
                     <div className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate text-sm font-medium">
-                        {p.name}
+                        {product.name}
                       </span>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        {p.regular_price ? (
-                          <span>Regular: {p.regular_price}</span>
+                        {product.regular_price ? (
+                          <span>Regular: {product.regular_price}</span>
                         ) : null}
-                        {p.sale_price ? (
-                          <span>Sale: {p.sale_price}</span>
+                        {product.sale_price ? (
+                          <span>Sale: {product.sale_price}</span>
                         ) : null}
                         <Badge variant="outline" className="text-xs">
-                          {p.stock_status}
+                          {product.stock_status}
                         </Badge>
                       </div>
                     </div>
