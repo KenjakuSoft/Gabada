@@ -44,11 +44,16 @@ export function WooImport() {
 
   const previewMutation = useMutation({
     mutationFn: () =>
-      importApi.wooPreview({ credentials, per_page: 100, page: 1 }),
+      importApi.wooPreview({
+        credentials,
+        per_page: 100,
+        page: 1,
+        fetch_all: true,
+      }),
     onSuccess: (data) => {
       setPreview(data)
       setSelected(new Set(data.map((p) => p.woo_id)))
-      toast.success(`Found ${data.length} products`)
+      toast.success(`Found ${data.length} products across the full catalog`)
     },
     onError: () =>
       toast.error('Preview failed', 'Check credentials and site URL'),
@@ -153,7 +158,7 @@ export function WooImport() {
                 ) : (
                   <Search className="h-4 w-4" />
                 )}
-                Preview products
+                Preview full catalog
               </Button>
             </div>
           </div>
@@ -163,7 +168,7 @@ export function WooImport() {
           label="Found"
           value={preview.length}
           icon={<Package className="h-4 w-4" />}
-          hint={preview.length > 0 ? 'in current preview' : 'run preview'}
+          hint={preview.length > 0 ? 'in full catalog preview' : 'run preview'}
           tone={preview.length > 0 ? 'primary' : 'default'}
         />
         <StatTile
