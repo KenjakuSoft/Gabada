@@ -4,6 +4,7 @@ import type {
   Category,
   FileImportPreviewResponse,
   FileImportRow,
+  FileImportCommitResponse,
   PriceLog,
   ProbeResponse,
   ScrapeResult,
@@ -225,8 +226,11 @@ export const importApi = {
     rows: FileImportRow[]
     store_id: number
     category_id?: number | null
-  }): Promise<{ imported: number }> => {
-    const { data } = await http.post('/import/file/commit', body)
+  }): Promise<FileImportCommitResponse> => {
+    const { data } = await http.post<FileImportCommitResponse>(
+      '/import/file/commit',
+      body,
+    )
     return data
   },
 }

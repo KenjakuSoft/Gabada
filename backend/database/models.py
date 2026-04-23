@@ -196,18 +196,31 @@ class WooImportRequest(BaseModel):
 class FileImportPreviewResponse(BaseModel):
     columns: list[str]
     sample_rows: list[list[str]]
+    rows: list[list[str]] = Field(default_factory=list)
     total_rows: int
     file_format: str  # "csv", "excel", "pdf"
+    source_name: Optional[str] = None
 
 class FileImportRow(BaseModel):
     name: str
-    url: str
+    source_index: Optional[int] = None
+    url: Optional[str] = None
     image_url: Optional[str] = None
+    price: Optional[str | float] = None
+    discounted_price: Optional[str | float] = None
+    dealer_price: Optional[str | float] = None
+    stock_status: Optional[str] = None
 
 class FileImportCommitRequest(BaseModel):
     rows: list[FileImportRow]
     store_id: int
     category_id: Optional[int] = None
+
+
+class FileImportCommitResponse(BaseModel):
+    imported: int
+    created: int = 0
+    updated: int = 0
 
 
 # ── Quick-add (paste URLs → tracked products) ────────────────────────────────

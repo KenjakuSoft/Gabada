@@ -21,6 +21,7 @@ backend/*.db-journal
 frontend-web/node_modules/
 frontend-web/dist/
 frontend-web/.vite/
+*.tsbuildinfo
 
 # IDE / tools
 .vscode/

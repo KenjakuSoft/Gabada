@@ -7,6 +7,7 @@ import {
   Radio,
   TrendingDown,
   TrendingUp,
+  type LucideIcon,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -20,17 +21,92 @@ import { useLiveTime } from '@/hooks/useLiveTime'
 import type { ActivityEntry } from '@/api'
 import { cn, formatDelta, formatMoney } from '@/lib/utils'
 
-const CHANGE_LABEL: Record<string, string> = {
-  price_drop: 'Price drop',
-  price_rise: 'Price rise',
-  back_in_stock: 'Back in stock',
-  out_of_stock: 'Out of stock',
-  initial: 'First scrape',
-  stock_change: 'Stock change',
-}
-
 const REFRESH_MS = 30_000
 const EMPTY_ENTRIES: ActivityEntry[] = []
+
+type NormalizedChangeType =
+  | 'price_down'
+  | 'price_up'
+  | 'price_and_stock'
+  | 'stock_in'
+  | 'stock_out'
+  | 'stock_change'
+  | 'new'
+  | 'unknown'
+
+interface ChangePresentation {
+  label: string
+  icon: LucideIcon
+  variant: 'success' | 'warning' | 'info' | 'destructive' | 'outline'
+}
+
+const CHANGE_PRESENTATION: Record<NormalizedChangeType, ChangePresentation> = {
+  price_down: {
+    label: 'Price down',
+    icon: TrendingDown,
+    variant: 'success',
+  },
+  price_up: {
+    label: 'Price up',
+    icon: TrendingUp,
+    variant: 'destructive',
+  },
+  price_and_stock: {
+    label: 'Price + stock',
+    icon: ActivityIcon,
+    variant: 'info',
+  },
+  stock_in: {
+    label: 'Back in stock',
+    icon: CircleDot,
+    variant: 'success',
+  },
+  stock_out: {
+    label: 'Out of stock',
+    icon: Radio,
+    variant: 'warning',
+  },
+  stock_change: {
+    label: 'Stock change',
+    icon: Radio,
+    variant: 'outline',
+  },
+  new: {
+    label: 'First scrape',
+    icon: CircleDot,
+    variant: 'info',
+  },
+  unknown: {
+    label: 'Update',
+    icon: ActivityIcon,
+    variant: 'outline',
+  },
+}
+
+function normalizeChangeType(changeType: string): NormalizedChangeType {
+  switch (changeType) {
+    case 'price_drop':
+      return 'price_down'
+    case 'price_rise':
+      return 'price_up'
+    case 'back_in_stock':
+      return 'stock_in'
+    case 'out_of_stock':
+      return 'stock_out'
+    case 'initial':
+      return 'new'
+    case 'price_down':
+    case 'price_up':
+    case 'price_and_stock':
+    case 'stock_in':
+    case 'stock_out':
+    case 'stock_change':
+    case 'new':
+      return changeType
+    default:
+      return 'unknown'
+  }
+}
 
 export function ActivityPage() {
   const symbol = useCurrencySymbol()
@@ -129,6 +205,9 @@ interface ActivityRowProps {
 function ActivityRow({ entry, symbol }: ActivityRowProps) {
   const live = useLiveTime(entry.scraped_at)
   const delta = entry.price_delta
+  const normalizedChange = normalizeChangeType(entry.change_type)
+  const changePresentation = CHANGE_PRESENTATION[normalizedChange]
+  const ChangeIcon = changePresentation.icon
   const deltaColor =
     delta == null || delta === 0
       ? 'text-muted-foreground'
@@ -136,8 +215,8 @@ function ActivityRow({ entry, symbol }: ActivityRowProps) {
         ? 'text-success'
         : 'text-destructive'
   const priceNow = entry.discounted_price ?? entry.price
-  const isDrop = entry.change_type === 'price_drop'
-  const isRise = entry.change_type === 'price_rise'
+  const isDrop = normalizedChange === 'price_down'
+  const isRise = normalizedChange === 'price_up'
 
   return (
     <li
@@ -160,10 +239,11 @@ function ActivityRow({ entry, symbol }: ActivityRowProps) {
       </div>
 
       <Badge
-        variant={isDrop ? 'success' : isRise ? 'destructive' : 'outline'}
-        className="whitespace-nowrap text-[10px]"
+        variant={changePresentation.variant}
+        className="flex items-center gap-1.5 whitespace-nowrap text-[10px]"
       >
-        {CHANGE_LABEL[entry.change_type] ?? entry.change_type}
+        <ChangeIcon className="h-3 w-3" />
+        {changePresentation.label}
       </Badge>
 
       <div className="w-20 text-right text-sm font-semibold tabular-nums sm:w-24">
@@ -196,12 +276,14 @@ function computeStats(entries: ActivityEntry[]): StatsResult {
   let rises = 0
   let stockShifts = 0
   for (const e of entries) {
-    if (e.change_type === 'price_drop') drops += 1
-    if (e.change_type === 'price_rise') rises += 1
+    const normalizedChange = normalizeChangeType(e.change_type)
+    if (normalizedChange === 'price_down') drops += 1
+    if (normalizedChange === 'price_up') rises += 1
     if (
-      e.change_type === 'back_in_stock' ||
-      e.change_type === 'out_of_stock' ||
-      e.change_type === 'stock_change'
+      normalizedChange === 'stock_in' ||
+      normalizedChange === 'stock_out' ||
+      normalizedChange === 'stock_change' ||
+      normalizedChange === 'price_and_stock'
     ) {
       stockShifts += 1
     }
