@@ -195,6 +195,7 @@ export const importApi = {
     credentials: WooCredentials
     per_page?: number
     page?: number
+    fetch_all?: boolean
   }): Promise<WooProductPreview[]> => {
     const { data } = await http.post<WooProductPreview[]>(
       '/import/woo/preview',

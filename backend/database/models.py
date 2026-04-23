@@ -183,6 +183,7 @@ class WooPreviewRequest(BaseModel):
     credentials: WooCredentials
     per_page: int = 50
     page: int = 1
+    fetch_all: bool = False
 
 class WooImportRequest(BaseModel):
     credentials: WooCredentials
