@@ -1,0 +1,92 @@
+# Changelog
+
+All notable changes to Gabada are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.0] — 2026-04-26
+
+First multi-platform release. Windows installer + portable bundles for Linux and macOS.
+
+### Added
+- **Linux and macOS portable builds** in the release pipeline (`Gabada-vX.Y.Z-linux-x64.tar.gz`, `Gabada-vX.Y.Z-macos-arm64.tar.gz`).
+- **Unix launchers** — `start_gabada.sh` and `stop_gabada.sh` for Linux/macOS.
+- **Cross-platform PyInstaller spec** at [`packaging/gabada.spec`](./packaging/gabada.spec) replacing the Windows-only spec.
+- **Linux/macOS build script** at [`packaging/build_release.sh`](./packaging/build_release.sh).
+- **Unified release workflow** ([`.github/workflows/release.yml`](./.github/workflows/release.yml)) — builds Windows / Linux / macOS in parallel and attaches all artifacts to the GitHub Release.
+- **Tag-push trigger** — pushing a `v*` tag now creates a release automatically.
+
+### Changed
+- README restyled with icon-keyed sections, badge row, and richer tables.
+- Quick Start now uses `py -3` instead of pinning `py -3.11` (any installed Python ≥3.11 works).
+- Documented `Start Gabada.vbs` (silent launcher) and `Stop Gabada.bat`.
+- Documented environment variables: `GABADA_DATA_DIR`, `GABADA_NO_BROWSER`, `PLAYWRIGHT_BROWSERS_PATH`.
+
+### Fixed
+- Removed unused `os` import and dead `global` declarations in `backend/scraper/engine.py` (lint cleanup).
+- Deleted unused `frontend-web/src/components/products/ProductCard.tsx` and `frontend-web/src/components/ui/card.tsx` (knip cleanup).
+
+### Removed
+- `.github/workflows/windows-release.yml` — superseded by `release.yml`.
+- `packaging/windows/gabada.spec` — superseded by `packaging/gabada.spec`.
+
+## [0.1.4] — 2026-04-23
+
+### Changed
+- Polished the importer, diagnostics, and desktop UX.
+- Made the file import workflow easier to review.
+
+## [0.1.3] — 2026-04-23
+
+### Added
+- Scheduled WooCommerce catalog sync — auto-add new products from a connected store.
+- Portable backup / restore workflow — `Settings → Backup, restore, and share`.
+- Improvements to imports, the activity feed, and documentation.
+
+## [0.1.2] — 2026-04-23
+
+### Added
+- Full WooCommerce catalog fetching during import (no longer capped at the first page).
+
+### Fixed
+- Smart price review hardened against title-noise false positives.
+
+## [0.1.1] — 2026-04-21
+
+### Changed
+- Hardened scraper detection and cleaned repo docs.
+
+### Added
+- Scraper review warnings and auto-correction for suspicious price/stock matches.
+
+## [0.1.0] — 2026-04-21
+
+First tagged Windows release line.
+
+### Added
+- Windows release automation via GitHub Actions.
+- Windows desktop packaging — PyInstaller bundle + Inno Setup installer.
+- Bento-driven interactive UI overhaul across all pages.
+- `sites.toml` site-profile registry editable from the app.
+- Full ISO 4217 currency list in settings.
+- Bot-check bypass, preorder/backorder support, reverse-price fix, and edit UI.
+- "Add another store" flow on the product detail page.
+- React-based frontend (`frontend-web`) replacing the Flutter prototype.
+- Settings form, probe debugger, and static frontend mount.
+- Add-product flow, store CRUD, and import (WooCommerce + file).
+- Torrent-style home and product detail pages with price chart and logs.
+- Selector-aware deterministic smart scan, dealer price detection, probe + login-session endpoints.
+- User-configurable currency, timezone, and scrape schedule.
+- Auto-detection of platform when adding a store URL.
+- Manual override bottom sheet on each store row (price, stock, note).
+- Dealer price support, EMI/installment filtering, manual overrides, and bulk WooCommerce / file import.
+- Activity feed, categories, LKR currency support.
+- Initial scaffold of the price and stock tracker.
+
+[0.2.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.0
+[0.1.4]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.4
+[0.1.3]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.3
+[0.1.2]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.2
+[0.1.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.1
+[0.1.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.0

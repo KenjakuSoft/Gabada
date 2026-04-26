@@ -11,9 +11,10 @@
 [![Playwright](https://img.shields.io/badge/Playwright-Chromium-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev)
 [![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-7B68EE?style=for-the-badge)](#-releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](./LICENSE)
 
-**[⚡ Quick Start](#-quick-start)** · **[✨ Features](#-features)** · **[📥 Import](#-import-workflow)** · **[🔬 Selector Lab](#-selector-lab)** · **[🛠 Development](#-development)** · **[📦 Releases](#-releases)**
+**[⚡ Quick Start](#-quick-start)** · **[✨ Features](#-features)** · **[📥 Import](#-import-workflow)** · **[🔬 Selector Lab](#-selector-lab)** · **[🛠 Development](#-development)** · **[📦 Releases](#-releases)** · **[📜 Changelog](./CHANGELOG.md)**
 
 </div>
 
@@ -185,7 +186,7 @@ npm.cmd run build
 
 ### 4️⃣ Run the app
 
-#### 🖱 Windows launcher
+#### 🪟 Windows
 
 Double-click [`start_gabada.bat`](./start_gabada.bat). It will:
 
@@ -198,6 +199,16 @@ Double-click [`start_gabada.bat`](./start_gabada.bat). It will:
 | :--- | :--- |
 | [`Start Gabada.vbs`](./Start%20Gabada.vbs) | Launch silently — runs `start_gabada.bat` hidden, no console window |
 | [`Stop Gabada.bat`](./Stop%20Gabada.bat) | Kill `python.exe` hosting `desktop_launcher.py` and any installed `Gabada.exe` |
+
+#### 🐧 Linux / 🍎 macOS
+
+```bash
+chmod +x start_gabada.sh stop_gabada.sh
+./start_gabada.sh            # boots the desktop launcher and opens your browser
+./stop_gabada.sh             # terminates a running instance
+```
+
+The Unix launcher prefers `backend/.venv/bin/python` and falls back to system `python3` if no venv is present.
 
 #### 💻 Manual start
 
@@ -299,10 +310,18 @@ Gabada/
 ├─ frontend-web/
 │  ├─ src/                    # React 19 + Vite + Tailwind v4
 │  └─ package.json
-├─ packaging/windows/         # PyInstaller spec, Inno Setup, build script
-├─ start_gabada.bat           # one-click Windows launcher
-├─ Start Gabada.vbs           # silent launcher
-├─ Stop Gabada.bat            # process killer
+├─ packaging/
+│  ├─ gabada.spec             # cross-platform PyInstaller spec
+│  ├─ build_release.sh        # Linux/macOS portable build
+│  └─ windows/                # Inno Setup installer + Windows build script
+├─ .github/workflows/
+│  └─ release.yml             # 3-OS release matrix
+├─ start_gabada.bat           # 🪟 one-click Windows launcher
+├─ start_gabada.sh            # 🐧🍎 Unix launcher
+├─ Start Gabada.vbs           # 🪟 silent launcher
+├─ Stop Gabada.bat            # 🪟 process killer
+├─ stop_gabada.sh             # 🐧🍎 process killer
+├─ CHANGELOG.md
 └─ README.md
 ```
 
@@ -390,43 +409,54 @@ The backend API is mounted under `/api`. Interactive docs are available at [`/do
 
 ### 🏷 Latest stable release
 
-> 🟢 **`v0.1.3`** — current published Windows release line.
+> 🟢 **`v0.2.0`** — first release with native Windows installer + portable bundles for Linux and macOS.
+>
+> Full history in [`CHANGELOG.md`](./CHANGELOG.md).
 
-### 🏗 Windows installer builds
+### 📦 Release artifacts
 
-Packaging files live in [`packaging/windows`](./packaging/windows):
+| Platform | Artifact | Format |
+| :--- | :--- | :--- |
+| 🪟 Windows | `GabadaSetup-<tag>-windows-x64.exe` | Inno Setup installer |
+| 🪟 Windows | `Gabada-<tag>-windows-x64.zip` | Portable bundle |
+| 🐧 Linux | `Gabada-<tag>-linux-x64.tar.gz` | Portable bundle |
+| 🍎 macOS | `Gabada-<tag>-macos-arm64.tar.gz` | Portable bundle (Apple Silicon) |
 
-| File | Purpose |
-| :--- | :--- |
-| [`gabada.spec`](./packaging/windows/gabada.spec) | PyInstaller bundle definition |
-| [`build_installer.ps1`](./packaging/windows/build_installer.ps1) | Local packaging script |
-| [`gabada.iss`](./packaging/windows/gabada.iss) | Inno Setup installer |
+### 🏗 Build locally
 
-Build locally:
+<details>
+<summary><b>🪟 Windows</b> — installer + portable</summary>
 
 ```powershell
 cd packaging\windows
 .\build_installer.ps1
 ```
 
-The script will:
+The script builds the frontend, downloads the Playwright Chromium bundle, runs PyInstaller against [`packaging/gabada.spec`](./packaging/gabada.spec), and runs Inno Setup 6 if installed.
 
-- 🏗 Build the frontend bundle
-- 📦 Install packaging requirements
-- 🌐 Download the Playwright Chromium bundle for packaging
-- 🐍 Create a desktop app bundle with PyInstaller
-- 💿 Create an installer when Inno Setup 6 is installed
+| File | Purpose |
+| :--- | :--- |
+| [`packaging/gabada.spec`](./packaging/gabada.spec) | Cross-platform PyInstaller bundle definition |
+| [`packaging/windows/build_installer.ps1`](./packaging/windows/build_installer.ps1) | Windows packaging script |
+| [`packaging/windows/gabada.iss`](./packaging/windows/gabada.iss) | Inno Setup installer config |
+
+</details>
+
+<details>
+<summary><b>🐧 Linux / 🍎 macOS</b> — portable tarball</summary>
+
+```bash
+cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
+./packaging/build_release.sh --app-version 0.2.0
+```
+
+Output lands in `packaging/output/Gabada-v0.2.0-<platform>-<arch>.tar.gz`. Architecture is auto-detected (`x64`/`arm64`).
+
+</details>
 
 ### 🚀 GitHub Releases
 
-Publishing a GitHub Release triggers the workflow at [`.github/workflows/windows-release.yml`](./.github/workflows/windows-release.yml).
-
-**Release assets:**
-
-- 📦 `GabadaSetup-<tag>-windows-x64.exe`
-- 🗜 `Gabada-<tag>-windows-x64.zip`
-
-You can also run the workflow manually for an existing tag from GitHub Actions.
+Pushing a `v*` tag (or publishing a Release in the GitHub UI) triggers [`.github/workflows/release.yml`](./.github/workflows/release.yml). The workflow runs a 3-OS matrix (Windows / Ubuntu / macOS) and attaches every artifact to the same release.
 
 **Installed app behavior:**
 
