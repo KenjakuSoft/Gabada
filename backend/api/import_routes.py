@@ -3,7 +3,7 @@ import io
 import logging
 import re
 from typing import Any, Optional
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 _WOO_API_MAX_PER_PAGE = 100
 _WOO_MAX_PREVIEW_PAGES = 500
 _WOO_TIMEOUT = httpx.Timeout(60.0, connect=20.0)
+_KEEP_IMPORT_VALUE = object()
 
 
 def _map_woo_stock(status: str) -> str:
@@ -108,6 +109,22 @@ def _woo_products_urls(site_url: str) -> list[str]:
     return unique
 
 
+def _woo_store_products_urls(site_url: str) -> list[str]:
+    base = _normalize_woo_site_url(site_url)
+    candidates = [
+        f"{base}/wp-json/wc/store/v1/products",
+        f"{base}/index.php?rest_route=/wc/store/v1/products",
+        f"{base}/?rest_route=/wc/store/v1/products",
+    ]
+    unique: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate not in seen:
+            unique.append(candidate)
+            seen.add(candidate)
+    return unique
+
+
 def _woo_per_page(value: int) -> int:
     return max(1, min(value, _WOO_API_MAX_PER_PAGE))
 
@@ -138,6 +155,63 @@ def _woo_preview_item(product: dict) -> WooProductPreview:
         image_url=images[0]["src"] if images else None,
         categories=[category["name"] for category in product.get("categories", [])],
     )
+
+
+def _woo_is_public_product(product: dict) -> bool:
+    return (product.get("status") or "").strip().lower() == "publish"
+
+
+def _woo_store_product_stock_status(product: dict) -> str:
+    if product.get("is_on_backorder"):
+        return "onbackorder"
+
+    stock_class = str((product.get("stock_availability") or {}).get("class") or "").strip().lower()
+    if stock_class in {"in-stock", "instock"}:
+        return "instock"
+    if stock_class in {"out-of-stock", "outofstock"}:
+        return "outofstock"
+
+    if product.get("is_in_stock") is True:
+        return "instock"
+    if product.get("is_in_stock") is False:
+        return "outofstock"
+    return "outofstock"
+
+
+def _woo_store_product_to_woo_shape(product: dict) -> dict:
+    prices = product.get("prices") or {}
+    regular_price = prices.get("regular_price") or prices.get("price") or None
+    sale_price = prices.get("sale_price") or None
+    if sale_price and regular_price and sale_price == regular_price:
+        sale_price = None
+
+    return {
+        "id": product["id"],
+        "name": product.get("name") or "",
+        "permalink": product.get("permalink") or "",
+        "regular_price": regular_price,
+        "sale_price": sale_price,
+        "stock_status": _woo_store_product_stock_status(product),
+        "images": [
+            {"src": image.get("src")}
+            for image in product.get("images", [])
+            if image.get("src")
+        ],
+        "categories": [
+            {"name": category.get("name")}
+            for category in product.get("categories", [])
+            if category.get("name")
+        ],
+        "status": "publish",
+    }
+
+
+def _woo_request_target(endpoint: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    parsed = urlparse(endpoint)
+    merged_params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    merged_params.update(params)
+    request_url = urlunparse(parsed._replace(query=""))
+    return request_url, merged_params
 
 
 async def _woo_get_products(
@@ -183,14 +257,27 @@ async def _woo_get_products(
 
     for endpoint in endpoints:
         for label, request_kwargs in auth_modes:
+            request_url, request_params = _woo_request_target(
+                endpoint,
+                request_kwargs["params"],
+            )
             try:
-                resp = await client.get(endpoint, **request_kwargs)
+                resp = await client.get(
+                    request_url,
+                    auth=request_kwargs["auth"],
+                    params=request_params,
+                )
             except httpx.RequestError as exc:
                 last_request_error = exc
                 attempts.append(f"{label} via {endpoint} unreachable: {exc}")
                 continue
 
             if resp.status_code == 200:
+                try:
+                    resp.json()
+                except ValueError:
+                    attempts.append(f"{label} via {endpoint}: 200 OK but returned invalid JSON")
+                    continue
                 return resp, endpoint, label
 
             body_detail = _clip_woo_body(resp.text)
@@ -207,7 +294,53 @@ async def _woo_get_products(
     raise HTTPException(status_code=502, detail=detail)
 
 
-async def _woo_fetch_preview_products(body: WooPreviewRequest) -> list[WooProductPreview]:
+async def _woo_get_public_store_products(
+    client: httpx.AsyncClient,
+    *,
+    site_url: str,
+    params: dict,
+    preferred_endpoint: Optional[str] = None,
+) -> tuple[httpx.Response, str]:
+    attempts: list[str] = []
+    last_request_error: Optional[httpx.RequestError] = None
+    endpoints = _woo_store_products_urls(site_url)
+    if preferred_endpoint in endpoints:
+        endpoints = [preferred_endpoint] + [
+            endpoint for endpoint in endpoints if endpoint != preferred_endpoint
+        ]
+
+    for endpoint in endpoints:
+        request_url, request_params = _woo_request_target(endpoint, params)
+        try:
+            resp = await client.get(request_url, params=request_params)
+        except httpx.RequestError as exc:
+            last_request_error = exc
+            attempts.append(f"public store api via {endpoint} unreachable: {exc}")
+            continue
+
+        if resp.status_code == 200:
+            try:
+                resp.json()
+            except ValueError:
+                attempts.append(f"public store api via {endpoint}: 200 OK but returned invalid JSON")
+                continue
+            return resp, endpoint
+
+        body_detail = _clip_woo_body(resp.text)
+        status_detail = f"{resp.status_code} {resp.reason_phrase}".strip()
+        if body_detail:
+            attempts.append(f"public store api via {endpoint}: {status_detail} - {body_detail}")
+        else:
+            attempts.append(f"public store api via {endpoint}: {status_detail}")
+
+    if last_request_error is not None and not attempts:
+        raise HTTPException(status_code=502, detail=f"Cannot reach WooCommerce public store API: {last_request_error}")
+
+    detail = "WooCommerce public store API failed. " + " | ".join(attempts[:4])
+    raise HTTPException(status_code=502, detail=detail)
+
+
+async def _woo_fetch_preview_products_v3(body: WooPreviewRequest) -> list[WooProductPreview]:
     per_page = _woo_per_page(body.per_page)
     async with httpx.AsyncClient(timeout=_WOO_TIMEOUT) as client:
         resolved_endpoint: Optional[str] = None
@@ -218,11 +351,19 @@ async def _woo_fetch_preview_products(body: WooPreviewRequest) -> list[WooProduc
                 site_url=body.credentials.site_url,
                 consumer_key=body.credentials.consumer_key,
                 consumer_secret=body.credentials.consumer_secret,
-                params={"per_page": per_page, "page": max(1, body.page)},
+                params={
+                    "per_page": per_page,
+                    "page": max(1, body.page),
+                    "status": "publish",
+                },
                 preferred_endpoint=resolved_endpoint,
                 preferred_auth_mode=resolved_auth_mode,
             )
-            return [_woo_preview_item(product) for product in resp.json()]
+            return [
+                _woo_preview_item(product)
+                for product in resp.json()
+                if _woo_is_public_product(product)
+            ]
 
         previews: list[WooProductPreview] = []
         seen_ids: set[int] = set()
@@ -241,11 +382,17 @@ async def _woo_fetch_preview_products(body: WooPreviewRequest) -> list[WooProduc
                 site_url=body.credentials.site_url,
                 consumer_key=body.credentials.consumer_key,
                 consumer_secret=body.credentials.consumer_secret,
-                params={"per_page": per_page, "page": page},
+                params={
+                    "per_page": per_page,
+                    "page": page,
+                    "status": "publish",
+                },
                 preferred_endpoint=resolved_endpoint,
                 preferred_auth_mode=resolved_auth_mode,
             )
-            products = resp.json()
+            products = [
+                product for product in resp.json() if _woo_is_public_product(product)
+            ]
             new_products = [
                 product
                 for product in products
@@ -269,6 +416,95 @@ async def _woo_fetch_preview_products(body: WooPreviewRequest) -> list[WooProduc
             page += 1
 
         return previews
+
+
+async def _woo_fetch_preview_products_store_api(body: WooPreviewRequest) -> list[WooProductPreview]:
+    per_page = _woo_per_page(body.per_page)
+    async with httpx.AsyncClient(timeout=_WOO_TIMEOUT) as client:
+        resolved_endpoint: Optional[str] = None
+        if not body.fetch_all:
+            resp, _ = await _woo_get_public_store_products(
+                client,
+                site_url=body.credentials.site_url,
+                params={
+                    "per_page": per_page,
+                    "page": max(1, body.page),
+                },
+                preferred_endpoint=resolved_endpoint,
+            )
+            return [
+                _woo_preview_item(_woo_store_product_to_woo_shape(product))
+                for product in resp.json()
+            ]
+
+        previews: list[WooProductPreview] = []
+        seen_ids: set[int] = set()
+        repeated_pages = 0
+        page = 1
+        total_pages: int | None = None
+
+        while True:
+            if page > _WOO_MAX_PREVIEW_PAGES:
+                raise HTTPException(
+                    status_code=502,
+                    detail="WooCommerce public store preview exceeded the safe page limit",
+                )
+            resp, resolved_endpoint = await _woo_get_public_store_products(
+                client,
+                site_url=body.credentials.site_url,
+                params={
+                    "per_page": per_page,
+                    "page": page,
+                },
+                preferred_endpoint=resolved_endpoint,
+            )
+            products = resp.json()
+            new_products = [
+                product
+                for product in products
+                if product.get("id") not in seen_ids
+            ]
+            if new_products:
+                previews.extend(
+                    _woo_preview_item(_woo_store_product_to_woo_shape(product))
+                    for product in new_products
+                )
+                seen_ids.update(product["id"] for product in new_products)
+                repeated_pages = 0
+            else:
+                repeated_pages += 1
+
+            if total_pages is None:
+                total_pages = _woo_total_pages(resp)
+            if total_pages is not None and page >= total_pages:
+                break
+            if len(products) < per_page:
+                break
+            if repeated_pages >= 1:
+                break
+            page += 1
+
+        return previews
+
+
+async def _woo_fetch_preview_products(body: WooPreviewRequest) -> list[WooProductPreview]:
+    try:
+        return await _woo_fetch_preview_products_v3(body)
+    except HTTPException as exc:
+        primary_detail = _woo_preview_error_detail(exc)
+        logger.info(
+            "Woo v3 preview failed for %s, trying public store API fallback: %s",
+            body.credentials.site_url,
+            primary_detail,
+        )
+        try:
+            return await _woo_fetch_preview_products_store_api(body)
+        except HTTPException as fallback_exc:
+            fallback_detail = _woo_preview_error_detail(fallback_exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"{primary_detail} | Public Store API fallback failed. {fallback_detail}",
+            ) from fallback_exc
 
 
 async def _woo_validate_preview_request(body: WooPreviewRequest) -> None:
@@ -310,6 +546,10 @@ def _row_to_store(row) -> Store:
         id=row["id"],
         name=row["name"],
         base_url=row["base_url"],
+        manual_only=bool(row["manual_only"]),
+        dealer_login_url=row["dealer_login_url"],
+        dealer_storage_state_path=row["dealer_storage_state_path"],
+        dealer_session_updated_at=row["dealer_session_updated_at"],
         woo_enabled=bool(row["woo_enabled"]),
         woo_site_url=row["woo_site_url"],
         woo_consumer_key=row["woo_consumer_key"],
@@ -326,6 +566,10 @@ async def _get_store_or_404(db, store_id: int) -> Store:
                id,
                name,
                base_url,
+               manual_only,
+               dealer_login_url,
+               dealer_storage_state_path,
+               dealer_session_updated_at,
                woo_enabled,
                woo_site_url,
                woo_consumer_key,
@@ -397,6 +641,84 @@ async def _find_any_product_by_name(db, canonical_name: str) -> Optional[dict]:
     return dict(rows[0]) if rows else None
 
 
+async def _merge_woo_catalog_item(
+    db,
+    *,
+    store_id: int,
+    name: str,
+    permalink: str,
+    image_url: Optional[str],
+    existing_by_url: dict[str, dict],
+    existing_by_name: dict[str, dict],
+    create_if_missing: bool,
+) -> str:
+    normalized_url = _normalize_store_product_url(permalink)
+    normalized_name = _normalize_store_product_name(name)
+    match = existing_by_url.get(normalized_url) or existing_by_name.get(normalized_name)
+    if match is not None:
+        if normalized_url and match.get("product_url") != permalink:
+            await db.execute(
+                "UPDATE product_stores SET product_url = ?, is_active = 1 WHERE id = ?",
+                (permalink, match["product_store_id"]),
+            )
+            match["product_url"] = permalink
+        if image_url and not match.get("image_url"):
+            await db.execute(
+                "UPDATE products SET image_url = ? WHERE id = ?",
+                (image_url, match["product_id"]),
+            )
+            match["image_url"] = image_url
+        if normalized_url:
+            existing_by_url[normalized_url] = match
+        if normalized_name:
+            existing_by_name[normalized_name] = match
+        return "existing"
+
+    if not create_if_missing:
+        return "skipped"
+
+    scrape_config_json = ScrapeConfig(platform="woocommerce").model_dump_json()
+    existing_product = await _find_any_product_by_name(db, name)
+    if existing_product is not None:
+        product_id = existing_product["id"]
+        product_store_id = await create_store_link(
+            db,
+            product_id=product_id,
+            store_id=store_id,
+            product_url=permalink,
+            scrape_config_json=scrape_config_json,
+            is_active=True,
+        )
+        if image_url and not existing_product.get("image_url"):
+            await db.execute(
+                "UPDATE products SET image_url = ? WHERE id = ?",
+                (image_url, product_id),
+            )
+    else:
+        product_id, product_store_id = await create_product_with_store(
+            db,
+            canonical_name=name,
+            image_url=image_url,
+            category_id=None,
+            store_id=store_id,
+            product_url=permalink,
+            scrape_config_json=scrape_config_json,
+        )
+
+    payload = {
+        "product_id": product_id,
+        "canonical_name": name,
+        "image_url": image_url,
+        "product_store_id": product_store_id,
+        "product_url": permalink,
+    }
+    if normalized_url:
+        existing_by_url[normalized_url] = payload
+    if normalized_name:
+        existing_by_name[normalized_name] = payload
+    return "created"
+
+
 async def sync_store_woo_catalog(store_id: int) -> WooSyncResult:
     db = await get_db()
     try:
@@ -410,56 +732,20 @@ async def sync_store_woo_catalog(store_id: int) -> WooSyncResult:
         existing = 0
         auto_import_new = bool(store.woo_auto_import_new)
         for preview in previews:
-            normalized_url = _normalize_store_product_url(preview.permalink)
-            normalized_name = _normalize_store_product_name(preview.name)
-            match = existing_by_url.get(normalized_url) or existing_by_name.get(normalized_name)
-            if match is not None:
+            outcome = await _merge_woo_catalog_item(
+                db,
+                store_id=store_id,
+                name=preview.name,
+                permalink=preview.permalink,
+                image_url=preview.image_url,
+                existing_by_url=existing_by_url,
+                existing_by_name=existing_by_name,
+                create_if_missing=auto_import_new,
+            )
+            if outcome == "created":
+                created += 1
+            elif outcome == "existing":
                 existing += 1
-                if normalized_url and match.get("product_url") != preview.permalink:
-                    await db.execute(
-                        "UPDATE product_stores SET product_url = ?, is_active = 1 WHERE id = ?",
-                        (preview.permalink, match["product_store_id"]),
-                    )
-                if preview.image_url and not match.get("image_url"):
-                    await db.execute(
-                        "UPDATE products SET image_url = ? WHERE id = ?",
-                        (preview.image_url, match["product_id"]),
-                    )
-                continue
-
-            if not auto_import_new:
-                continue
-
-            existing_product = await _find_any_product_by_name(db, preview.name)
-            if existing_product is not None:
-                await create_store_link(
-                    db,
-                    product_id=existing_product["id"],
-                    store_id=store_id,
-                    product_url=preview.permalink,
-                    scrape_config_json=ScrapeConfig(platform="woocommerce").model_dump_json(),
-                    is_active=True,
-                )
-                if preview.image_url and not existing_product.get("image_url"):
-                    await db.execute(
-                        "UPDATE products SET image_url = ? WHERE id = ?",
-                        (preview.image_url, existing_product["id"]),
-                    )
-            else:
-                await create_product_with_store(
-                    db,
-                    canonical_name=preview.name,
-                    image_url=preview.image_url,
-                    category_id=None,
-                    store_id=store_id,
-                    product_url=preview.permalink,
-                    scrape_config_json=ScrapeConfig(platform="woocommerce").model_dump_json(),
-                )
-            created += 1
-            if normalized_url:
-                existing_by_url[normalized_url] = {"product_url": preview.permalink}
-            if normalized_name:
-                existing_by_name[normalized_name] = {"canonical_name": preview.name}
 
         await db.execute(
             "UPDATE stores SET woo_last_synced_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -505,7 +791,7 @@ async def sync_all_enabled_woo_stores() -> list[WooSyncResult]:
     return results
 
 
-async def _woo_fetch_products_by_ids(body: WooImportRequest) -> list[dict]:
+async def _woo_fetch_products_by_ids_v3(body: WooImportRequest) -> list[dict]:
     product_ids = list(dict.fromkeys(body.product_ids))
     if not product_ids:
         return []
@@ -523,14 +809,62 @@ async def _woo_fetch_products_by_ids(body: WooImportRequest) -> list[dict]:
                 params={
                     "include": ",".join(str(product_id) for product_id in chunk),
                     "per_page": len(chunk),
+                    "status": "publish",
                 },
                 preferred_endpoint=resolved_endpoint,
                 preferred_auth_mode=resolved_auth_mode,
             )
             for product in resp.json():
+                if not _woo_is_public_product(product):
+                    continue
                 products_by_id[product["id"]] = product
 
     return [products_by_id[product_id] for product_id in product_ids if product_id in products_by_id]
+
+
+async def _woo_fetch_products_by_ids_store_api(body: WooImportRequest) -> list[dict]:
+    product_ids = list(dict.fromkeys(body.product_ids))
+    if not product_ids:
+        return []
+
+    products_by_id: dict[int, dict] = {}
+    async with httpx.AsyncClient(timeout=_WOO_TIMEOUT) as client:
+        resolved_endpoint: Optional[str] = None
+        for chunk in _chunked(product_ids, _WOO_API_MAX_PER_PAGE):
+            resp, resolved_endpoint = await _woo_get_public_store_products(
+                client,
+                site_url=body.credentials.site_url,
+                params={
+                    "include": ",".join(str(product_id) for product_id in chunk),
+                    "per_page": len(chunk),
+                },
+                preferred_endpoint=resolved_endpoint,
+            )
+            for product in resp.json():
+                normalized = _woo_store_product_to_woo_shape(product)
+                products_by_id[normalized["id"]] = normalized
+
+    return [products_by_id[product_id] for product_id in product_ids if product_id in products_by_id]
+
+
+async def _woo_fetch_products_by_ids(body: WooImportRequest) -> list[dict]:
+    try:
+        return await _woo_fetch_products_by_ids_v3(body)
+    except HTTPException as exc:
+        primary_detail = _woo_preview_error_detail(exc)
+        logger.info(
+            "Woo v3 import fetch failed for %s, trying public store API fallback: %s",
+            body.credentials.site_url,
+            primary_detail,
+        )
+        try:
+            return await _woo_fetch_products_by_ids_store_api(body)
+        except HTTPException as fallback_exc:
+            fallback_detail = _woo_preview_error_detail(fallback_exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"{primary_detail} | Public Store API fallback failed. {fallback_detail}",
+            ) from fallback_exc
 
 
 @router.post("/woo/preview", response_model=list[WooProductPreview])
@@ -546,18 +880,24 @@ async def woo_import(body: WooImportRequest):
 
     db = await get_db()
     imported = 0
+    existing_by_url: dict[str, dict] = {}
+    existing_by_name: dict[str, dict] = {}
     try:
+        existing_by_url, existing_by_name = await _existing_store_product_maps(db, body.store_id)
         for product in products:
             images = product.get("images", [])
-            await create_product_with_store(
+            outcome = await _merge_woo_catalog_item(
                 db,
-                canonical_name=product["name"],
-                image_url=images[0]["src"] if images else None,
-                category_id=None,
                 store_id=body.store_id,
-                product_url=product["permalink"],
+                name=product["name"],
+                permalink=product["permalink"],
+                image_url=images[0]["src"] if images else None,
+                existing_by_url=existing_by_url,
+                existing_by_name=existing_by_name,
+                create_if_missing=True,
             )
-            imported += 1
+            if outcome == "created":
+                imported += 1
         await db.commit()
     finally:
         await db.close()
@@ -1150,7 +1490,8 @@ async def _upsert_import_target(
     row: FileImportRow,
     store_id: int,
     category_id: Optional[int],
-) -> tuple[int, int, str]:
+    create_missing_products: bool,
+) -> tuple[Optional[int], Optional[int], str]:
     provided_url = (row.url or "").strip()
     has_real_url = bool(provided_url)
     entered_name = row.name.strip()
@@ -1187,6 +1528,8 @@ async def _upsert_import_target(
         target = await _find_import_target(db, canonical_name=canonical_name, store_id=store_id)
 
     if target is None:
+        if not create_missing_products:
+            return None, None, "skipped"
         product_id, product_store_id = await create_product_with_store(
             db,
             canonical_name=canonical_name,
@@ -1280,12 +1623,144 @@ async def _insert_import_snapshot(db, *, product_store_id: int, row: FileImportR
     )
 
 
+async def _set_import_fallback(
+    db,
+    *,
+    product_store_id: int,
+    dealer_price: Any = _KEEP_IMPORT_VALUE,
+    warranty: Any = _KEEP_IMPORT_VALUE,
+) -> None:
+    if dealer_price is _KEEP_IMPORT_VALUE and warranty is _KEEP_IMPORT_VALUE:
+        return
+
+    rows = await db.execute_fetchall(
+        """SELECT
+               manual_price,
+               manual_stock_status,
+               manual_warranty,
+               imported_dealer_price,
+               imported_warranty,
+               override_note
+           FROM product_store_overrides
+           WHERE product_store_id = ?
+           LIMIT 1""",
+        (product_store_id,),
+    )
+    current = rows[0] if rows else None
+
+    normalized_warranty = (
+        (warranty or "").strip() or None
+        if warranty is not _KEEP_IMPORT_VALUE
+        else (
+            (current["imported_warranty"] or "").strip() or None
+            if current
+            else None
+        )
+    )
+    next_dealer_price = (
+        current["imported_dealer_price"]
+        if dealer_price is _KEEP_IMPORT_VALUE and current
+        else (None if dealer_price is _KEEP_IMPORT_VALUE else dealer_price)
+    )
+
+    if current is None and next_dealer_price is None and normalized_warranty is None:
+        return
+
+    await db.execute(
+        """INSERT INTO product_store_overrides
+               (product_store_id, imported_dealer_price, imported_warranty)
+           VALUES (?, ?, ?)
+           ON CONFLICT(product_store_id) DO UPDATE SET
+               imported_dealer_price = excluded.imported_dealer_price,
+               imported_warranty = excluded.imported_warranty,
+               updated_at = CURRENT_TIMESTAMP""",
+        (
+            product_store_id,
+            next_dealer_price,
+            normalized_warranty,
+        ),
+    )
+
+    await db.execute(
+        """DELETE FROM product_store_overrides
+           WHERE product_store_id = ?
+             AND manual_price IS NULL
+             AND manual_stock_status IS NULL
+             AND manual_warranty IS NULL
+             AND imported_dealer_price IS NULL
+             AND imported_warranty IS NULL
+             AND override_note IS NULL""",
+        (product_store_id,),
+    )
+
+
+def _normalize_seen_product_store_ids(values: list[int]) -> set[int]:
+    return {
+        int(value)
+        for value in values
+        if isinstance(value, int) and value > 0
+    }
+
+
+async def _mark_missing_full_catalog_dealer_unavailable(
+    db,
+    *,
+    store_id: int,
+    seen_product_store_ids: set[int],
+) -> int:
+    params: list[Any] = [store_id]
+    query = """
+        SELECT pso.product_store_id
+        FROM product_store_overrides pso
+        JOIN product_stores ps ON ps.id = pso.product_store_id
+        WHERE ps.store_id = ?
+          AND (
+              pso.imported_dealer_price IS NOT NULL
+              OR NULLIF(TRIM(pso.imported_warranty), '') IS NOT NULL
+          )
+    """
+    if seen_product_store_ids:
+        placeholders = ", ".join("?" for _ in seen_product_store_ids)
+        query += f" AND pso.product_store_id NOT IN ({placeholders})"
+        params.extend(sorted(seen_product_store_ids))
+
+    rows = await db.execute_fetchall(query, tuple(params))
+    missing_ids = [int(row["product_store_id"]) for row in rows]
+    if not missing_ids:
+        return 0
+
+    placeholders = ", ".join("?" for _ in missing_ids)
+    await db.execute(
+        f"""UPDATE product_store_overrides
+            SET imported_dealer_price = NULL,
+                imported_warranty = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE product_store_id IN ({placeholders})""",
+        tuple(missing_ids),
+    )
+    await db.execute(
+        f"""DELETE FROM product_store_overrides
+            WHERE product_store_id IN ({placeholders})
+              AND manual_price IS NULL
+              AND manual_stock_status IS NULL
+              AND manual_warranty IS NULL
+              AND imported_dealer_price IS NULL
+              AND imported_warranty IS NULL
+              AND override_note IS NULL""",
+        tuple(missing_ids),
+    )
+    return len(missing_ids)
+
+
 @router.post("/file/commit", response_model=FileImportCommitResponse)
 async def file_commit(body: FileImportCommitRequest):
     db = await get_db()
     imported = 0
     created = 0
     updated = 0
+    skipped = 0
+    dealer_unavailable_marked = 0
+    processed_product_store_ids: set[int] = set()
     try:
         for row in body.rows:
             if not row.name.strip() and row.product_id is None and row.product_store_id is None:
@@ -1309,6 +1784,36 @@ async def file_commit(body: FileImportCommitRequest):
                 row=row,
                 store_id=body.store_id,
                 category_id=body.category_id,
+                create_missing_products=body.create_missing_products,
+            )
+            if action == "skipped" or product_store_id is None:
+                skipped += 1
+                continue
+            processed_product_store_ids.add(product_store_id)
+
+            await _set_import_fallback(
+                db,
+                product_store_id=product_store_id,
+                dealer_price=(
+                    row.dealer_price
+                    if row.dealer_price is not None
+                    else (
+                        None
+                        if body.dealer_column_mapped
+                        and body.missing_rows_policy == "mark_dealer_unavailable"
+                        else _KEEP_IMPORT_VALUE
+                    )
+                ),
+                warranty=(
+                    row.warranty
+                    if row.warranty is not None
+                    else (
+                        None
+                        if body.warranty_column_mapped
+                        and body.missing_rows_policy == "mark_dealer_unavailable"
+                        else _KEEP_IMPORT_VALUE
+                    )
+                ),
             )
             await _insert_import_snapshot(db, product_store_id=product_store_id, row=row)
             imported += 1
@@ -1316,6 +1821,19 @@ async def file_commit(body: FileImportCommitRequest):
                 created += 1
             else:
                 updated += 1
+
+        if body.missing_rows_policy == "mark_dealer_unavailable":
+            seen_product_store_ids = _normalize_seen_product_store_ids(
+                body.full_catalog_seen_product_store_ids
+            )
+            seen_product_store_ids.update(processed_product_store_ids)
+            dealer_unavailable_marked = (
+                await _mark_missing_full_catalog_dealer_unavailable(
+                    db,
+                    store_id=body.store_id,
+                    seen_product_store_ids=seen_product_store_ids,
+                )
+            )
         await db.commit()
     finally:
         await db.close()
@@ -1324,4 +1842,6 @@ async def file_commit(body: FileImportCommitRequest):
         imported=imported,
         created=created,
         updated=updated,
+        skipped=skipped,
+        dealer_unavailable_marked=dealer_unavailable_marked,
     )

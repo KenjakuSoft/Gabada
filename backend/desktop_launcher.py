@@ -98,31 +98,49 @@ def _open_browser_when_ready(port: int) -> None:
 
 
 def main() -> int:
-    configure_runtime_environment()
-    _configure_logging()
-    LOGGER.info("Desktop launcher starting")
+    try:
+        configure_runtime_environment()
+        _configure_logging()
+        LOGGER.info("Desktop launcher starting")
 
-    port, already_running = _discover_port()
-    LOGGER.info("Port decision: %s (already_running=%s)", port, already_running)
-    if already_running:
-        if _should_open_browser():
-            webbrowser.open(_app_url(port))
+        port, already_running = _discover_port()
+        LOGGER.info("Port decision: %s (already_running=%s)", port, already_running)
+        if already_running:
+            if _should_open_browser():
+                webbrowser.open(_app_url(port))
+            return 0
+
+        threading.Thread(target=_open_browser_when_ready, args=(port,), daemon=True).start()
+        LOGGER.info("Starting uvicorn on http://%s:%s", HOST, port)
+        config = uvicorn.Config(
+            app=app,
+            host=HOST,
+            port=port,
+            log_level="info",
+            reload=False,
+        )
+        server = uvicorn.Server(config)
+        app.state.request_shutdown = lambda: setattr(server, "should_exit", True)
+        try:
+            success = asyncio.run(server.serve())
+        except KeyboardInterrupt:
+            LOGGER.info("Shutdown requested by user")
+            return 0
+        finally:
+            app.state.request_shutdown = None
+        LOGGER.info("Uvicorn exited with success=%s", success)
+        return 0 if success is not False else 2
+    except KeyboardInterrupt:
+        LOGGER.info("Shutdown requested by user")
         return 0
-
-    threading.Thread(target=_open_browser_when_ready, args=(port,), daemon=True).start()
-    LOGGER.info("Starting uvicorn on http://%s:%s", HOST, port)
-    config = uvicorn.Config(
-        app=app,
-        host=HOST,
-        port=port,
-        log_level="info",
-        reload=False,
-    )
-    server = uvicorn.Server(config)
-    success = asyncio.run(server.serve())
-    LOGGER.info("Uvicorn exited with success=%s", success)
-    return 0 if success is not False else 1
+    except Exception:
+        LOGGER.exception("Desktop launcher failed")
+        return 2
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        LOGGER.info("Shutdown requested by user")
+        raise SystemExit(0)

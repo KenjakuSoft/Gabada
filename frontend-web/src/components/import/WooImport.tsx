@@ -9,6 +9,7 @@ import {
   Package,
   RefreshCw,
   Search,
+  Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -140,6 +141,26 @@ export function WooImport() {
     onError: () => toast.error('Import failed'),
   })
 
+  const clearCatalogMutation = useMutation({
+    mutationFn: (id: number) => storesApi.clearCatalog(id),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['products'] })
+      qc.invalidateQueries({ queryKey: ['stores'] })
+      qc.invalidateQueries({ queryKey: ['activity'] })
+      setPreview([])
+      setSelected(new Set())
+      toast.info(
+        `${result.store_name} cleared`,
+        `Removed ${result.removed_links} linked rows, ${result.removed_products} products, and ${result.removed_logs} logs. Store settings were kept.`,
+      )
+    },
+    onError: (error) => {
+      const detail =
+        error instanceof Error ? error.message : 'Could not clear the local store catalog'
+      toast.error('Clear failed', detail)
+    },
+  })
+
   const saveSyncMutation = useMutation({
     mutationFn: persistWooSyncSettings,
     onSuccess: (store) => {
@@ -168,6 +189,14 @@ export function WooImport() {
     siteUrl.length > 8 && consumerKey.length > 0 && consumerSecret.length > 0
   const canImport = selected.size > 0 && storeId !== ''
   const canSaveSync = canPreview && storeId !== ''
+  const canClearCatalog =
+    storeId !== '' &&
+    !previewMutation.isPending &&
+    !importMutation.isPending &&
+    !saveSyncMutation.isPending &&
+    !clearCatalogMutation.isPending
+  const selectedStore =
+    (stores.data ?? []).find((store) => String(store.id) === storeId) ?? null
 
   function toggle(id: number) {
     const next = new Set(selected)
@@ -293,6 +322,26 @@ export function WooImport() {
             </div>
             <div className="sm:col-span-2 flex flex-wrap justify-end gap-2">
               <Button
+                variant="destructive"
+                onClick={() => {
+                  if (!selectedStore) return
+                  const confirmed = confirm(
+                    `Clear all local ${selectedStore.name} rows from Gabada? This removes that store's linked products, logs, and overrides. Products that still belong to other stores stay.`,
+                  )
+                  if (confirmed) {
+                    clearCatalogMutation.mutate(selectedStore.id)
+                  }
+                }}
+                disabled={!canClearCatalog}
+              >
+                {clearCatalogMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Clear local store catalog
+              </Button>
+              <Button
                 variant="outline"
                 onClick={() => saveSyncMutation.mutate()}
                 disabled={!canSaveSync || saveSyncMutation.isPending}
@@ -315,6 +364,9 @@ export function WooImport() {
                 )}
                 Preview full catalog
               </Button>
+            </div>
+            <div className="sm:col-span-2 rounded-xl border border-border/70 bg-background/45 p-3 text-xs text-muted-foreground">
+              Use <span className="font-medium text-foreground">Clear local store catalog</span> when you want a fresh Gabada slate for this store before importing again. It keeps the store and Woo credentials, but removes this store&apos;s linked products, history, and overrides from Gabada.
             </div>
           </div>
         </BentoTile>

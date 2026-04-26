@@ -27,6 +27,7 @@ OutputBaseFilename=GabadaSetup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=assets\gabada.ico
 UninstallDisplayIcon={app}\Gabada.exe
 
 [Languages]

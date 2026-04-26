@@ -765,6 +765,12 @@ export function SelectorLabPage() {
                     ? formatMoney(displayed.discounted_price, symbol)
                     : 'n/a'}
                 </dd>
+                <dt className="text-muted-foreground">Dealer</dt>
+                <dd className="font-semibold tabular-nums">
+                  {displayed?.dealer_price != null
+                    ? formatMoney(displayed.dealer_price, symbol)
+                    : 'n/a'}
+                </dd>
                 <dt className="text-muted-foreground">Stock</dt>
                 <dd>
                   <Badge
@@ -783,6 +789,10 @@ export function SelectorLabPage() {
                 <dt className="text-muted-foreground">Raw price</dt>
                 <dd className="truncate font-mono text-xs">
                   {displayed?.raw_price ?? 'n/a'}
+                </dd>
+                <dt className="text-muted-foreground">Raw dealer</dt>
+                <dd className="truncate font-mono text-xs">
+                  {displayed?.raw_dealer ?? 'n/a'}
                 </dd>
               </dl>
               {displayed?.error ? (
@@ -840,7 +850,7 @@ export function SelectorLabPage() {
               <div className="mt-3 overflow-hidden rounded-md border border-border">
                 <div className="max-h-[560px] overflow-auto">
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-muted/80 text-muted-foreground backdrop-blur">
+                    <thead className="sticky top-0 bg-muted/95 text-muted-foreground">
                       <tr>
                         <th className="px-2 py-1.5 text-left font-medium">Sample</th>
                         <th className="px-2 py-1.5 text-left font-medium">Hints</th>

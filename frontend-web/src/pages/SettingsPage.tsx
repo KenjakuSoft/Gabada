@@ -8,6 +8,7 @@ import {
   FileCode,
   Globe2,
   Loader2,
+  Power,
   Radio,
   RefreshCw,
   ShieldCheck,
@@ -256,6 +257,29 @@ export function SettingsPage() {
       toast.error('Save failed', 'Invalid cron, timezone, or backend offline'),
   })
 
+  const shutdown = useMutation({
+    mutationFn: () => settingsApi.shutdown(),
+    onSuccess: () => {
+      toast.success(
+        'Gabada is closing',
+        'This tab will disconnect in a moment while the local backend shuts down.',
+      )
+      window.setTimeout(() => {
+        try {
+          window.close()
+        } catch {
+          // Ignore browser restrictions on window.close().
+        }
+      }, 900)
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'Could not stop Gabada from this session'
+      toast.error('Exit failed', detail)
+    },
+  })
+
   const dirty = useMemo(() => {
     if (!draft || !settings.data) return false
     const keys: Array<keyof Settings> = [
@@ -338,6 +362,25 @@ export function SettingsPage() {
                 <Check className="h-4 w-4" />
               )}
               Save
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const confirmed = window.confirm(
+                  'Close Gabada on this machine now? Any open Gabada tabs will disconnect.',
+                )
+                if (!confirmed) return
+                shutdown.mutate()
+              }}
+              disabled={save.isPending || shutdown.isPending}
+            >
+              {shutdown.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Power className="h-4 w-4" />
+              )}
+              Exit Gabada
             </Button>
           </>
         }

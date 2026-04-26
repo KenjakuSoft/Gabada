@@ -20,6 +20,10 @@ export interface Store {
   id: number
   name: string
   base_url: string
+  manual_only: boolean
+  dealer_login_url: string | null
+  dealer_storage_state_path: string | null
+  dealer_session_updated_at: string | null
   woo_enabled: boolean
   woo_site_url: string | null
   woo_consumer_key: string | null
@@ -39,11 +43,26 @@ export interface WooSyncResult {
   synced_at: string | null
 }
 
+export interface StoreCatalogClearResult {
+  store_id: number
+  store_name: string
+  removed_links: number
+  removed_products: number
+  removed_logs: number
+}
+
+export interface StoreDealerSessionResponse {
+  store: Store
+  saved_to: string
+  final_url: string
+}
+
 export interface ProductStoreSummary {
   id: number
   store_id: number
   store_name: string
   store_base_url: string
+  store_manual_only: boolean
   product_url: string
   is_active: boolean
   latest_price: number | null
@@ -56,6 +75,7 @@ export interface ProductStoreSummary {
   latest_price_delta: number | null
   manual_price: number | null
   manual_stock_status: StockStatus | null
+  manual_warranty: string | null
   override_note: string | null
 }
 
@@ -82,6 +102,8 @@ export interface PriceLog {
   stock_status: StockStatus | null
   change_type: string | null
   price_delta: number | null
+  previous_price: number | null
+  previous_stock_status: StockStatus | null
 }
 
 export interface ActivityEntry {
@@ -92,6 +114,7 @@ export interface ActivityEntry {
   change_type: string
   price: number | null
   discounted_price: number | null
+  dealer_price: number | null
   price_delta: number | null
   previous_price: number | null
   stock_status: StockStatus | null
@@ -273,4 +296,6 @@ export interface FileImportCommitResponse {
   imported: number
   created: number
   updated: number
+  skipped: number
+  dealer_unavailable_marked: number
 }

@@ -1,45 +1,19 @@
-# Gabada site profiles — edit this file in Notepad to register new shops.
+# Gabada site profiles
 #
-# Each table heading is a hostname (no scheme, no path). "www." is stripped
-# before matching, so ["example.com"] covers both example.com and
-# www.example.com. Subdomain matches walk up the domain suffix
-# (shop.a.example.com falls back to a.example.com, then example.com).
+# Managed by the Selector Lab and Settings editor.
+# Match is by hostname. "www." is stripped automatically.
 #
-# Save the file and the scraper reloads automatically — no restart needed.
-# Unknown hosts still work: the scraper falls back to auto-detection.
-#
-# Known platform values:
-#   cs-cart, woocommerce, shopify, magento, prestashop, generic
-#
-# Minimal entry (just pin the platform):
-#   ["mystore.com"]
-#   platform = "shopify"
-#
-# Full entry (override selectors too):
-#   ["tricky.com"]
-#   platform = "generic"
-#   wait_for = "#product-price"
-#   [tricky.com.selectors]
-#   title = "h1.product-title"
-#   price = ".price-now"
-#   discounted_price = ".price-was"
-#   stock_status = ".availability"
-#   image = "img.product-main"
 
-
-# ── Sri Lanka CS-Cart / B2B tech retailers ──────────────────────────────────
-
-["nanotek.lk"]
-platform = "cs-cart"
+["barclays"]
 
 ["barclays.lk"]
 platform = "generic"
 wait_for = ".product-details-area .price-box .price"
 
-[barclays.lk.selectors]
-title = ".product-name h1"
-price = ".product-details-area .price-box .price"
-stock_status = ".product-details-area .availability"
+["nanotek.lk"]
+platform = "cs-cart"
 
-
-# ── Add your sites below. Copy one of the examples above and edit. ──────────
+["sense.lk"]
+platform = "generic"
+wait_for = "#productPrice"
+selectors = { image = "button.owl-prev:nth-of-type(1) > img", price = "#productPrice", stock_status = "div.col-md-7.pt-lg-0", title = "h1.fw-600.text-24" }

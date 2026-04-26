@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   Boxes,
+  CalendarDays,
   Clock,
   ImageOff,
   LineChart as LineChartIcon,
@@ -17,6 +18,8 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toast-store'
@@ -31,6 +34,17 @@ import { useLiveTime } from '@/hooks/useLiveTime'
 import type { PriceLog, Product } from '@/api'
 import { cn } from '@/lib/utils'
 
+type HistoryRange = 'all' | 'today' | '7d' | '30d' | '90d' | 'custom'
+
+const HISTORY_RANGES: { value: HistoryRange; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'today', label: 'Today' },
+  { value: '7d', label: '7 days' },
+  { value: '30d', label: '30 days' },
+  { value: '90d', label: '90 days' },
+  { value: 'custom', label: 'Custom' },
+]
+
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>()
   const productId = Number(id)
@@ -38,6 +52,14 @@ export function ProductDetailPage() {
   const navigate = useNavigate()
   const symbol = useCurrencySymbol()
   const [editing, setEditing] = useState(false)
+  const [historyStoreId, setHistoryStoreId] = useState('all')
+  const [historyRange, setHistoryRange] = useState<HistoryRange>('all')
+  const [customFrom, setCustomFrom] = useState(dateDaysAgoInput(30))
+  const [customTo, setCustomTo] = useState(todayInputDate())
+  const historyDates = useMemo(
+    () => resolveHistoryDates(historyRange, customFrom, customTo),
+    [customFrom, customTo, historyRange],
+  )
 
   const product = useQuery<Product>({
     queryKey: ['product', productId],
@@ -46,10 +68,27 @@ export function ProductDetailPage() {
   })
 
   const logs = useQuery<PriceLog[]>({
-    queryKey: ['product-logs', productId],
-    queryFn: () => logsApi.forProduct(productId),
+    queryKey: ['product-logs', productId, historyDates.from, historyDates.to],
+    queryFn: () =>
+      logsApi.forProduct(productId, {
+        from: historyDates.from,
+        to: historyDates.to,
+        limit: 5000,
+      }),
     enabled: Number.isFinite(productId) && productId > 0,
   })
+
+  const historyStores = useMemo(() => {
+    const stores = product.data?.stores ?? []
+    if (historyStoreId === 'all') return stores
+    return stores.filter((store) => String(store.id) === historyStoreId)
+  }, [historyStoreId, product.data?.stores])
+
+  const historyLogs = useMemo(() => {
+    const list = logs.data ?? []
+    if (historyStoreId === 'all') return list
+    return list.filter((log) => String(log.product_store_id) === historyStoreId)
+  }, [historyStoreId, logs.data])
 
   const scrapeAll = useMutation({
     mutationFn: async () => {
@@ -85,6 +124,12 @@ export function ProductDetailPage() {
   const p = product.data
   const stats = computeStats(p)
   const recent = mostRecentScrape(p)
+  const selectedHistoryStore =
+    historyStoreId === 'all'
+      ? null
+      : p.stores.find((store) => String(store.id) === historyStoreId)
+  const historyScope = selectedHistoryStore?.store_name ?? 'All stores'
+  const historyRangeLabel = labelHistoryRange(historyRange, historyDates)
 
   return (
     <div className="space-y-6">
@@ -255,33 +300,176 @@ export function ProductDetailPage() {
         </BentoTile>
 
         <BentoTile colSpan={6}>
-          <TileHeader
-            eyebrow="Price history"
-            title="Across all stores"
-            icon={<LineChartIcon className="h-4 w-4" />}
-          />
-          <div className="mt-3">
-            <PriceChart
-              logs={logs.data ?? []}
-              stores={p.stores}
-              symbol={symbol}
-            />
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <TileHeader
+                eyebrow="History controls"
+                title={`${historyScope} - ${historyRangeLabel}`}
+                icon={<CalendarDays className="h-4 w-4" />}
+              />
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="muted">{historyLogs.length} logs</Badge>
+                {logs.isFetching ? <Badge variant="info">Refreshing</Badge> : null}
+              </div>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-[minmax(180px,260px)_1fr]">
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Store
+                </span>
+                <Select
+                  value={historyStoreId}
+                  onChange={(event) => setHistoryStoreId(event.target.value)}
+                >
+                  <option value="all">All stores</option>
+                  {p.stores.map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {store.store_name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+
+              <div className="space-y-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Date selection
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {HISTORY_RANGES.map((range) => (
+                    <Button
+                      key={range.value}
+                      type="button"
+                      variant={historyRange === range.value ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setHistoryRange(range.value)}
+                    >
+                      {range.label}
+                    </Button>
+                  ))}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="space-y-1">
+                    <span className="text-[11px] text-muted-foreground">From</span>
+                    <Input
+                      type="date"
+                      value={customFrom}
+                      max={customTo || undefined}
+                      onChange={(event) => {
+                        setCustomFrom(event.target.value)
+                        setHistoryRange('custom')
+                      }}
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[11px] text-muted-foreground">To</span>
+                    <Input
+                      type="date"
+                      value={customTo}
+                      min={customFrom || undefined}
+                      onChange={(event) => {
+                        setCustomTo(event.target.value)
+                        setHistoryRange('custom')
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
           </div>
         </BentoTile>
 
         <BentoTile colSpan={6}>
-          <TileHeader eyebrow="Recent logs" title="Newest first" />
+          <TileHeader
+            eyebrow="Price graph"
+            title={historyScope}
+            icon={<LineChartIcon className="h-4 w-4" />}
+          />
           <div className="mt-3">
-            <LogsTable
-              logs={(logs.data ?? []).slice(0, 100)}
-              stores={p.stores}
-              symbol={symbol}
-            />
+            {logs.isLoading ? (
+              <Skeleton className="h-80 w-full" />
+            ) : (
+              <PriceChart
+                logs={historyLogs}
+                stores={historyStores}
+                symbol={symbol}
+              />
+            )}
+          </div>
+        </BentoTile>
+
+        <BentoTile colSpan={6}>
+          <TileHeader
+            eyebrow="Previous logs"
+            title={`${historyLogs.length} entries`}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Logs below follow the selected store and date range above.
+          </p>
+          <div className="mt-3">
+            {logs.isLoading ? (
+              <Skeleton className="h-52 w-full" />
+            ) : (
+              <LogsTable
+                logs={historyLogs}
+                stores={p.stores}
+                symbol={symbol}
+              />
+            )}
           </div>
         </BentoTile>
       </BentoGrid>
     </div>
   )
+}
+
+function resolveHistoryDates(
+  range: HistoryRange,
+  customFrom: string,
+  customTo: string,
+): { from: string | null; to: string | null } {
+  if (range === 'all') return { from: null, to: null }
+  if (range === 'today') {
+    const today = todayInputDate()
+    return { from: today, to: today }
+  }
+  if (range === '7d') return { from: dateDaysAgoInput(6), to: todayInputDate() }
+  if (range === '30d') return { from: dateDaysAgoInput(29), to: todayInputDate() }
+  if (range === '90d') return { from: dateDaysAgoInput(89), to: todayInputDate() }
+  return {
+    from: customFrom || null,
+    to: customTo || null,
+  }
+}
+
+function labelHistoryRange(
+  range: HistoryRange,
+  dates: { from: string | null; to: string | null },
+): string {
+  if (range === 'all') return 'all history'
+  if (range === 'today') return 'today'
+  if (range === 'custom') {
+    if (dates.from && dates.to) return `${dates.from} to ${dates.to}`
+    if (dates.from) return `from ${dates.from}`
+    if (dates.to) return `until ${dates.to}`
+    return 'custom range'
+  }
+  return HISTORY_RANGES.find((option) => option.value === range)?.label ?? 'history'
+}
+
+function todayInputDate(): string {
+  return toInputDate(new Date())
+}
+
+function dateDaysAgoInput(days: number): string {
+  const date = new Date()
+  date.setDate(date.getDate() - days)
+  return toInputDate(date)
+}
+
+function toInputDate(date: Date): string {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 10)
 }
 
 function LiveTimeLine({ iso }: { iso: string | null }) {

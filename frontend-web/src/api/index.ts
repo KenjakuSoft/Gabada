@@ -15,6 +15,8 @@ import type {
   SelectorLabSaveResponse,
   Settings,
   Store,
+  StoreCatalogClearResult,
+  StoreDealerSessionResponse,
   WooSyncResult,
   WooCredentials,
   WooProductPreview,
@@ -31,7 +33,9 @@ export const storesApi = {
   },
   create: async (body: {
     name: string
-    base_url: string
+    base_url?: string
+    manual_only?: boolean
+    dealer_login_url?: string | null
     woo_enabled?: boolean
     woo_site_url?: string | null
     woo_consumer_key?: string | null
@@ -46,6 +50,9 @@ export const storesApi = {
     body: {
       name?: string
       base_url?: string
+      manual_only?: boolean
+      dealer_login_url?: string | null
+      dealer_storage_state_path?: string | null
       woo_enabled?: boolean
       woo_site_url?: string | null
       woo_consumer_key?: string | null
@@ -60,6 +67,25 @@ export const storesApi = {
     const { data } = await http.post<WooSyncResult>(`/stores/${id}/woo-sync`, undefined, {
       timeout: 300_000,
     })
+    return data
+  },
+  captureDealerSession: async (
+    id: number,
+    body?: { wait_seconds?: number; headless?: boolean },
+  ): Promise<StoreDealerSessionResponse> => {
+    const { data } = await http.post<StoreDealerSessionResponse>(
+      `/stores/${id}/dealer-session`,
+      body ?? {},
+      { timeout: 300_000 },
+    )
+    return data
+  },
+  clearDealerSession: async (id: number): Promise<Store> => {
+    const { data } = await http.delete<Store>(`/stores/${id}/dealer-session`)
+    return data
+  },
+  clearCatalog: async (id: number): Promise<StoreCatalogClearResult> => {
+    const { data } = await http.delete<StoreCatalogClearResult>(`/stores/${id}/catalog`)
     return data
   },
   remove: async (id: number): Promise<void> => {
@@ -89,8 +115,17 @@ export const categoriesApi = {
 }
 
 export const logsApi = {
-  forProduct: async (productId: number): Promise<PriceLog[]> => {
-    const { data } = await http.get<PriceLog[]>(`/logs/product/${productId}`)
+  forProduct: async (
+    productId: number,
+    params?: { from?: string | null; to?: string | null; limit?: number },
+  ): Promise<PriceLog[]> => {
+    const { data } = await http.get<PriceLog[]>(`/logs/product/${productId}`, {
+      params: {
+        from: params?.from || undefined,
+        to: params?.to || undefined,
+        limit: params?.limit,
+      },
+    })
     return data
   },
   all: async (params?: {
@@ -122,6 +157,10 @@ export const settingsApi = {
   },
   nextRun: async (): Promise<{ next_run_time: string | null }> => {
     const { data } = await http.get('/settings/schedule/next')
+    return data
+  },
+  shutdown: async (): Promise<{ status: string }> => {
+    const { data } = await http.post<{ status: string }>('/settings/shutdown')
     return data
   },
   databaseInfo: async (): Promise<DatabaseTransferInfo> => {
@@ -291,6 +330,11 @@ export const importApi = {
     rows: FileImportRow[]
     store_id: number
     category_id?: number | null
+    create_missing_products?: boolean
+    missing_rows_policy?: 'ignore' | 'mark_dealer_unavailable'
+    full_catalog_seen_product_store_ids?: number[]
+    dealer_column_mapped?: boolean
+    warranty_column_mapped?: boolean
   }): Promise<FileImportCommitResponse> => {
     const { data } = await http.post<FileImportCommitResponse>(
       '/import/file/commit',

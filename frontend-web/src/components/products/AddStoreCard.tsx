@@ -6,11 +6,23 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { productsApi, storesApi } from '@/api'
-import type { Store } from '@/api'
+import type { StockStatus, Store } from '@/api'
 
 interface AddStoreCardProps {
   productId: number
 }
+
+const MANUAL_STOCK_OPTIONS: Array<{ value: StockStatus; label: string }> = [
+  { value: 'in_stock', label: 'In stock' },
+  { value: 'out_of_stock', label: 'Out of stock' },
+  { value: 'limited', label: 'Limited' },
+  { value: 'preorder', label: 'Pre-order' },
+  { value: 'backorder', label: 'Backorder' },
+  { value: 'call_for_price', label: 'Call for price' },
+  { value: 'contact_store', label: 'Contact store' },
+  { value: 'discontinued', label: 'Discontinued' },
+  { value: 'unknown', label: 'Unknown' },
+]
 
 export function AddStoreCard({ productId }: AddStoreCardProps) {
   const qc = useQueryClient()
@@ -18,6 +30,10 @@ export function AddStoreCard({ productId }: AddStoreCardProps) {
   const [url, setUrl] = useState('')
   const [storeId, setStoreId] = useState('')
   const [newStoreName, setNewStoreName] = useState('')
+  const [newStoreManualOnly, setNewStoreManualOnly] = useState(false)
+  const [manualPrice, setManualPrice] = useState('')
+  const [manualStockStatus, setManualStockStatus] = useState<StockStatus | ''>('')
+  const [manualWarranty, setManualWarranty] = useState('')
 
   const stores = useQuery<Store[]>({
     queryKey: ['stores'],
@@ -47,26 +63,57 @@ export function AddStoreCard({ productId }: AddStoreCardProps) {
 
   const createStore = useMutation({
     mutationFn: async () => {
-      const origin = new URL(url).origin
       return storesApi.create({
-        name: newStoreName.trim() || new URL(url).hostname,
-        base_url: origin,
+        name: newStoreName.trim() || safeHost(url) || 'Manual source',
+        base_url: newStoreManualOnly ? '' : new URL(url).origin,
+        manual_only: newStoreManualOnly,
       })
     },
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['stores'] })
       setStoreId(String(created.id))
       setNewStoreName('')
+      setNewStoreManualOnly(false)
     },
   })
 
+  const selectedStore = useMemo(() => {
+    const fromQuery =
+      (stores.data ?? []).find((store) => String(store.id) === effectiveStoreId) ?? null
+    if (fromQuery) return fromQuery
+    if (createStore.data && String(createStore.data.id) === effectiveStoreId) {
+      return createStore.data
+    }
+    return null
+  }, [createStore.data, effectiveStoreId, stores.data])
+  const manualSourceSelected = selectedStore?.manual_only ?? newStoreManualOnly
+
   const addStore = useMutation({
-    mutationFn: () =>
-      productsApi.addStore(productId, {
+    mutationFn: async () => {
+      const link = await productsApi.addStore(productId, {
         store_id: Number(effectiveStoreId),
-        product_url: url.trim(),
-        auto_detect: true,
-      }),
+        product_url: url.trim() || null,
+        auto_detect: !(selectedStore?.manual_only ?? false),
+      })
+
+      const parsedManualPrice = parseManualPrice(manualPrice)
+      if (
+        selectedStore?.manual_only &&
+        (
+          parsedManualPrice != null ||
+          manualStockStatus !== '' ||
+          manualWarranty.trim() !== ''
+        )
+      ) {
+        await productsApi.setOverride(productId, link.id, {
+          manual_price: parsedManualPrice,
+          manual_stock_status: manualStockStatus || null,
+          manual_warranty: manualWarranty.trim() || null,
+        })
+      }
+
+      return link
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['product', productId] })
       qc.invalidateQueries({ queryKey: ['products'] })
@@ -79,6 +126,12 @@ export function AddStoreCard({ productId }: AddStoreCardProps) {
     setUrl('')
     setStoreId('')
     setNewStoreName('')
+    setNewStoreManualOnly(false)
+    setManualPrice('')
+    setManualStockStatus('')
+    setManualWarranty('')
+    createStore.reset()
+    addStore.reset()
   }
 
   if (!open) {
@@ -95,7 +148,9 @@ export function AddStoreCard({ productId }: AddStoreCardProps) {
     )
   }
 
-  const canAdd = url.trim().length > 8 && effectiveStoreId !== ''
+  const canAdd =
+    effectiveStoreId !== '' &&
+    ((selectedStore?.manual_only ?? false) || url.trim().length > 8)
   const urlHost = safeHost(url)
 
   return (
@@ -113,8 +168,17 @@ export function AddStoreCard({ productId }: AddStoreCardProps) {
           id="add-store-url"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://another-shop.example.com/products/widget"
+          placeholder={
+            selectedStore?.manual_only
+              ? 'Optional for manual-only stores'
+              : 'https://another-shop.example.com/products/widget'
+          }
         />
+        {selectedStore?.manual_only ? (
+          <p className="text-xs text-muted-foreground">
+            This store is marked as manual-only, so you can link it without a website URL.
+          </p>
+        ) : null}
       </div>
 
       <div className="space-y-1.5">
@@ -131,10 +195,23 @@ export function AddStoreCard({ productId }: AddStoreCardProps) {
             </option>
           ))}
         </Select>
-        {url && !matchedStore ? (
+        {!effectiveStoreId ? (
+          <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={newStoreManualOnly}
+              onChange={(e) => setNewStoreManualOnly(e.target.checked)}
+              className="h-4 w-4 accent-primary"
+            />
+            Create a manual-only supplier instead of a website store
+          </label>
+        ) : null}
+        {(url && !matchedStore) || newStoreManualOnly ? (
           <div className="mt-2 rounded-md border border-dashed border-border p-2">
             <p className="mb-2 text-xs text-muted-foreground">
-              No store matches <span className="font-mono">{urlHost}</span>. Create one?
+              {newStoreManualOnly
+                ? 'Create a manual-only supplier store?'
+                : <>No store matches <span className="font-mono">{urlHost}</span>. Create one?</>}
             </p>
             <div className="flex gap-2">
               <Input
@@ -146,7 +223,7 @@ export function AddStoreCard({ productId }: AddStoreCardProps) {
                 variant="outline"
                 size="sm"
                 onClick={() => createStore.mutate()}
-                disabled={createStore.isPending || !urlHost}
+                disabled={createStore.isPending || (!newStoreManualOnly && !urlHost)}
               >
                 {createStore.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -162,6 +239,52 @@ export function AddStoreCard({ productId }: AddStoreCardProps) {
           </div>
         ) : null}
       </div>
+
+      {manualSourceSelected ? (
+        <div className="space-y-3 rounded-md border border-dashed border-border p-3">
+          <div>
+            <p className="text-sm font-medium">Manual store snapshot</p>
+            <p className="text-xs text-muted-foreground">
+              Enter the current price and stock status now, so the manual supplier row is useful immediately.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="manual-store-price">Price (optional)</Label>
+              <Input
+                id="manual-store-price"
+                value={manualPrice}
+                onChange={(e) => setManualPrice(e.target.value)}
+                placeholder="52500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="manual-store-stock">Stock status (optional)</Label>
+              <Select
+                id="manual-store-stock"
+                value={manualStockStatus}
+                onChange={(e) => setManualStockStatus(e.target.value as StockStatus | '')}
+              >
+                <option value="">— none —</option>
+                {MANUAL_STOCK_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="manual-store-warranty">Warranty (optional)</Label>
+              <Input
+                id="manual-store-warranty"
+                value={manualWarranty}
+                onChange={(e) => setManualWarranty(e.target.value)}
+                placeholder="1 year warranty"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex items-center justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={reset}>
@@ -183,7 +306,7 @@ export function AddStoreCard({ productId }: AddStoreCardProps) {
 
       {addStore.isError ? (
         <p className="text-right text-xs text-destructive">
-          Failed to add store. The URL may already be linked to this product.
+          Failed to add store. The store may already be linked to this product.
         </p>
       ) : null}
     </div>
@@ -196,4 +319,12 @@ function safeHost(url: string): string | null {
   } catch {
     return null
   }
+}
+
+function parseManualPrice(value: string): number | null {
+  const cleaned = value.replace(/[^\d.,]/g, '').trim()
+  if (!cleaned) return null
+  const normalized = cleaned.includes('.') ? cleaned.replace(/,/g, '') : cleaned.replace(/,/g, '')
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
 }

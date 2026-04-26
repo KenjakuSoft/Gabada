@@ -36,7 +36,7 @@ function ToastItem({ toast }: { toast: Toast }) {
   return (
     <div
       className={cn(
-        'gbd-toast-in pointer-events-auto flex items-start gap-3 rounded-lg border px-3 py-2.5 shadow-lg backdrop-blur',
+        'gbd-toast-in pointer-events-auto flex items-start gap-3 rounded-xl border px-3 py-2.5 shadow-[var(--shadow-elevated)] backdrop-blur transition-transform hover:-translate-y-0.5',
         tone,
       )}
       role="status"

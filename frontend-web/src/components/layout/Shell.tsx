@@ -6,7 +6,6 @@ import {
   Download,
   Home,
   Moon,
-  Package,
   Plus,
   Radio,
   Search,
@@ -55,19 +54,26 @@ export function Shell() {
   }, [location.pathname])
 
   return (
-    <div className="flex h-full min-h-screen bg-background text-foreground">
-      <aside className="w-60 shrink-0 border-r border-border bg-card/40 backdrop-blur-sm">
-        <div className="flex h-14 items-center gap-2 border-b border-border px-4">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-primary to-[color-mix(in_oklch,var(--primary)_60%,var(--accent))] text-primary-foreground shadow-sm">
-            <Package className="h-4 w-4" />
+    <div className="relative flex h-full min-h-screen overflow-hidden text-foreground">
+      <aside className="gbd-glass relative z-10 hidden w-64 shrink-0 border-r border-border/70 md:block">
+        <div className="flex h-16 items-center gap-3 border-b border-border/60 px-4">
+          <img
+            src="/gabada-mark.svg"
+            alt="Gabada logo"
+            className="h-10 w-10 shrink-0 rounded-xl shadow-lg shadow-primary/15"
+          />
+          <div>
+            <span className="block text-sm font-black tracking-[0.24em]">GABADA</span>
+            <span className="text-[10px] tracking-wide text-muted-foreground">
+              Track any online shop.
+            </span>
           </div>
-          <span className="text-sm font-semibold tracking-tight">Gabada</span>
         </div>
         <nav ref={navRef} className="relative flex flex-col gap-1 p-3">
           {pill ? (
             <span
               aria-hidden
-              className="pointer-events-none absolute left-3 right-3 rounded-md bg-accent transition-[top,height] duration-300 ease-out"
+              className="pointer-events-none absolute left-3 right-3 rounded-xl border border-primary/15 bg-gradient-to-r from-accent/90 to-[color-mix(in_oklch,var(--accent)_70%,var(--glow-b))] shadow-[0_8px_22px_-20px_var(--primary)] transition-[top,height] duration-150 ease-out"
               style={{ top: pill.top, height: pill.height }}
             />
           ) : null}
@@ -78,27 +84,55 @@ export function Shell() {
               end={to === '/'}
               className={({ isActive }) =>
                 cn(
-                  'relative z-10 flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
+                  'group/nav relative z-10 flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-[transform,color] duration-200 hover:translate-x-1',
                   isActive
                     ? 'text-accent-foreground font-medium'
                     : 'text-muted-foreground hover:text-foreground',
                 )
               }
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-4 w-4 transition-transform duration-200 group-hover/nav:scale-110" />
               {label}
             </NavLink>
           ))}
         </nav>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         <TopBar />
-        <main className="flex-1 overflow-y-auto px-6 py-6">
-          <Outlet />
+        <MobileNav />
+        <main className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
+          <div className="mx-auto max-w-[1800px]">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>
+  )
+}
+
+function MobileNav() {
+  return (
+    <nav className="gbd-glass z-20 flex gap-2 overflow-x-auto border-b border-border/70 px-3 py-2 md:hidden">
+      {NAV.map(({ to, label, icon: Icon }) => (
+        <NavLink
+          key={to}
+          to={to}
+          end={to === '/'}
+          className={({ isActive }) =>
+            cn(
+              'inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-[background-color,border-color,color,transform]',
+              isActive
+                ? 'border-primary/25 bg-accent text-accent-foreground'
+                : 'border-border/70 bg-card/50 text-muted-foreground hover:-translate-y-0.5 hover:border-primary/25 hover:text-foreground',
+            )
+          }
+        >
+          <Icon className="h-3.5 w-3.5" />
+          {label}
+        </NavLink>
+      ))}
+    </nav>
   )
 }
 
@@ -128,7 +162,13 @@ function TopBar() {
   const nextLabel = useMemo(() => formatNextRun(nextRun), [nextRun])
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur-md">
+    <header className="gbd-glass sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border/70 px-4 sm:px-6">
+      {active > 0 ? (
+        <span
+          aria-hidden
+          className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent"
+        />
+      ) : null}
       <div className="flex items-center gap-3 text-xs">
         <span className="relative inline-flex h-2 w-2">
           {active > 0 ? (
@@ -150,7 +190,7 @@ function TopBar() {
 
       <div className="flex items-center gap-4">
         {nextLabel ? (
-          <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+          <div className="hidden items-center gap-1.5 rounded-full border border-border/70 bg-card/60 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:flex">
             <Radio className="h-3.5 w-3.5" />
             Next scrape <span className="font-medium text-foreground">{nextLabel}</span>
           </div>
