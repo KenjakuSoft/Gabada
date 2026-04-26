@@ -65,6 +65,7 @@ PLATFORM_WAIT_FOR: dict[str, str] = {
     "magento":     "[data-price-type='finalPrice'] .price, .price-box .price",
     "prestashop":  "#our_price_display, .current-price",
     "generic":     "",
+    "facebook-marketplace": "div[role='main']",
 }
 
 PLATFORM_SELECTORS: dict[str, dict[str, Optional[str]]] = {
@@ -104,6 +105,13 @@ PLATFORM_SELECTORS: dict[str, dict[str, Optional[str]]] = {
         "stock_status": "#stock_availability, .availability",
     },
     "generic": {
+        "title": None,
+        "price": None,
+        "discounted_price": None,
+        "dealer_price": None,
+        "stock_status": None,
+    },
+    "facebook-marketplace": {
         "title": None,
         "price": None,
         "discounted_price": None,
@@ -270,7 +278,7 @@ _DEFAULT_BODY = """# Gabada site profiles
 # Edit this file with any text editor (Notepad works). Save and the scraper
 # reloads automatically — no server restart needed.
 #
-# Known platforms: cs-cart, woocommerce, shopify, magento, prestashop, generic
+# Known platforms: cs-cart, woocommerce, shopify, magento, prestashop, generic, facebook-marketplace
 #
 # Examples:
 #

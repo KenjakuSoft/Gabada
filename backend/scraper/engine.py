@@ -784,6 +784,12 @@ def _merge_public_and_authenticated_result(
     return _normalize_scrape_result(merged)
 
 
+def _clear_dealer_price(result: ScrapeResult) -> ScrapeResult:
+    result.dealer_price = None
+    result.raw_dealer = None
+    return result
+
+
 # ── Strategy 1: JSON-LD ───────────────────────────────────────────────────────
 
 async def _try_json_ld(page: Page) -> ScrapeResult:
@@ -1096,7 +1102,7 @@ def _is_facebook_marketplace_url(url: Optional[str]) -> bool:
         from urllib.parse import urlparse
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
-        if host.startswith("www."):
+        if host.startswith(("www.", "web.")):
             host = host[4:]
         if host not in _FB_MARKETPLACE_HOSTS:
             return False
@@ -1105,18 +1111,28 @@ def _is_facebook_marketplace_url(url: Optional[str]) -> bool:
         return False
 
 
+def _facebook_marketplace_item_id(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    try:
+        from urllib.parse import urlparse
+        path = urlparse(url).path or ""
+    except Exception:
+        return None
+    match = re.search(r"/marketplace/item/(\d+)", path)
+    if not match:
+        match = re.search(r"/marketplace/[^/]+/item/(\d+)", path)
+    return match.group(1) if match else None
+
+
 _FB_TITLE_RE = re.compile(r'"marketplace_listing_title"\s*:\s*"((?:[^"\\]|\\.)*)"')
-_FB_LISTING_PRICE_RE = re.compile(
-    r'"listing_price"\s*:\s*\{[^}]{0,400}?"amount"\s*:\s*"([^"]+)"'
+_FB_AMOUNT_RE = re.compile(r'"amount"\s*:\s*"([^"]+)"')
+_FB_FORMATTED_AMOUNT_RE = re.compile(
+    r'"(?:formatted_amount|formatted_amount_zeros_stripped|formattedAmountWithoutDecimals)"'
+    r'\s*:\s*"((?:[^"\\]|\\.)*)"'
 )
-_FB_LISTING_FORMATTED_RE = re.compile(
-    r'"listing_price"\s*:\s*\{[^}]{0,400}?"formatted_amount"\s*:\s*"([^"]+)"'
-)
-_FB_STRIKE_PRICE_RE = re.compile(
-    r'"strikethrough_price"\s*:\s*\{[^}]{0,400}?"amount"\s*:\s*"([^"]+)"'
-)
-_FB_STRIKE_FORMATTED_RE = re.compile(
-    r'"strikethrough_price"\s*:\s*\{[^}]{0,400}?"formatted_amount"\s*:\s*"([^"]+)"'
+_FB_FORMATTED_PRICE_TEXT_RE = re.compile(
+    r'"formatted_price"\s*:\s*\{\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"'
 )
 _FB_IS_LIVE_RE = re.compile(r'"is_live"\s*:\s*(true|false)')
 _FB_IS_PENDING_RE = re.compile(r'"is_pending"\s*:\s*(true|false)')
@@ -1132,6 +1148,187 @@ def _decode_fb_json_string(value: str) -> str:
         return value
 
 
+def _extract_fb_object_ranges(blob: str, key: str) -> list[tuple[int, int, str]]:
+    """Extract every JSON object value for ``"key": { ... }`` from a blob."""
+    ranges: list[tuple[int, int, str]] = []
+    needle = f'"{key}"'
+    search_from = 0
+    while True:
+        idx = blob.find(needle, search_from)
+        if idx == -1:
+            return ranges
+        pos = idx + len(needle)
+        while pos < len(blob) and blob[pos] in " \t\r\n":
+            pos += 1
+        if pos < len(blob) and blob[pos] == ':':
+            pos += 1
+        else:
+            search_from = idx + len(needle)
+            continue
+        while pos < len(blob) and blob[pos] in " \t\r\n":
+            pos += 1
+        if pos >= len(blob) or blob[pos] != '{':
+            search_from = idx + len(needle)
+            continue
+        depth = 0
+        in_str = False
+        escape = False
+        start = pos
+        while pos < len(blob):
+            c = blob[pos]
+            if in_str:
+                if escape:
+                    escape = False
+                elif c == '\\':
+                    escape = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == '{':
+                    depth += 1
+                elif c == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = pos + 1
+                        ranges.append((start, end, blob[start:end]))
+                        search_from = end
+                        break
+            pos += 1
+        else:
+            return ranges
+
+
+def _extract_fb_object(blob: str, key: str) -> Optional[str]:
+    ranges = _extract_fb_object_ranges(blob, key)
+    return ranges[0][2] if ranges else None
+
+
+def _fb_positions(blob: str, needle: Optional[str]) -> list[int]:
+    if not blob or not needle:
+        return []
+    return [m.start() for m in re.finditer(re.escape(needle), blob)]
+
+
+def _fb_nearest_distance(pos: int, anchors: list[int]) -> Optional[int]:
+    if not anchors:
+        return None
+    return min(abs(pos - anchor) for anchor in anchors)
+
+
+def _fb_scope_for_object(
+    blob: str,
+    start: int,
+    end: int,
+    anchors: list[int],
+) -> str:
+    if anchors:
+        anchor = min(anchors, key=lambda pos: abs(start - pos))
+    else:
+        anchor = start
+    scope_start = max(0, min(anchor, start) - 6000)
+    scope_end = min(len(blob), max(anchor, end) + 30000)
+    return blob[scope_start:scope_end]
+
+
+def _fb_select_listing_scope(
+    blobs: list[str],
+    item_id: Optional[str],
+) -> tuple[str, str] | tuple[None, None]:
+    """Choose the listing_price object scoped to the Marketplace item id.
+
+    Facebook hydration often contains the target listing plus recommendation
+    lists. This keeps the extractor anchored to the item URL instead of the
+    first price in the page's script order.
+    """
+    best: Optional[tuple[tuple[int, ...], str, str]] = None
+    for script_index, blob in enumerate(blobs):
+        if not blob:
+            continue
+        item_anchors = _fb_positions(blob, item_id)
+        title_anchors = [m.start() for m in _FB_TITLE_RE.finditer(blob)]
+        anchors = item_anchors or title_anchors
+        for start, end, obj in _extract_fb_object_ranges(blob, "listing_price"):
+            amount, formatted = _extract_fb_amount(obj)
+            if _parse_price(amount or formatted) is None:
+                continue
+            distance = _fb_nearest_distance(start, anchors)
+            distance_value = distance if distance is not None else 1_000_000
+            distance_score = 1_000_000 - min(distance_value, 1_000_000)
+            has_target_id = 1 if item_anchors else 0
+            has_title = 1 if title_anchors else 0
+            has_formatted = 1 if formatted else 0
+            score = (
+                has_target_id,
+                distance_score,
+                has_title,
+                has_formatted,
+                -script_index,
+                -start,
+            )
+            scope = _fb_scope_for_object(blob, start, end, anchors)
+            if best is None or score > best[0]:
+                best = (score, scope, obj)
+    if best is None:
+        return None, None
+    return best[1], best[2]
+
+
+def _extract_fb_amount(obj_str: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Pull ``amount`` and decoded ``formatted_amount`` from a price object."""
+    if not obj_str:
+        return None, None
+    amount = None
+    formatted = None
+    m = _FB_AMOUNT_RE.search(obj_str)
+    if m:
+        amount = m.group(1)
+    m = _FB_FORMATTED_AMOUNT_RE.search(obj_str)
+    if m:
+        formatted = _decode_fb_json_string(m.group(1))
+    return amount, formatted
+
+
+def _extract_fb_formatted_price(blob: str) -> Optional[str]:
+    m = _FB_FORMATTED_PRICE_TEXT_RE.search(blob)
+    if not m:
+        return None
+    return _decode_fb_json_string(m.group(1))
+
+
+async def _find_fb_dom_strikethrough(page: Page) -> Optional[str]:
+    """Read the visible strikethrough price straight from the DOM.
+
+    Used when JSON extraction misses ``strikethrough_price`` (FB renames
+    GraphQL fields periodically). Looks for any short element whose
+    computed ``text-decoration-line`` includes ``line-through`` and
+    contains a digit.
+    """
+    try:
+        return await page.evaluate(
+            """() => {
+                const candidates = Array.from(
+                    document.querySelectorAll('span, div, s, del')
+                );
+                for (const el of candidates) {
+                    const txt = (el.textContent || '').trim();
+                    if (!txt || txt.length > 60) continue;
+                    if (!/[0-9]/.test(txt)) continue;
+                    const cs = window.getComputedStyle(el);
+                    const tdl = cs.textDecorationLine || cs.textDecoration || '';
+                    if (tdl.indexOf('line-through') !== -1) {
+                        return txt;
+                    }
+                }
+                return null;
+            }"""
+        )
+    except Exception as e:
+        logger.debug("FB Marketplace DOM strikethrough search failed: %s", e)
+        return None
+
+
 async def _try_facebook_marketplace(page: Page) -> ScrapeResult:
     """Pull title / price / discount / stock from FB Marketplace inline JSON.
 
@@ -1142,7 +1339,7 @@ async def _try_facebook_marketplace(page: Page) -> ScrapeResult:
     if not _is_facebook_marketplace_url(getattr(page, "url", "")):
         return result
     try:
-        blob = await page.evaluate(
+        scripts = await page.evaluate(
             """() => {
                 const scripts = Array.from(document.querySelectorAll('script'));
                 const parts = [];
@@ -1156,49 +1353,55 @@ async def _try_facebook_marketplace(page: Page) -> ScrapeResult:
                         parts.push(text);
                     }
                 }
-                return parts.join('\\n');
+                return parts;
             }"""
         )
     except Exception as e:
         logger.debug("FB Marketplace blob fetch failed: %s", e)
         return result
 
-    if not blob:
+    blobs = [text for text in scripts if isinstance(text, str) and text] if scripts else []
+    if not blobs:
         return result
+
+    item_id = _facebook_marketplace_item_id(getattr(page, "url", ""))
+    blob, listing_obj = _fb_select_listing_scope(blobs, item_id)
+    if not blob:
+        blob = "\n".join(blobs)
+        listing_obj = _extract_fb_object(blob, "listing_price")
 
     title_match = _FB_TITLE_RE.search(blob)
     if title_match:
         result.title = _decode_fb_json_string(title_match.group(1))
 
-    listing_amount = _FB_LISTING_PRICE_RE.search(blob)
-    listing_formatted = _FB_LISTING_FORMATTED_RE.search(blob)
-    strike_amount = _FB_STRIKE_PRICE_RE.search(blob)
-    strike_formatted = _FB_STRIKE_FORMATTED_RE.search(blob)
+    strike_obj = _extract_fb_object(blob, "strikethrough_price")
+    listing_amount_str, listing_formatted_str = _extract_fb_amount(listing_obj)
+    strike_amount_str, strike_formatted_str = _extract_fb_amount(strike_obj)
 
-    listing_value = _parse_price(listing_amount.group(1)) if listing_amount else None
-    strike_value = _parse_price(strike_amount.group(1)) if strike_amount else None
+    listing_value = _parse_price(listing_amount_str or listing_formatted_str)
+    listing_raw = listing_formatted_str or _extract_fb_formatted_price(blob) or listing_amount_str
+    strike_value = _parse_price(strike_amount_str or strike_formatted_str)
+    strike_raw = strike_formatted_str or strike_amount_str
+
+    # DOM fallback: when JSON misses the strike (FB renames fields), read
+    # the line-through element directly from the rendered page.
+    if listing_value is not None and strike_value is None:
+        dom_strike = await _find_fb_dom_strikethrough(page)
+        if dom_strike:
+            parsed = _parse_price(dom_strike)
+            if parsed is not None and parsed > listing_value:
+                strike_value = parsed
+                strike_raw = dom_strike
 
     if listing_value is not None and strike_value is not None and strike_value > listing_value:
         # Strikethrough is the original; listing_price is the sale price.
         result.price = strike_value
-        result.raw_price = (
-            _decode_fb_json_string(strike_formatted.group(1))
-            if strike_formatted
-            else strike_amount.group(1)
-        )
+        result.raw_price = strike_raw or str(strike_value)
         result.discounted_price = listing_value
-        result.raw_discounted = (
-            _decode_fb_json_string(listing_formatted.group(1))
-            if listing_formatted
-            else listing_amount.group(1)
-        )
+        result.raw_discounted = listing_raw or str(listing_value)
     elif listing_value is not None:
         result.price = listing_value
-        result.raw_price = (
-            _decode_fb_json_string(listing_formatted.group(1))
-            if listing_formatted
-            else listing_amount.group(1)
-        )
+        result.raw_price = listing_raw or str(listing_value)
 
     # Stock: FB exposes is_live (current public status) and the legacy
     # is_pending / is_sold flags. Treat any "sold" marker as out-of-stock.
@@ -1237,6 +1440,69 @@ async def _try_facebook_marketplace(page: Page) -> ScrapeResult:
 #
 # Ordering is stable because sort keys are pure functions of the DOM.
 # Installment / EMI contexts are filtered before candidates are collected.
+
+def _facebook_probe_candidates_from_result(result: ScrapeResult) -> list[ProbeCandidate]:
+    candidates: list[ProbeCandidate] = []
+    if result.discounted_price is not None:
+        if result.raw_discounted:
+            candidates.append(ProbeCandidate(
+                text=result.raw_discounted[:80],
+                value=result.discounted_price,
+                score=120,
+                dom_path="facebook-marketplace listing_price",
+            ))
+        if result.raw_price:
+            candidates.append(ProbeCandidate(
+                text=result.raw_price[:80],
+                value=result.price,
+                score=110,
+                struck=True,
+                dom_path="facebook-marketplace strikethrough_price",
+            ))
+    elif result.price is not None and result.raw_price:
+        candidates.append(ProbeCandidate(
+            text=result.raw_price[:80],
+            value=result.price,
+            score=120,
+            dom_path="facebook-marketplace listing_price",
+        ))
+    return candidates
+
+
+def _facebook_selector_candidates_from_result(
+    result: ScrapeResult,
+) -> list[SelectorLabCandidate]:
+    candidates: list[SelectorLabCandidate] = []
+    fields = [
+        (
+            "listing_price",
+            result.raw_discounted if result.discounted_price is not None else result.raw_price,
+            result.discounted_price if result.discounted_price is not None else result.price,
+            "Facebook Marketplace current price from inline JSON",
+        ),
+        (
+            "strikethrough_price",
+            result.raw_price if result.discounted_price is not None else None,
+            result.price if result.discounted_price is not None else None,
+            "Facebook Marketplace struck regular price from inline JSON",
+        ),
+    ]
+    for key, raw, value, reason in fields:
+        if value is None or not raw:
+            continue
+        candidates.append(SelectorLabCandidate(
+            selector=f"facebook-marketplace:{key}",
+            dom_path=key,
+            text=raw[:160],
+            sample=raw[:80],
+            value=value,
+            source="facebook-marketplace",
+            confidence=95,
+            kind_hints=[],
+            reason=reason,
+        ))
+    return candidates
+
 
 _SMART_SCAN_JS = r"""() => {
     function visible(el) {
@@ -2564,13 +2830,18 @@ async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabRespon
         response.final_url = page.url
         response.hostname = _normalize_hostname(page.url or url)
         response.current_profile = current_profile
+        is_facebook_marketplace = (
+            _is_facebook_marketplace_url(url)
+            or _is_facebook_marketplace_url(page.url)
+            or nav_config.platform == "facebook-marketplace"
+        )
 
         lab = await _run_selector_lab(page)
         smart = await _run_smart_scan(page)
         response.platform = (
-            lab.get("platform")
-            or smart.get("platform")
-            or "generic"
+            "facebook-marketplace"
+            if is_facebook_marketplace
+            else (lab.get("platform") or smart.get("platform") or "generic")
         )
         response.root_selector = lab.get("root_selector")
         lab_candidates = [
@@ -2603,6 +2874,11 @@ async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabRespon
                 page,
                 effective,
                 platform_hint=response.platform,
+            )
+        if is_facebook_marketplace:
+            response.candidates = (
+                _facebook_selector_candidates_from_result(response.extracted)
+                + response.candidates
             )
         response.suggested_assignments = _suggest_selector_assignments(
             response.candidates,
@@ -3019,6 +3295,9 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
     # before we touch the network. Unknown hosts pass through untouched.
     config = _apply_site_profile(url, config)
 
+    if _is_facebook_marketplace_url(url):
+        return _clear_dealer_price(await _scrape_url_once(url, config))
+
     if not config.storage_state_path:
         return await _scrape_url_once(url, config)
 
@@ -3049,6 +3328,11 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
     try:
         await _navigate(page, url, config)
         response.final_url = page.url
+        is_facebook_marketplace = (
+            _is_facebook_marketplace_url(url)
+            or _is_facebook_marketplace_url(page.url)
+            or config.platform == "facebook-marketplace"
+        )
 
         # JSON-LD
         jsonld = await _try_json_ld(page)
@@ -3059,7 +3343,11 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
 
         # Smart scan + candidates
         data = await _run_smart_scan(page)
-        response.platform = data.get("platform", "generic") or "generic"
+        response.platform = (
+            "facebook-marketplace"
+            if is_facebook_marketplace
+            else (data.get("platform", "generic") or "generic")
+        )
         for c in data.get("candidates", []):
             response.candidates.append(ProbeCandidate(
                 text=str(c.get("text", ""))[:80],
@@ -3075,9 +3363,8 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
 
         # Run the full scrape waterfall to compute an "extracted" snapshot.
         # When a saved dealer session is attached, use the normal scrape()
-        # entrypoint so the authenticated pass can preserve the public price
-        # and store the logged-in value as dealer_price.
-        if config.storage_state_path:
+        # entrypoint so non-Facebook sites can preserve public/dealer prices.
+        if config.storage_state_path and not is_facebook_marketplace:
             extracted = await scrape(url, config)
         else:
             extracted = await scrape_with_open_page(
@@ -3086,6 +3373,11 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
                 platform_hint=response.platform,
             )
         response.extracted = extracted
+        if is_facebook_marketplace:
+            response.candidates = (
+                _facebook_probe_candidates_from_result(extracted)
+                + response.candidates
+            )
 
         # Suggested config
         platform = response.platform if response.platform in _PLATFORM_SELECTORS else "generic"
@@ -3124,12 +3416,17 @@ async def scrape_with_open_page(
     """
     # Facebook Marketplace listings have no JSON-LD or stable selectors —
     # pull straight from the inline GraphQL JSON before the generic waterfall.
-    if _is_facebook_marketplace_url(getattr(page, "url", "")):
+    is_facebook_marketplace = (
+        _is_facebook_marketplace_url(getattr(page, "url", ""))
+        or platform_hint == "facebook-marketplace"
+    )
+    fb_result = ScrapeResult()
+    if is_facebook_marketplace:
         fb_result = await _try_facebook_marketplace(page)
-        if fb_result.price or fb_result.title:
+        if fb_result.price is not None:
             if not fb_result.stock_status:
                 fb_result.stock_status = "unknown"
-            return _normalize_scrape_result(fb_result)
+            return _normalize_scrape_result(_clear_dealer_price(fb_result))
 
     result = await _try_json_ld(page)
     if not result.price:
@@ -3145,7 +3442,7 @@ async def scrape_with_open_page(
             result.title = preserved_title or smart.title
         if result.stock_status in (None, "unknown") and smart.stock_status not in (None, "unknown"):
             result.stock_status = smart.stock_status
-        if smart.dealer_price and not result.dealer_price:
+        if not is_facebook_marketplace and smart.dealer_price and not result.dealer_price:
             result.dealer_price = smart.dealer_price
             result.raw_dealer = smart.raw_dealer
         if smart.discounted_price and not result.discounted_price:
@@ -3155,13 +3452,21 @@ async def scrape_with_open_page(
     if not result.price or not result.dealer_price or not result.title:
         common = await _try_common(page)
         _merge_price_candidate(result, common)
-        if not result.dealer_price and common.dealer_price:
+        if not is_facebook_marketplace and not result.dealer_price and common.dealer_price:
             result.dealer_price = common.dealer_price
             result.raw_dealer = common.raw_dealer
         if not result.title and common.title:
             result.title = common.title
         if result.stock_status in (None, "unknown") and common.stock_status not in (None, "unknown"):
             result.stock_status = common.stock_status
+
+    if fb_result.title and not result.title:
+        result.title = fb_result.title
+    if (
+        result.stock_status in (None, "unknown")
+        and fb_result.stock_status not in (None, "unknown")
+    ):
+        result.stock_status = fb_result.stock_status
 
     sel = config.selectors
     has_custom = any([
@@ -3177,6 +3482,8 @@ async def scrape_with_open_page(
         has_custom=has_custom,
         structured_price_locked=structured_price_locked,
     )
+    if is_facebook_marketplace:
+        _clear_dealer_price(result)
 
     if not result.stock_status:
         result.stock_status = "unknown"
