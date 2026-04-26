@@ -297,7 +297,7 @@ async def _diagnostic_config(
         return config, None
 
     config.storage_state_path = storage_state_path
-    return config, f"Using saved dealer session from {store_name}."
+    return config, f"Using saved login session from {store_name}."
 
 
 def _profile_response(profile: site_profiles.SiteProfile) -> SelectorLabProfile:

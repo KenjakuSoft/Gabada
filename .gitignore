@@ -47,6 +47,7 @@ gcm-diagnose.log
 # Packaging outputs
 .cache/
 .cache/playwright-browsers/
+packaging/output/
 packaging/windows/build/
 packaging/windows/dist/
 packaging/windows/output/
