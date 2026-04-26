@@ -34,6 +34,8 @@
 - 🎯 **Row-level matching** — attach document rows to existing products before importing
 - 💾 **Portable backups** — export and import a shareable archive
 - 🔄 **Scheduled Woo sync** — auto-add new catalog products
+- 🛒 **Facebook Marketplace** — extracts title, current price, strikethrough price, and stock from FB listings
+- 🔐 **Per-store login sessions** — capture a logged-in browser state for sites that gate pricing behind login
 - 🔬 **Probe + Selector Lab** — diagnose and fix scraper issues
 - 🧬 **Per-domain profiles** — save reusable selectors for reliable future syncs
 - 🖥 **One-click launcher** — Windows release build or local launcher
@@ -339,6 +341,8 @@ Gabada/
 Gabada uses a **layered extraction approach**:
 
 ```
+0️⃣  Facebook Marketplace fast path (when URL is a marketplace listing)
+       ↓
 1️⃣  JSON-LD structured data
        ↓
 2️⃣  Microdata and schema hints
@@ -357,6 +361,7 @@ Gabada uses a **layered extraction approach**:
 - 💸 `discounted_price` is treated as the current sale price
 - 📞 Extended status values such as `call_for_price`, `contact_store`, and `discontinued` can be preserved
 - 🛡 Suspicious results can be reviewed and auto-corrected before saving
+- 🛒 Facebook Marketplace listings extract directly from the inline GraphQL JSON, anchored to the URL's item id so recommendation cards never override the main listing
 
 ## 📜 Site Profiles
 
@@ -409,7 +414,7 @@ The backend API is mounted under `/api`. Interactive docs are available at [`/do
 
 ### 🏷 Latest stable release
 
-> 🟢 **`v0.2.0`** — first release with native Windows installer + portable bundles for Linux and macOS.
+> 🟢 **`v0.2.3`** — Facebook Marketplace extraction hardened (item-id scoped, brace-balanced JSON, DOM strikethrough fallback).
 >
 > Full history in [`CHANGELOG.md`](./CHANGELOG.md).
 
@@ -447,10 +452,10 @@ The script builds the frontend, downloads the Playwright Chromium bundle, runs P
 
 ```bash
 cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
-./packaging/build_release.sh --app-version 0.2.0
+./packaging/build_release.sh --app-version 0.2.3
 ```
 
-Output lands in `packaging/output/Gabada-v0.2.0-<platform>-<arch>.tar.gz`. Architecture is auto-detected (`x64`/`arm64`).
+Output lands in `packaging/output/Gabada-v0.2.3-<platform>-<arch>.tar.gz`. Architecture is auto-detected (`x64`/`arm64`).
 
 </details>
 

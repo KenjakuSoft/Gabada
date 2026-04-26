@@ -778,7 +778,7 @@ def _merge_public_and_authenticated_result(
             _add_review_note(merged, note)
         _add_review_note(
             merged,
-            "Authenticated dealer session preserved the public price and stored the dealer price separately.",
+            "Authenticated login session preserved the public price and stored the dealer price separately.",
         )
 
     return _normalize_scrape_result(merged)
@@ -3362,7 +3362,7 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
             ))
 
         # Run the full scrape waterfall to compute an "extracted" snapshot.
-        # When a saved dealer session is attached, use the normal scrape()
+        # When a saved login session is attached, use the normal scrape()
         # entrypoint so non-Facebook sites can preserve public/dealer prices.
         if config.storage_state_path and not is_facebook_marketplace:
             extracted = await scrape(url, config)
@@ -3579,12 +3579,12 @@ async def _open_login_context(
                     channel=channel,
                     **options,
                 )
-                logger.info("Dealer login opened with installed %s", channel)
+                logger.info("Login window opened with installed %s", channel)
                 return context
             except Exception as exc:
-                logger.info("Installed %s unavailable for dealer login: %s", channel, exc)
+                logger.info("Installed %s unavailable for login window: %s", channel, exc)
 
-    logger.info("Dealer login falling back to bundled Chromium")
+    logger.info("Login window falling back to bundled Chromium")
     return await pw.chromium.launch_persistent_context(**options)
 
 
@@ -3659,7 +3659,7 @@ async def save_login_state(
         target_path = resolve_storage_state_path(save_path, for_write=True)
         await context.storage_state(path=str(target_path))
         final_url = page.url if not page.is_closed() else url
-        logger.info("Dealer login state saved by %s to %s", save_reason, target_path)
+        logger.info("Login session saved by %s to %s", save_reason, target_path)
         return {"saved_to": str(target_path), "final_url": final_url}
     finally:
         await context.close()
