@@ -5,10 +5,19 @@ All notable changes to Gabada are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] — 2026-04-27
+
+### Changed
+- **Renamed remaining "dealer session/login" leftovers** to neutral "login session" wording in user-facing strings (`scraper_routes.py` probe note, the authenticated-scrape review note) and internal logs (`engine.py` login window logs). The dealer-price concept on price logs / imports / probe is preserved (it's a real wholesale-pricing concept).
+- **README** refreshed: highlights call out Facebook Marketplace and per-store login sessions, the scraping model documents the FB fast path, and version pointers updated.
+
+### Fixed
+- **`packaging/output/`** added to `.gitignore` (the unix release script writes there; previously only `packaging/windows/output/` was ignored).
+
 ## [0.2.3] — 2026-04-27
 
 ### Fixed
-- **Facebook Marketplace strikethrough price** — earlier regex used `[^}]` to scan inside the `strikethrough_price` object, but FB's GraphQL response nests sub-objects (e.g. `currency`) so the first inner `}` truncated the match before reaching `"amount"`. Replaced the regex set with a brace-balanced object extractor that handles arbitrary nesting (`_extract_fb_object_ranges`).
+- **Facebook Marketplace strikethrough price** — the previous regex used `[^}]` to scan inside the `strikethrough_price` object, but FB's GraphQL response nests sub-objects (e.g. `currency`) so the first inner `}` truncated the match before reaching `"amount"`. Replaced the regex set with a brace-balanced object extractor that handles arbitrary nesting (`_extract_fb_object_ranges`).
 - **Listing pulled from recommendation cards** — when a marketplace page hydrates the main listing alongside "More from this seller" cards, the first `listing_price` in script order isn't always the target. New `_fb_select_listing_scope` anchors extraction to the item id parsed from the URL, scoring each candidate object by distance to the id/title.
 
 ### Added
@@ -19,8 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Dealer-price suppression on Facebook Marketplace** — FB has no wholesale-pricing concept, so `_clear_dealer_price` now wipes `dealer_price` everywhere on FB scrapes (`scrape()`, `scrape_with_open_page()`, smart scan, common patterns) to remove a class of false positives.
-- **Renamed remaining "dealer session/login" leftovers** to neutral "login session" wording in user-facing strings (`scraper_routes.py` probe note, the authenticated-scrape review note) and internal logs (`engine.py` login window logs).
-- **Top-level `packaging/output/`** added to `.gitignore` (the unix release script writes there).
 
 ## [0.2.2] — 2026-04-26
 
@@ -122,6 +129,7 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
+[0.2.4]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.4
 [0.2.3]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.3
 [0.2.2]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.1
