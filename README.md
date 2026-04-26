@@ -1,112 +1,127 @@
-# Gabada
-
-> Track prices, compare stores, and repair scraping issues from one local app.
-
 <div align="center">
+
+# 🛒 Gabada
+
+### Track prices, compare stores, and repair scraping issues — all from one local app.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vite.dev)
 [![Playwright](https://img.shields.io/badge/Playwright-Chromium-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev)
+[![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](./LICENSE)
 
-[Quick Start](#quick-start) | [Features](#features) | [Import Workflow](#import-workflow) | [Selector Lab](#selector-lab) | [Development](#development) | [Releases](#releases)
+**[⚡ Quick Start](#-quick-start)** · **[✨ Features](#-features)** · **[📥 Import](#-import-workflow)** · **[🔬 Selector Lab](#-selector-lab)** · **[🛠 Development](#-development)** · **[📦 Releases](#-releases)**
 
 </div>
 
-Gabada is a local-first product price and stock tracker for online stores. It scrapes product pages, stores history in SQLite, and gives you a web app for managing products, comparing stores, reviewing activity, and correcting scraper problems when a site layout changes.
+---
 
-## Highlights
+> Gabada is a local-first product price and stock tracker for online stores. It scrapes product pages, stores history in SQLite, and gives you a web app for managing products, comparing stores, reviewing activity, and correcting scraper problems when a site layout changes.
 
-- Track the same product across multiple stores
-- Log regular, sale, and dealer pricing over time
-- Store document-only details such as warranty alongside price snapshots
-- Review stock changes in a live activity feed
-- Import from WooCommerce, CSV, Excel, and PDF
-- Match document rows to existing Gabada products before importing anything
-- Export or import a shareable backup when moving or updating an install
-- Save Woo credentials on a store and auto-sync new catalog products later
-- Use Probe and Selector Lab to diagnose and fix scraper issues
-- Save selector profiles per domain for more reliable future syncs
-- Run locally with a simple launcher or Windows release build
+---
 
-## Features
+## ✨ Highlights
+
+- 🏬 **Multi-store tracking** — link one product to many stores
+- 📈 **Full price history** — regular, sale, and dealer pricing over time
+- 📜 **Document fields** — store warranty alongside price snapshots
+- 🔔 **Live activity feed** — surface meaningful price and stock changes
+- 📥 **Multi-source import** — WooCommerce, CSV, Excel, and PDF
+- 🎯 **Row-level matching** — attach document rows to existing products before importing
+- 💾 **Portable backups** — export and import a shareable archive
+- 🔄 **Scheduled Woo sync** — auto-add new catalog products
+- 🔬 **Probe + Selector Lab** — diagnose and fix scraper issues
+- 🧬 **Per-domain profiles** — save reusable selectors for reliable future syncs
+- 🖥 **One-click launcher** — Windows release build or local launcher
+
+## 🧭 Features
 
 | Area | What it does |
-| --- | --- |
-| Multi-store tracking | Link one product to many stores and compare the latest prices side by side. |
-| Price history | Save each scrape and surface meaningful price and stock changes in Activity. |
-| Selector Lab | Inspect selectors, assign fields, test extraction, and save reusable domain profiles. |
-| Probe | Preview what the scraper sees before you commit a product or profile change. |
-| Import tools | Bring in large catalogs from WooCommerce or product documents with full preview, row targeting, selective updates, and optional scheduled Woo sync. |
-| Backup & restore | Export a shareable backup archive and import it into another Gabada install with a safety copy first. |
-| Safer extraction | Cross-check suspicious price or stock matches against stronger page signals before saving them. |
-| Categories | Organize products with category names and colors. |
-| Windows launcher | Start the app with [start_gabada.bat](./start_gabada.bat) after setup. |
+| :--- | :--- |
+| 🏬 **Multi-store tracking** | Link one product to many stores and compare the latest prices side by side. |
+| 📈 **Price history** | Save each scrape and surface meaningful price and stock changes in Activity. |
+| 🔬 **Selector Lab** | Inspect selectors, assign fields, test extraction, and save reusable domain profiles. |
+| 🔍 **Probe** | Preview what the scraper sees before you commit a product or profile change. |
+| 📥 **Import tools** | Bring in large catalogs from WooCommerce or product documents with full preview, row targeting, selective updates, and optional scheduled Woo sync. |
+| 💾 **Backup & restore** | Export a shareable backup archive and import it into another Gabada install with a safety copy first. |
+| 🛡 **Safer extraction** | Cross-check suspicious price or stock matches against stronger page signals before saving them. |
+| 🏷 **Categories** | Organize products with category names and colors. |
+| 🚀 **Windows launcher** | Start the app with [`start_gabada.bat`](./start_gabada.bat) after setup. |
 
-## App Areas
+## 🗺 App Areas
 
-- `Home` for product overview and quick actions
-- `Categories` for category management
-- `Add product` for quick-add URL flows
-- `Stores` for store management
-- `Import` for WooCommerce and document import
-- `Probe` for scrape diagnostics
-- `Selector Lab` for selector discovery, testing, and profile saving
-- `Activity` for recent price and stock changes
-- `Settings` for app settings, backups, and site profile editing
+| Page | Purpose |
+| :--- | :--- |
+| 🏠 **Home** | Product overview and quick actions |
+| 🏷 **Categories** | Category management |
+| ➕ **Add product** | Quick-add URL flows |
+| 🏬 **Stores** | Store management |
+| 📥 **Import** | WooCommerce and document import |
+| 🔍 **Probe** | Scrape diagnostics |
+| 🔬 **Selector Lab** | Selector discovery, testing, and profile saving |
+| 🔔 **Activity** | Recent price and stock changes |
+| ⚙ **Settings** | App settings, backups, and site profile editing |
 
-## Import Workflow
+## 📥 Import Workflow
 
-Gabada now supports full-catalog style imports for both WooCommerce and document-based sources.
+Gabada supports full-catalog style imports for both WooCommerce and document-based sources.
 
-### WooCommerce import
+### 🛍 WooCommerce import
 
-- preview the store catalog before importing
-- fetch more than the first page instead of stopping at 100
-- handle broken or repeating Woo pagination more safely
-- select only the products you want to bring in
-- optionally save Woo credentials on the destination store
-- optionally auto-add new Woo products during future scheduled syncs
+- 👀 Preview the store catalog before importing
+- 📚 Fetch more than the first page instead of stopping at 100
+- 🔁 Handle broken or repeating Woo pagination more safely
+- ✅ Select only the products you want to bring in
+- 🔐 Optionally save Woo credentials on the destination store
+- 🤖 Optionally auto-add new Woo products during future scheduled syncs
 
-### Document import
+### 📄 Document import
 
-- upload `CSV`, `XLSX`, `XLS`, or `PDF`
-- parse the full document instead of only a tiny sample
-- search across the parsed document before committing anything
-- map columns for:
-  - product name
-  - product URL
-  - image URL
-  - retail price
-  - sale price
-  - dealer price
-  - warranty
-  - stock
-- choose the destination store and optional category
-- select exactly which rows should be imported
-- attach each row to an existing Gabada product when needed
-- update the exact product/store link when the selected store already exists on that product
-- create a new store link on an existing product if the store is not linked yet
+Upload `CSV`, `XLSX`, `XLS`, or `PDF` and parse the full document — not just a tiny sample.
 
-Rows without a real product URL can still be imported as inactive store links for price-list style tracking until a live product page is attached later. Availability text such as `call for price`, `contact us`, or `discontinued` is also preserved instead of collapsing into plain `unknown`.
+<details>
+<summary><b>Column mapping</b> — click to expand</summary>
+
+| Field | Description |
+| :--- | :--- |
+| Product name | Display name shown across the app |
+| Product URL | Canonical store page (optional — see below) |
+| Image URL | Product image |
+| Retail price | Original / regular price |
+| Sale price | Current discounted price |
+| Dealer price | Wholesale or trade price |
+| Warranty | Document-only metadata kept alongside snapshots |
+| Stock | Stock status text |
+
+</details>
+
+- 🔎 Search across the parsed document before committing anything
+- 🎯 Choose the destination store and optional category
+- ✅ Select exactly which rows should be imported
+- 🔗 Attach each row to an existing Gabada product when needed
+- ✏️ Update the exact product/store link when the selected store already exists on that product
+- ➕ Create a new store link on an existing product if the store is not linked yet
+
+> 💡 Rows without a real product URL can still be imported as inactive store links for price-list style tracking until a live product page is attached later. Availability text such as `call for price`, `contact us`, or `discontinued` is preserved instead of collapsing into plain `unknown`.
 
 When Woo sync is enabled on a store, Gabada checks that catalog before scheduled scrapes and can add newly discovered products automatically.
 
-## Selector Lab
+## 🔬 Selector Lab
 
 Selector Lab is the recovery tool for hard-to-scrape stores.
 
-Use it when:
+**Use it when:**
 
-- a page includes unrelated numbers near the product area
-- payment or installment amounts are confusing the scraper
-- stock labels are mixed with unrelated buttons or cards
-- a store layout changed
-- you want to save a better selector profile for future syncs
+- 🔢 A page includes unrelated numbers near the product area
+- 💳 Payment or installment amounts are confusing the scraper
+- 📦 Stock labels are mixed with unrelated buttons or cards
+- 🏗 A store layout changed
+- 💾 You want to save a better selector profile for future syncs
 
-Typical flow:
+**Typical flow:**
 
 1. Open `/selector-lab`
 2. Paste a product URL
@@ -116,38 +131,40 @@ Typical flow:
 6. Test the profile
 7. Save it for the domain
 
-If Gabada auto-corrects a suspicious scrape, Probe and Selector Lab surface a review warning so you can confirm what changed.
+> ⚠️ If Gabada auto-corrects a suspicious scrape, Probe and Selector Lab surface a review warning so you can confirm what changed.
 
-## Backup & Restore
+## 💾 Backup & Restore
 
-Gabada can now move a filled setup between installs without starting over.
+Gabada can move a filled setup between installs without starting over.
 
-- `Settings -> Backup, restore, and share` exports a shareable backup archive
-- the archive includes the SQLite database and saved scraper profiles
-- importing a backup replaces the current local library on that machine
-- before import, Gabada creates a safety copy of the current database
-- plain `.db` / `.sqlite` files can also be imported when that is all you have
+- 📤 `Settings → Backup, restore, and share` exports a shareable backup archive
+- 📦 The archive includes the SQLite database and saved scraper profiles
+- 📥 Importing a backup replaces the current local library on that machine
+- 🛟 Before import, Gabada creates a safety copy of the current database
+- 🗄 Plain `.db` / `.sqlite` files can also be imported when that's all you have
 
-Installed desktop builds already keep user data in the app-data folder, so upgrading to a newer release should continue using the same library automatically.
+> 🪄 Installed desktop builds keep user data in the app-data folder, so upgrading to a newer release continues using the same library automatically.
 
-## Quick Start
+## ⚡ Quick Start
 
-### Requirements
+### 📋 Requirements
 
-- Python 3.11+
-- Node.js 20+
-- Git
+| Tool | Version |
+| :--- | :--- |
+| 🐍 Python | 3.11+ |
+| 🟢 Node.js | 20+ |
+| 🔧 Git | any recent |
 
-Playwright downloads its own Chromium build, so you do not need a separate browser install.
+> Playwright downloads its own Chromium build, so you do not need a separate browser install.
 
-### Clone
+### 1️⃣ Clone
 
 ```powershell
 git clone https://github.com/Xx-LiDAF-xX/Gabada.git
 cd Gabada
 ```
 
-### Backend setup
+### 2️⃣ Backend setup
 
 ```powershell
 cd backend
@@ -156,9 +173,9 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-`py -3` selects the latest installed Python 3 launcher. Pin a specific version with `py -3.11` (or newer) if you have several installed.
+> `py -3` selects the latest installed Python 3 launcher. Pin a specific version with `py -3.11` (or newer) if you have several installed.
 
-### Frontend setup
+### 3️⃣ Frontend setup
 
 ```powershell
 cd ..\frontend-web
@@ -166,71 +183,75 @@ npm.cmd install
 npm.cmd run build
 ```
 
-### Run the app
+### 4️⃣ Run the app
 
-#### Windows launcher
+#### 🖱 Windows launcher
 
-Double-click [start_gabada.bat](./start_gabada.bat).
+Double-click [`start_gabada.bat`](./start_gabada.bat). It will:
 
-It will:
+- 🐍 use `backend\.venv\Scripts\python.exe`
+- 🚀 run the desktop launcher at `backend\desktop_launcher.py`
+- ♻️ reuse an existing backend process when one is already active
+- 🌐 open the app in your browser after `/health` is ready
 
-- use `backend\.venv\Scripts\python.exe`
-- run the desktop launcher at `backend\desktop_launcher.py`
-- reuse an existing backend process when one is already active
-- open the app in your browser after `/health` is ready
+| Variant | Behavior |
+| :--- | :--- |
+| [`Start Gabada.vbs`](./Start%20Gabada.vbs) | Launch silently — runs `start_gabada.bat` hidden, no console window |
+| [`Stop Gabada.bat`](./Stop%20Gabada.bat) | Kill `python.exe` hosting `desktop_launcher.py` and any installed `Gabada.exe` |
 
-To launch without a console window, double-click [Start Gabada.vbs](./Start%20Gabada.vbs) instead — it runs `start_gabada.bat` hidden.
-
-To stop a running instance, double-click [Stop Gabada.bat](./Stop%20Gabada.bat). It terminates `python.exe` processes hosting `desktop_launcher.py` and any installed `Gabada.exe`.
-
-#### Manual start
+#### 💻 Manual start
 
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe -m uvicorn main:app --port 8000
 ```
 
-#### Desktop-style local launcher
+#### 🖥 Desktop-style local launcher
 
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe desktop_launcher.py
 ```
 
-Open:
+#### 🌐 Open
 
-- App: [http://127.0.0.1:8000](http://127.0.0.1:8000)
-- API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- Health: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
+| Resource | URL |
+| :--- | :--- |
+| 🏠 App | <http://127.0.0.1:8000> |
+| 📚 API docs | <http://127.0.0.1:8000/docs> |
+| 💚 Health | <http://127.0.0.1:8000/health> |
 
-## Development
+## 🛠 Development
 
 Run backend and frontend separately for hot reload.
 
-### Terminal 1
+#### Terminal 1 — Backend
 
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
 ```
 
-### Terminal 2
+#### Terminal 2 — Frontend
 
 ```powershell
 cd frontend-web
 npm.cmd run dev
 ```
 
-Open:
+| Resource | URL |
+| :--- | :--- |
+| ⚡ Frontend dev server | <http://127.0.0.1:5173> |
+| 🔌 Backend API | <http://127.0.0.1:8000> |
 
-- Frontend dev server: [http://127.0.0.1:5173](http://127.0.0.1:5173)
-- Backend API: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+> The frontend proxies API calls under `/api` to the backend.
 
-The frontend proxies API calls to `/api` on the backend.
+### 🧰 Useful commands
 
-### Useful commands
-
-#### Frontend
+<table>
+<tr><th>Frontend</th><th>Backend</th></tr>
+<tr>
+<td>
 
 ```powershell
 cd frontend-web
@@ -239,7 +260,8 @@ npm.cmd run build
 npm.cmd run lint
 ```
 
-#### Backend
+</td>
+<td>
 
 ```powershell
 cd backend
@@ -247,71 +269,84 @@ cd backend
 .\.venv\Scripts\python.exe -m py_compile main.py
 ```
 
-### Environment variables
+</td>
+</tr>
+</table>
+
+### 🔑 Environment variables
 
 | Variable | Purpose |
-| --- | --- |
+| :--- | :--- |
 | `GABADA_DATA_DIR` | Override the user data directory (database, logs, captured sessions, `sites.toml`). Useful for tests or running multiple instances side by side. |
-| `GABADA_NO_BROWSER` | Set to `1`/`true`/`yes` to stop the desktop launcher from auto-opening a browser. |
+| `GABADA_NO_BROWSER` | Set to `1` / `true` / `yes` to stop the desktop launcher from auto-opening a browser. |
 | `PLAYWRIGHT_BROWSERS_PATH` | Set automatically when an `ms-playwright/` folder is bundled next to a frozen build. Override only if you keep Playwright browsers in a custom location. |
 
-Defaults work for normal local use — no `.env` file is required.
+> Defaults work for normal local use — no `.env` file is required.
 
-## Architecture
+## 🏗 Architecture
 
 ```text
 Gabada/
-|- backend/
-|  |- api/
-|  |- database/
-|  |- scheduler/
-|  |- scraper/
-|  |- main.py
-|  `- requirements.txt
-|- frontend-web/
-|  |- src/
-|  `- package.json
-|- packaging/
-|- start_gabada.bat
-`- README.md
+├─ backend/
+│  ├─ api/                    # FastAPI routers (mounted under /api)
+│  ├─ database/               # SQLite layer + Pydantic models
+│  ├─ scheduler/              # APScheduler cron jobs
+│  ├─ scraper/                # Playwright engine + sites.toml profiles
+│  ├─ app_paths.py            # dev vs frozen path resolution
+│  ├─ desktop_launcher.py     # standalone launcher (port 8000–8010)
+│  ├─ main.py                 # FastAPI entry point
+│  └─ requirements.txt
+├─ frontend-web/
+│  ├─ src/                    # React 19 + Vite + Tailwind v4
+│  └─ package.json
+├─ packaging/windows/         # PyInstaller spec, Inno Setup, build script
+├─ start_gabada.bat           # one-click Windows launcher
+├─ Start Gabada.vbs           # silent launcher
+├─ Stop Gabada.bat            # process killer
+└─ README.md
 ```
 
-Stack:
+### 🧱 Stack
 
-- Backend: FastAPI, Playwright, APScheduler, aiosqlite, Pydantic
-- Frontend: React 19, Vite 8, TypeScript, Tailwind v4, TanStack Query
-- Database: SQLite at `backend/gabada.db`
-- Installed builds move the database into the platform app-data folder automatically
+| Layer | Tech |
+| :--- | :--- |
+| 🐍 Backend | FastAPI, Playwright, APScheduler, aiosqlite, Pydantic v2 |
+| ⚛ Frontend | React 19, Vite 8, TypeScript, Tailwind v4, TanStack Query, Zustand, Recharts |
+| 🗄 Database | SQLite (WAL mode) at `backend/gabada.db` in dev — installed builds use the platform app-data folder |
+| 📦 Packaging | PyInstaller + Inno Setup (Windows) |
 
-## Scraping Model
+## 🕸 Scraping Model
 
-Gabada uses a layered extraction approach:
+Gabada uses a **layered extraction approach**:
 
-1. JSON-LD structured data
-2. Microdata and schema hints
-3. Smart page scan
-4. Common patterns and saved selectors
+```
+1️⃣  JSON-LD structured data
+       ↓
+2️⃣  Microdata and schema hints
+       ↓
+3️⃣  Smart page scan
+       ↓
+4️⃣  Common patterns and saved selectors
+```
 
-Important behavior:
+**Important behavior:**
 
-- prices and stock are scraped outside the API request cycle
-- one Playwright browser instance is reused
-- per-domain selector overrides can be saved
-- `price` is treated as the regular or original price
-- `discounted_price` is treated as the current sale price
-- extended status values such as `call_for_price`, `contact_store`, and `discontinued` can be preserved
-- suspicious results can be reviewed and auto-corrected before saving
+- 🔄 Prices and stock are scraped outside the API request cycle
+- 🌐 One Playwright browser instance is reused for the entire app lifetime
+- 🧬 Per-domain selector overrides can be saved
+- 🏷 `price` is treated as the regular or original price
+- 💸 `discounted_price` is treated as the current sale price
+- 📞 Extended status values such as `call_for_price`, `contact_store`, and `discontinued` can be preserved
+- 🛡 Suspicious results can be reviewed and auto-corrected before saving
 
-## Site Profiles
+## 📜 Site Profiles
 
-Gabada stores domain-level scrape profiles in [backend/scraper/sites.toml](./backend/scraper/sites.toml).
+Gabada stores domain-level scrape profiles in [`backend/scraper/sites.toml`](./backend/scraper/sites.toml).
 
 You can edit profiles in two ways:
 
-- in the app under `Settings -> Site profiles`
-- directly in `backend/scraper/sites.toml`
-
-Example:
+- 🖥 In the app under `Settings → Site profiles`
+- ✏️ Directly in `backend/scraper/sites.toml`
 
 ```toml
 ["example.com"]
@@ -320,47 +355,54 @@ wait_for = ".product-price"
 selectors = { title = "h1", price = ".product-price", stock_status = ".availability" }
 ```
 
-## API
+> Match is by hostname. `www.` is stripped automatically.
 
-The backend API is mounted under `/api`.
+## 🔌 API
 
-Common endpoints:
+The backend API is mounted under `/api`. Interactive docs are available at [`/docs`](http://127.0.0.1:8000/docs).
 
-- `GET /health`
-- `GET /api/products/`
-- `GET /api/stores/`
-- `GET /api/categories/`
-- `GET /api/settings/database/info`
-- `GET /api/settings/database/export`
-- `POST /api/settings/database/import`
-- `POST /api/import/woo/preview`
-- `POST /api/import/woo/import`
-- `POST /api/import/file/preview`
-- `POST /api/import/file/commit`
-- `POST /api/scraper/probe`
-- `POST /api/scraper/selector-lab`
-- `POST /api/scraper/selector-lab/test`
-- `PUT /api/scraper/selector-lab/profile`
-- `POST /api/scraper/scrape/{product_store_id}`
-- `POST /api/scraper/scrape-all`
+<details>
+<summary><b>Common endpoints</b> — click to expand</summary>
 
-Interactive docs are available at `/docs`.
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| `GET` | `/health` | Liveness probe |
+| `GET` | `/api/products/` | List products |
+| `GET` | `/api/stores/` | List stores |
+| `GET` | `/api/categories/` | List categories |
+| `GET` | `/api/settings/database/info` | Backup metadata |
+| `GET` | `/api/settings/database/export` | Download backup archive |
+| `POST` | `/api/settings/database/import` | Restore from backup |
+| `POST` | `/api/import/woo/preview` | Preview WooCommerce catalog |
+| `POST` | `/api/import/woo/import` | Commit selected Woo products |
+| `POST` | `/api/import/file/preview` | Parse uploaded document |
+| `POST` | `/api/import/file/commit` | Commit selected rows |
+| `POST` | `/api/scraper/probe` | Preview a scrape |
+| `POST` | `/api/scraper/selector-lab` | Discover selector candidates |
+| `POST` | `/api/scraper/selector-lab/test` | Test a candidate profile |
+| `PUT` | `/api/scraper/selector-lab/profile` | Save a per-domain profile |
+| `POST` | `/api/scraper/scrape/{product_store_id}` | Scrape one link |
+| `POST` | `/api/scraper/scrape-all` | Scrape every active link |
 
-## Releases
+</details>
 
-### Latest stable release
+## 📦 Releases
 
-- `v0.1.3` is the current published Windows release line.
+### 🏷 Latest stable release
 
-### Windows installer builds
+> 🟢 **`v0.1.3`** — current published Windows release line.
 
-Packaging files live in [packaging/windows](./packaging/windows):
+### 🏗 Windows installer builds
 
-- `gabada.spec` for the PyInstaller bundle
-- `build_installer.ps1` for local packaging
-- `gabada.iss` for the Inno Setup installer
+Packaging files live in [`packaging/windows`](./packaging/windows):
 
-Build locally with:
+| File | Purpose |
+| :--- | :--- |
+| [`gabada.spec`](./packaging/windows/gabada.spec) | PyInstaller bundle definition |
+| [`build_installer.ps1`](./packaging/windows/build_installer.ps1) | Local packaging script |
+| [`gabada.iss`](./packaging/windows/gabada.iss) | Inno Setup installer |
+
+Build locally:
 
 ```powershell
 cd packaging\windows
@@ -369,39 +411,42 @@ cd packaging\windows
 
 The script will:
 
-- build the frontend bundle
-- install packaging requirements
-- download the Playwright Chromium bundle for packaging
-- create a desktop app bundle with PyInstaller
-- create an installer when Inno Setup 6 is installed
+- 🏗 Build the frontend bundle
+- 📦 Install packaging requirements
+- 🌐 Download the Playwright Chromium bundle for packaging
+- 🐍 Create a desktop app bundle with PyInstaller
+- 💿 Create an installer when Inno Setup 6 is installed
 
-### GitHub Releases
+### 🚀 GitHub Releases
 
-Publishing a GitHub Release triggers the workflow at [.github/workflows/windows-release.yml](./.github/workflows/windows-release.yml).
+Publishing a GitHub Release triggers the workflow at [`.github/workflows/windows-release.yml`](./.github/workflows/windows-release.yml).
 
-Release assets:
+**Release assets:**
 
-- `GabadaSetup-<tag>-windows-x64.exe`
-- `Gabada-<tag>-windows-x64.zip`
+- 📦 `GabadaSetup-<tag>-windows-x64.exe`
+- 🗜 `Gabada-<tag>-windows-x64.zip`
 
 You can also run the workflow manually for an existing tag from GitHub Actions.
 
-Installed app behavior:
+**Installed app behavior:**
 
-- runs as a normal desktop app and opens the browser automatically
-- stores user data in a writable app-data folder instead of the install folder
-- keeps using that same data folder when you install a newer version over the old one
-- bundles the frontend and default scraper profiles with the app
+- 🖥 Runs as a normal desktop app and opens the browser automatically
+- 💾 Stores user data in a writable app-data folder instead of the install folder
+- 🔁 Keeps using that same data folder when you install a newer version over the old one
+- 📦 Bundles the frontend and default scraper profiles with the app
 
-Typical runtime data locations:
+**Typical runtime data locations:**
 
-- Windows: `%APPDATA%\Gabada`
-- macOS: `~/Library/Application Support/Gabada`
-- Linux: `${XDG_DATA_HOME:-~/.local/share}/Gabada`
+| OS | Path |
+| :--- | :--- |
+| 🪟 Windows | `%APPDATA%\Gabada` |
+| 🍎 macOS | `~/Library/Application Support/Gabada` |
+| 🐧 Linux | `${XDG_DATA_HOME:-~/.local/share}/Gabada` |
 
-## Troubleshooting
+## 🩺 Troubleshooting
 
-### The app opens but the UI is missing
+<details>
+<summary><b>The app opens but the UI is missing</b></summary>
 
 Build the frontend first:
 
@@ -410,7 +455,10 @@ cd frontend-web
 npm.cmd run build
 ```
 
-### `start_gabada.bat` says the venv is missing
+</details>
+
+<details>
+<summary><b><code>start_gabada.bat</code> says the venv is missing</b></summary>
 
 Create the backend virtual environment and install dependencies:
 
@@ -420,34 +468,56 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### A store scrapes the wrong price or stock
+</details>
 
-- try `Probe` first to inspect the extracted result
-- use `Selector Lab` to test stronger selectors
-- save a selector profile for the domain
-- rescrape the affected products after the fix
+<details>
+<summary><b>A store scrapes the wrong price or stock</b></summary>
 
-### A document import looks incomplete
+- 🔍 Try `Probe` first to inspect the extracted result
+- 🔬 Use `Selector Lab` to test stronger selectors
+- 💾 Save a selector profile for the domain
+- 🔄 Rescrape the affected products after the fix
 
-- confirm the correct sheet or table is present in the workbench
-- remap columns before committing
-- attach rows to the existing Gabada products you want to update
-- for PDF price lists, make sure the product data appears in a table or column layout
+</details>
 
-### I want to move or share my Gabada library
+<details>
+<summary><b>A document import looks incomplete</b></summary>
 
-- open `Settings -> Backup, restore, and share`
-- export a backup archive from the source machine
-- import that file on the destination machine
-- if anything goes wrong, use the safety copy path shown after import
+- 📋 Confirm the correct sheet or table is present in the workbench
+- 🔄 Remap columns before committing
+- 🔗 Attach rows to the existing Gabada products you want to update
+- 📄 For PDF price lists, make sure the product data appears in a table or column layout
 
-### API requests fail in development
+</details>
+
+<details>
+<summary><b>I want to move or share my Gabada library</b></summary>
+
+- ⚙ Open `Settings → Backup, restore, and share`
+- 📤 Export a backup archive from the source machine
+- 📥 Import that file on the destination machine
+- 🛟 If anything goes wrong, use the safety copy path shown after import
+
+</details>
+
+<details>
+<summary><b>API requests fail in development</b></summary>
 
 Make sure both servers are running:
 
-- backend on `8000`
-- Vite on `5173`
+- 🔌 Backend on port `8000`
+- ⚡ Vite on port `5173`
 
-## License
+</details>
+
+## 📄 License
 
 [MIT](./LICENSE)
+
+---
+
+<div align="center">
+
+Made for tracking prices the way you actually shop them.
+
+</div>
