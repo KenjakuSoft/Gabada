@@ -725,7 +725,7 @@ export function GabadaShare() {
           name: newStoreName.trim(),
           base_url: createBaseUrl,
           manual_only: newStoreManualOnly || !createBaseUrl,
-          dealer_login_url: null,
+          login_url: null,
         })
         resolvedStoreId = createdStore.id
       }

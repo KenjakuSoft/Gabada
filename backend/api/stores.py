@@ -7,8 +7,8 @@ from database.db import get_db
 from database.models import (
     Store,
     StoreCreate,
-    StoreDealerSessionRequest,
-    StoreDealerSessionResponse,
+    StoreLoginSessionRequest,
+    StoreLoginSessionResponse,
     StoreUpdate,
     WooSyncResult,
 )
@@ -23,9 +23,9 @@ _STORE_SELECT = """
         name,
         base_url,
         manual_only,
-        dealer_login_url,
-        dealer_storage_state_path,
-        dealer_session_updated_at,
+        login_url,
+        storage_state_path,
+        session_updated_at,
         woo_enabled,
         woo_site_url,
         woo_consumer_key,
@@ -42,8 +42,8 @@ def _clean_store_fields(
     name: str,
     base_url: str,
     manual_only: bool,
-    dealer_login_url: str | None,
-    dealer_storage_state_path: str | None,
+    login_url: str | None,
+    storage_state_path: str | None,
     woo_enabled: bool,
     woo_site_url: str | None,
     woo_consumer_key: str | None,
@@ -59,8 +59,8 @@ def _clean_store_fields(
         "name": cleaned_name,
         "base_url": cleaned_base_url,
         "manual_only": cleaned_manual_only,
-        "dealer_login_url": (dealer_login_url or "").strip() or None,
-        "dealer_storage_state_path": (dealer_storage_state_path or "").strip() or None,
+        "login_url": (login_url or "").strip() or None,
+        "storage_state_path": (storage_state_path or "").strip() or None,
         "woo_enabled": bool(woo_enabled),
         "woo_site_url": (woo_site_url or "").strip() or None,
         "woo_consumer_key": (woo_consumer_key or "").strip() or None,
@@ -86,14 +86,14 @@ def _manual_store_base_url(name: str) -> str:
     return f"manual://{slug}"
 
 
-def _dealer_login_target(store: Store) -> str:
-    if store.dealer_login_url:
-        return store.dealer_login_url
+def _login_target(store: Store) -> str:
+    if store.login_url:
+        return store.login_url
     if store.manual_only:
-        raise HTTPException(status_code=400, detail="Manual-only stores do not have a dealer login target")
+        raise HTTPException(status_code=400, detail="Manual-only stores do not have a login target")
     if store.base_url.startswith(("http://", "https://")):
         return store.base_url
-    raise HTTPException(status_code=400, detail="Set a dealer login URL before capturing a session")
+    raise HTTPException(status_code=400, detail="Set a login URL before capturing a session")
 
 
 def _row_to_store(row) -> Store:
@@ -102,9 +102,9 @@ def _row_to_store(row) -> Store:
         name=row["name"],
         base_url=row["base_url"],
         manual_only=bool(row["manual_only"]),
-        dealer_login_url=row["dealer_login_url"],
-        dealer_storage_state_path=row["dealer_storage_state_path"],
-        dealer_session_updated_at=row["dealer_session_updated_at"],
+        login_url=row["login_url"],
+        storage_state_path=row["storage_state_path"],
+        session_updated_at=row["session_updated_at"],
         woo_enabled=bool(row["woo_enabled"]),
         woo_site_url=row["woo_site_url"],
         woo_consumer_key=row["woo_consumer_key"],
@@ -186,8 +186,8 @@ async def create_store(body: StoreCreate):
         name=body.name,
         base_url=body.base_url,
         manual_only=body.manual_only,
-        dealer_login_url=body.dealer_login_url,
-        dealer_storage_state_path=None,
+        login_url=body.login_url,
+        storage_state_path=None,
         woo_enabled=body.woo_enabled,
         woo_site_url=body.woo_site_url,
         woo_consumer_key=body.woo_consumer_key,
@@ -198,7 +198,7 @@ async def create_store(body: StoreCreate):
     try:
         cur = await db.execute(
             """INSERT INTO stores
-               (name, base_url, manual_only, dealer_login_url, dealer_storage_state_path,
+               (name, base_url, manual_only, login_url, storage_state_path,
                 woo_enabled, woo_site_url, woo_consumer_key, woo_consumer_secret,
                 woo_auto_import_new)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -206,8 +206,8 @@ async def create_store(body: StoreCreate):
                 cleaned["name"],
                 cleaned["base_url"],
                 int(cleaned["manual_only"]),
-                cleaned["dealer_login_url"],
-                cleaned["dealer_storage_state_path"],
+                cleaned["login_url"],
+                cleaned["storage_state_path"],
                 int(cleaned["woo_enabled"]),
                 cleaned["woo_site_url"],
                 cleaned["woo_consumer_key"],
@@ -241,8 +241,8 @@ async def update_store(store_id: int, body: StoreUpdate):
             name=body.name if body.name is not None else current["name"],
             base_url=body.base_url if body.base_url is not None else current["base_url"],
             manual_only=body.manual_only if body.manual_only is not None else bool(current["manual_only"]),
-            dealer_login_url=body.dealer_login_url if body.dealer_login_url is not None else current["dealer_login_url"],
-            dealer_storage_state_path=body.dealer_storage_state_path if body.dealer_storage_state_path is not None else current["dealer_storage_state_path"],
+            login_url=body.login_url if body.login_url is not None else current["login_url"],
+            storage_state_path=body.storage_state_path if body.storage_state_path is not None else current["storage_state_path"],
             woo_enabled=body.woo_enabled if body.woo_enabled is not None else bool(current["woo_enabled"]),
             woo_site_url=body.woo_site_url if body.woo_site_url is not None else current["woo_site_url"],
             woo_consumer_key=body.woo_consumer_key if body.woo_consumer_key is not None else current["woo_consumer_key"],
@@ -251,8 +251,8 @@ async def update_store(store_id: int, body: StoreUpdate):
         )
         await db.execute(
             """UPDATE stores
-               SET name = ?, base_url = ?, manual_only = ?, dealer_login_url = ?,
-                   dealer_storage_state_path = ?, woo_enabled = ?, woo_site_url = ?,
+               SET name = ?, base_url = ?, manual_only = ?, login_url = ?,
+                   storage_state_path = ?, woo_enabled = ?, woo_site_url = ?,
                    woo_consumer_key = ?, woo_consumer_secret = ?,
                    woo_auto_import_new = ?
                WHERE id = ?""",
@@ -260,8 +260,8 @@ async def update_store(store_id: int, body: StoreUpdate):
                 cleaned["name"],
                 cleaned["base_url"],
                 int(cleaned["manual_only"]),
-                cleaned["dealer_login_url"],
-                cleaned["dealer_storage_state_path"],
+                cleaned["login_url"],
+                cleaned["storage_state_path"],
                 int(cleaned["woo_enabled"]),
                 cleaned["woo_site_url"],
                 cleaned["woo_consumer_key"],
@@ -288,8 +288,8 @@ async def manual_woo_sync(store_id: int):
     return await sync_store_woo_catalog(store_id)
 
 
-@router.post("/{store_id}/dealer-session", response_model=StoreDealerSessionResponse)
-async def capture_dealer_session(store_id: int, body: StoreDealerSessionRequest):
+@router.post("/{store_id}/login-session", response_model=StoreLoginSessionResponse)
+async def capture_login_session(store_id: int, body: StoreLoginSessionRequest):
     db = await get_db()
     try:
         rows = await db.execute_fetchall(_STORE_SELECT + " WHERE id=?", (store_id,))
@@ -299,8 +299,8 @@ async def capture_dealer_session(store_id: int, body: StoreDealerSessionRequest)
     finally:
         await db.close()
 
-    target_url = _dealer_login_target(store)
-    save_path = f"stores/store-{store_id}-dealer.json"
+    target_url = _login_target(store)
+    save_path = f"stores/store-{store_id}-login.json"
     result = await save_login_state(
         url=target_url,
         save_path=save_path,
@@ -312,13 +312,13 @@ async def capture_dealer_session(store_id: int, body: StoreDealerSessionRequest)
     try:
         await db.execute(
             """UPDATE stores
-               SET dealer_storage_state_path = ?, dealer_session_updated_at = CURRENT_TIMESTAMP
+               SET storage_state_path = ?, session_updated_at = CURRENT_TIMESTAMP
                WHERE id = ?""",
             (save_path, store_id),
         )
         await db.commit()
         refreshed = await db.execute_fetchall(_STORE_SELECT + " WHERE id=?", (store_id,))
-        return StoreDealerSessionResponse(
+        return StoreLoginSessionResponse(
             store=_row_to_store(refreshed[0]),
             saved_to=result["saved_to"],
             final_url=result["final_url"],
@@ -327,15 +327,15 @@ async def capture_dealer_session(store_id: int, body: StoreDealerSessionRequest)
         await db.close()
 
 
-@router.delete("/{store_id}/dealer-session", response_model=Store)
-async def clear_dealer_session(store_id: int):
+@router.delete("/{store_id}/login-session", response_model=Store)
+async def clear_login_session(store_id: int):
     db = await get_db()
     try:
         rows = await db.execute_fetchall(_STORE_SELECT + " WHERE id=?", (store_id,))
         if not rows:
             raise HTTPException(status_code=404, detail="Store not found")
         current = rows[0]
-        saved_path = current["dealer_storage_state_path"]
+        saved_path = current["storage_state_path"]
     finally:
         await db.close()
 
@@ -352,15 +352,15 @@ async def clear_dealer_session(store_id: int):
         except Exception as exc:
             raise HTTPException(
                 status_code=500,
-                detail=f"Could not remove saved dealer session file: {exc}",
+                detail=f"Could not remove saved login session file: {exc}",
             )
 
     db = await get_db()
     try:
         await db.execute(
             """UPDATE stores
-               SET dealer_storage_state_path = NULL,
-                   dealer_session_updated_at = NULL
+               SET storage_state_path = NULL,
+                   session_updated_at = NULL
                WHERE id = ?""",
             (store_id,),
         )

@@ -5,6 +5,18 @@ All notable changes to Gabada are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-04-26
+
+### Added
+- **Facebook Marketplace scraper** — extracts title, price, discount price (via `strikethrough_price`), and stock status (`is_live` / `is_sold` / `is_pending`) from FB Marketplace listings by parsing the inline GraphQL JSON. Bypasses the generic waterfall when the URL is a `facebook.com/marketplace/…` listing.
+- New `["facebook.com"]` profile in `sites.toml` to settle the page before extraction.
+
+### Changed
+- **Stores: dropped "dealer" terminology** — the per-store login feature now uses neutral language. DB columns (`dealer_login_url` → `login_url`, `dealer_storage_state_path` → `storage_state_path`, `dealer_session_updated_at` → `session_updated_at`) are renamed in place via `ALTER TABLE RENAME COLUMN` (no data loss). API fields, Pydantic models (`StoreLoginSessionRequest/Response`), the endpoints (`/stores/{id}/login-session`), the helper `_login_target`, and the frontend Stores page (variables, types, HTML ids, badge text) all rename in lockstep. The dealer-price concept on price logs / imports / probe is preserved (it's a real wholesale-pricing concept, not store metadata).
+
+### Fixed
+- **macOS build** — PyInstaller's bincache flatten broke the Playwright `Google Chrome for Testing.app` bundle and `codesign` failed with "bundle format unrecognized". The spec now skips the Playwright `datas` entry on Darwin, and `build_release.sh` copies the browser cache into `<bundle>/_internal/ms-playwright/` after PyInstaller finishes — the same path the runtime hook (`app_paths.configure_runtime_environment`) reads.
+
 ## [0.2.1] — 2026-04-26
 
 ### Changed
@@ -93,6 +105,7 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
+[0.2.2]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.0
 [0.1.4]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.4

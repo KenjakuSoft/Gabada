@@ -33,9 +33,9 @@ async def init_db():
                 name TEXT NOT NULL,
                 base_url TEXT NOT NULL UNIQUE,
                 manual_only INTEGER NOT NULL DEFAULT 0,
-                dealer_login_url TEXT,
-                dealer_storage_state_path TEXT,
-                dealer_session_updated_at DATETIME,
+                login_url TEXT,
+                storage_state_path TEXT,
+                session_updated_at DATETIME,
                 woo_enabled INTEGER NOT NULL DEFAULT 0,
                 woo_site_url TEXT,
                 woo_consumer_key TEXT,
@@ -110,11 +110,23 @@ async def init_db():
         except Exception:
             pass
 
+        # Rename legacy dealer_* columns to neutral names; no-op on fresh DBs.
+        for rename_sql in [
+            "ALTER TABLE stores RENAME COLUMN dealer_login_url TO login_url",
+            "ALTER TABLE stores RENAME COLUMN dealer_storage_state_path TO storage_state_path",
+            "ALTER TABLE stores RENAME COLUMN dealer_session_updated_at TO session_updated_at",
+        ]:
+            try:
+                await db.execute(rename_sql)
+                await db.commit()
+            except Exception:
+                pass
+
         for col_sql in [
             "ALTER TABLE stores ADD COLUMN manual_only INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE stores ADD COLUMN dealer_login_url TEXT",
-            "ALTER TABLE stores ADD COLUMN dealer_storage_state_path TEXT",
-            "ALTER TABLE stores ADD COLUMN dealer_session_updated_at DATETIME",
+            "ALTER TABLE stores ADD COLUMN login_url TEXT",
+            "ALTER TABLE stores ADD COLUMN storage_state_path TEXT",
+            "ALTER TABLE stores ADD COLUMN session_updated_at DATETIME",
             "ALTER TABLE stores ADD COLUMN woo_enabled INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE stores ADD COLUMN woo_site_url TEXT",
             "ALTER TABLE stores ADD COLUMN woo_consumer_key TEXT",

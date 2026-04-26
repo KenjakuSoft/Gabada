@@ -21,7 +21,7 @@ class StoreCreate(BaseModel):
     name: str
     base_url: str = ""
     manual_only: bool = False
-    dealer_login_url: Optional[str] = None
+    login_url: Optional[str] = None
     woo_enabled: bool = False
     woo_site_url: Optional[str] = None
     woo_consumer_key: Optional[str] = None
@@ -33,8 +33,8 @@ class StoreUpdate(BaseModel):
     name: Optional[str] = None
     base_url: Optional[str] = None
     manual_only: Optional[bool] = None
-    dealer_login_url: Optional[str] = None
-    dealer_storage_state_path: Optional[str] = None
+    login_url: Optional[str] = None
+    storage_state_path: Optional[str] = None
     woo_enabled: Optional[bool] = None
     woo_site_url: Optional[str] = None
     woo_consumer_key: Optional[str] = None
@@ -43,19 +43,19 @@ class StoreUpdate(BaseModel):
 
 class Store(StoreCreate):
     id: int
-    dealer_storage_state_path: Optional[str] = None
-    dealer_session_updated_at: Optional[datetime] = None
+    storage_state_path: Optional[str] = None
+    session_updated_at: Optional[datetime] = None
     created_at: datetime
     woo_last_synced_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 
-class StoreDealerSessionRequest(BaseModel):
+class StoreLoginSessionRequest(BaseModel):
     wait_seconds: int = 180
     headless: bool = False
 
 
-class StoreDealerSessionResponse(BaseModel):
+class StoreLoginSessionResponse(BaseModel):
     store: Store
     saved_to: str
     final_url: str

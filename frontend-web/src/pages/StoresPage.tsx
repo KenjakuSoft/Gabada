@@ -89,7 +89,7 @@ export function StoresPage() {
   const [name, setName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [manualOnly, setManualOnly] = useState(false)
-  const [dealerLoginUrl, setDealerLoginUrl] = useState('')
+  const [loginUrl, setLoginUrl] = useState('')
 
   const stores = useQuery<Store[]>({
     queryKey: ['stores'],
@@ -128,14 +128,14 @@ export function StoresPage() {
         name: name.trim(),
         base_url: baseUrl.trim(),
         manual_only: manualOnly,
-        dealer_login_url: dealerLoginUrl.trim() || null,
+        login_url: loginUrl.trim() || null,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['stores'] })
       setName('')
       setBaseUrl('')
       setManualOnly(false)
-      setDealerLoginUrl('')
+      setLoginUrl('')
       setAdding(false)
       toast.success('Store added')
     },
@@ -171,8 +171,8 @@ export function StoresPage() {
     },
   })
 
-  const captureDealerSession = useMutation({
-    mutationFn: (id: number) => storesApi.captureDealerSession(id),
+  const captureLoginSession = useMutation({
+    mutationFn: (id: number) => storesApi.captureLoginSession(id),
     onMutate: () => {
       toast.info(
         'Login opened',
@@ -193,8 +193,8 @@ export function StoresPage() {
     },
   })
 
-  const clearDealerSession = useMutation({
-    mutationFn: (id: number) => storesApi.clearDealerSession(id),
+  const clearLoginSession = useMutation({
+    mutationFn: (id: number) => storesApi.clearLoginSession(id),
     onSuccess: (store) => {
       qc.invalidateQueries({ queryKey: ['stores'] })
       toast.info(`${store.name} logged out`)
@@ -300,7 +300,7 @@ export function StoresPage() {
                     setName('')
                     setBaseUrl('')
                     setManualOnly(false)
-                    setDealerLoginUrl('')
+                    setLoginUrl('')
                   }}
                 >
                   Cancel
@@ -318,11 +318,11 @@ export function StoresPage() {
                 No website / manual-only supplier
               </label>
               <div className="space-y-1.5">
-                <Label htmlFor="dealer-login-url">Login URL (optional)</Label>
+                <Label htmlFor="login-url">Login URL (optional)</Label>
                 <Input
-                  id="dealer-login-url"
-                  value={dealerLoginUrl}
-                  onChange={(e) => setDealerLoginUrl(e.target.value)}
+                  id="login-url"
+                  value={loginUrl}
+                  onChange={(e) => setLoginUrl(e.target.value)}
                   placeholder="https://shop.example.com/login"
                   disabled={create.isPending || manualOnly}
                 />
@@ -357,24 +357,24 @@ export function StoresPage() {
                   ? () => syncWoo.mutate(agg.store.id)
                   : undefined
               }
-              onCaptureDealerSession={
+              onCaptureLoginSession={
                 agg.store.manual_only
                   ? undefined
-                  : () => captureDealerSession.mutate(agg.store.id)
+                  : () => captureLoginSession.mutate(agg.store.id)
               }
               syncingWoo={syncWoo.isPending}
-              capturingDealerSession={
-                captureDealerSession.isPending &&
-                captureDealerSession.variables === agg.store.id
+              capturingLoginSession={
+                captureLoginSession.isPending &&
+                captureLoginSession.variables === agg.store.id
               }
-              onClearDealerSession={
-                agg.store.dealer_storage_state_path
-                  ? () => clearDealerSession.mutate(agg.store.id)
+              onClearLoginSession={
+                agg.store.storage_state_path
+                  ? () => clearLoginSession.mutate(agg.store.id)
                   : undefined
               }
-              clearingDealerSession={
-                clearDealerSession.isPending &&
-                clearDealerSession.variables === agg.store.id
+              clearingLoginSession={
+                clearLoginSession.isPending &&
+                clearLoginSession.variables === agg.store.id
               }
               onDelete={() => {
                 if (
@@ -397,11 +397,11 @@ export function StoresPage() {
 interface StoreTileProps {
   agg: StoreAggregate
   onSyncWoo?: () => void
-  onCaptureDealerSession?: () => void
-  onClearDealerSession?: () => void
+  onCaptureLoginSession?: () => void
+  onClearLoginSession?: () => void
   syncingWoo: boolean
-  capturingDealerSession: boolean
-  clearingDealerSession: boolean
+  capturingLoginSession: boolean
+  clearingLoginSession: boolean
   onDelete: () => void
   deleting: boolean
 }
@@ -409,17 +409,17 @@ interface StoreTileProps {
 function StoreTile({
   agg,
   onSyncWoo,
-  onCaptureDealerSession,
-  onClearDealerSession,
+  onCaptureLoginSession,
+  onClearLoginSession,
   syncingWoo,
-  capturingDealerSession,
-  clearingDealerSession,
+  capturingLoginSession,
+  clearingLoginSession,
   onDelete,
   deleting,
 }: StoreTileProps) {
   const live = useLiveTime(agg.lastScrapedAt)
   const wooLive = useLiveTime(agg.store.woo_last_synced_at)
-  const dealerLive = useLiveTime(agg.store.dealer_session_updated_at)
+  const sessionLive = useLiveTime(agg.store.session_updated_at)
   const { store, productCount, inStockCount, dropsCount } = agg
   const coverage =
     productCount > 0 ? Math.round((inStockCount / productCount) * 100) : 0
@@ -494,9 +494,9 @@ function StoreTile({
             manual-only
           </Badge>
         ) : null}
-        {store.dealer_storage_state_path ? (
+        {store.storage_state_path ? (
           <Badge variant="success" className="text-[10px]">
-            login pricing on
+            logged in
           </Badge>
         ) : null}
         {!store.manual_only ? (
@@ -504,30 +504,30 @@ function StoreTile({
             <Button
               size="sm"
               variant="outline"
-              onClick={onCaptureDealerSession}
+              onClick={onCaptureLoginSession}
               disabled={
-                capturingDealerSession ||
-                clearingDealerSession ||
-                !onCaptureDealerSession
+                capturingLoginSession ||
+                clearingLoginSession ||
+                !onCaptureLoginSession
               }
               className="h-7 px-2 text-[11px]"
             >
-              {capturingDealerSession ? (
+              {capturingLoginSession ? (
                 <LoaderIcon />
               ) : (
                 <KeyRound className="h-3.5 w-3.5" />
               )}
-              {store.dealer_storage_state_path ? 'Refresh login' : 'Login'}
+              {store.storage_state_path ? 'Refresh login' : 'Login'}
             </Button>
-            {store.dealer_storage_state_path ? (
+            {store.storage_state_path ? (
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={onClearDealerSession}
-                disabled={capturingDealerSession || clearingDealerSession || !onClearDealerSession}
+                onClick={onClearLoginSession}
+                disabled={capturingLoginSession || clearingLoginSession || !onClearLoginSession}
                 className="h-7 px-2 text-[11px] text-destructive hover:text-destructive"
               >
-                {clearingDealerSession ? (
+                {clearingLoginSession ? (
                   <LoaderIcon />
                 ) : (
                   <LogOut className="h-3.5 w-3.5" />
@@ -585,10 +585,10 @@ function StoreTile({
               {store.woo_last_synced_at ? wooLive : 'never synced'}
             </div>
           ) : null}
-          {!store.manual_only && store.dealer_session_updated_at ? (
+          {!store.manual_only && store.session_updated_at ? (
             <div className="inline-flex items-center gap-1">
               <KeyRound className="h-3 w-3" />
-              Login saved {dealerLive}
+              Login saved {sessionLive}
             </div>
           ) : null}
         </div>

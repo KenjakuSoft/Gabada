@@ -26,7 +26,11 @@ datas = [
     (str(frontend_dist), "frontend-web/dist"),
     (str(bundled_sites), "backend/scraper"),
 ]
-if playwright_browsers.exists():
+# macOS exception: the bundled Chromium contains a `.app` framework that
+# PyInstaller tries to ad-hoc codesign while collecting binaries, which
+# fails with "bundle format unrecognized". Skip the datas entry on darwin
+# and let build_release.sh copy the browsers in afterwards.
+if playwright_browsers.exists() and sys.platform != "darwin":
     datas.append((str(playwright_browsers), "ms-playwright"))
 
 hiddenimports = collect_submodules("playwright")

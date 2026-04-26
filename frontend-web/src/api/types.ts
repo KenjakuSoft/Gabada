@@ -21,9 +21,9 @@ export interface Store {
   name: string
   base_url: string
   manual_only: boolean
-  dealer_login_url: string | null
-  dealer_storage_state_path: string | null
-  dealer_session_updated_at: string | null
+  login_url: string | null
+  storage_state_path: string | null
+  session_updated_at: string | null
   woo_enabled: boolean
   woo_site_url: string | null
   woo_consumer_key: string | null
@@ -51,7 +51,7 @@ export interface StoreCatalogClearResult {
   removed_logs: number
 }
 
-export interface StoreDealerSessionResponse {
+export interface StoreLoginSessionResponse {
   store: Store
   saved_to: string
   final_url: string

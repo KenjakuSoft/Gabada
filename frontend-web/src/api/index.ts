@@ -16,7 +16,7 @@ import type {
   Settings,
   Store,
   StoreCatalogClearResult,
-  StoreDealerSessionResponse,
+  StoreLoginSessionResponse,
   WooSyncResult,
   WooCredentials,
   WooProductPreview,
@@ -35,7 +35,7 @@ export const storesApi = {
     name: string
     base_url?: string
     manual_only?: boolean
-    dealer_login_url?: string | null
+    login_url?: string | null
     woo_enabled?: boolean
     woo_site_url?: string | null
     woo_consumer_key?: string | null
@@ -51,8 +51,8 @@ export const storesApi = {
       name?: string
       base_url?: string
       manual_only?: boolean
-      dealer_login_url?: string | null
-      dealer_storage_state_path?: string | null
+      login_url?: string | null
+      storage_state_path?: string | null
       woo_enabled?: boolean
       woo_site_url?: string | null
       woo_consumer_key?: string | null
@@ -69,19 +69,19 @@ export const storesApi = {
     })
     return data
   },
-  captureDealerSession: async (
+  captureLoginSession: async (
     id: number,
     body?: { wait_seconds?: number; headless?: boolean },
-  ): Promise<StoreDealerSessionResponse> => {
-    const { data } = await http.post<StoreDealerSessionResponse>(
-      `/stores/${id}/dealer-session`,
+  ): Promise<StoreLoginSessionResponse> => {
+    const { data } = await http.post<StoreLoginSessionResponse>(
+      `/stores/${id}/login-session`,
       body ?? {},
       { timeout: 300_000 },
     )
     return data
   },
-  clearDealerSession: async (id: number): Promise<Store> => {
-    const { data } = await http.delete<Store>(`/stores/${id}/dealer-session`)
+  clearLoginSession: async (id: number): Promise<Store> => {
+    const { data } = await http.delete<Store>(`/stores/${id}/login-session`)
     return data
   },
   clearCatalog: async (id: number): Promise<StoreCatalogClearResult> => {
