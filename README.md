@@ -151,10 +151,12 @@ cd Gabada
 
 ```powershell
 cd backend
-py -3.11 -m venv .venv
+py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
+
+`py -3` selects the latest installed Python 3 launcher. Pin a specific version with `py -3.11` (or newer) if you have several installed.
 
 ### Frontend setup
 
@@ -176,6 +178,10 @@ It will:
 - run the desktop launcher at `backend\desktop_launcher.py`
 - reuse an existing backend process when one is already active
 - open the app in your browser after `/health` is ready
+
+To launch without a console window, double-click [Start Gabada.vbs](./Start%20Gabada.vbs) instead — it runs `start_gabada.bat` hidden.
+
+To stop a running instance, double-click [Stop Gabada.bat](./Stop%20Gabada.bat). It terminates `python.exe` processes hosting `desktop_launcher.py` and any installed `Gabada.exe`.
 
 #### Manual start
 
@@ -240,6 +246,16 @@ cd backend
 .\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
 .\.venv\Scripts\python.exe -m py_compile main.py
 ```
+
+### Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `GABADA_DATA_DIR` | Override the user data directory (database, logs, captured sessions, `sites.toml`). Useful for tests or running multiple instances side by side. |
+| `GABADA_NO_BROWSER` | Set to `1`/`true`/`yes` to stop the desktop launcher from auto-opening a browser. |
+| `PLAYWRIGHT_BROWSERS_PATH` | Set automatically when an `ms-playwright/` folder is bundled next to a frozen build. Override only if you keep Playwright browsers in a custom location. |
+
+Defaults work for normal local use — no `.env` file is required.
 
 ## Architecture
 
@@ -400,7 +416,7 @@ Create the backend virtual environment and install dependencies:
 
 ```powershell
 cd backend
-py -3.11 -m venv .venv
+py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
