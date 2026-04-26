@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to upload assets to
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            arch: x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - os: macos-latest
+            platform: macos
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name || inputs.tag || '' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          tag="${RELEASE_TAG}"
+          version="${tag#v}"
+          if [[ -z "$version" ]]; then
+            version="0.0.0-dev"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend-web/package-lock.json
+
+      - name: Create backend venv
+        shell: bash
+        run: python -m venv backend/.venv
+
+      - name: Resolve venv python path
+        shell: bash
+        run: |
+          if [[ "${{ matrix.platform }}" == "windows" ]]; then
+            echo "VENV_PY=$PWD/backend/.venv/Scripts/python.exe" >> "$GITHUB_ENV"
+          else
+            echo "VENV_PY=$PWD/backend/.venv/bin/python" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install backend dependencies
+        shell: bash
+        run: |
+          "$VENV_PY" -m pip install --upgrade pip
+          "$VENV_PY" -m pip install -r backend/requirements.txt
+          "$VENV_PY" -m pip install -r packaging/windows/requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend-web
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend-web
+        run: npm run build
+
+      - name: Install Inno Setup (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows package
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: .\packaging\windows\build_installer.ps1 -SkipFrontendBuild -AppVersion $env:APP_VERSION
+
+      - name: Build Linux/macOS package
+        if: matrix.platform != 'windows'
+        shell: bash
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          chmod +x packaging/build_release.sh
+          PYTHON="$VENV_PY" packaging/build_release.sh \
+            --skip-frontend-build \
+            --app-version "$APP_VERSION"
+
+      - name: Stage Windows release assets
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $tag = $env:TAG
+          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "manual" }
+
+          $portableName = "Gabada-$tag-windows-x64.zip"
+          $setupName = "GabadaSetup-$tag-windows-x64.exe"
+
+          New-Item -ItemType Directory -Force -Path packaging/output | Out-Null
+
+          if (!(Test-Path "packaging/windows/dist/Gabada")) {
+            throw "PyInstaller dist missing at packaging/windows/dist/Gabada"
+          }
+          Compress-Archive -Path "packaging/windows/dist/Gabada/*" -DestinationPath "packaging/output/$portableName" -Force
+
+          $installer = Get-ChildItem -Path "packaging/windows/output" -Filter "GabadaSetup*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($installer) {
+            Move-Item $installer.FullName "packaging/output/$setupName" -Force
+          } else {
+            Write-Warning "GabadaSetup.exe was not produced. Check Inno Setup output."
+          }
+
+          Get-ChildItem packaging/output | Format-Table Name,Length
+
+      - name: Show Linux/macOS release assets
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: ls -la packaging/output
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gabada-${{ matrix.platform }}-${{ matrix.arch }}
+          path: packaging/output/*
+          if-no-files-found: error
+
+      - name: Attach assets to GitHub release
+        if: ${{ env.RELEASE_TAG != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --title "Gabada $RELEASE_TAG" \
+              --notes "Automated release for $RELEASE_TAG. See CHANGELOG.md for details."
+          fi
+          for f in packaging/output/*; do
+            [[ -f "$f" ]] || continue
+            gh release upload "$RELEASE_TAG" "$f" --clobber
+          done

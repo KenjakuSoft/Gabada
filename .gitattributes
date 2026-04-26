@@ -1,0 +1,28 @@
+# Auto-detect text files; default to native line endings on checkout.
+* text=auto
+
+# Force LF for files that must run on Unix.
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.spec      text eol=lf
+*.toml      text eol=lf
+Makefile    text eol=lf
+
+# Force CRLF for Windows-only files.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+*.vbs       text eol=crlf
+
+# Mark binary assets explicitly so git does not attempt line-ending conversion.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.icns      binary
+*.zip       binary
+*.tar.gz    binary
+*.exe       binary
+*.dll       binary

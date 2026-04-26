@@ -1,17 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
 from pathlib import Path
 
 from playwright._impl.__pyinstaller import get_hook_dirs
 from PyInstaller.utils.hooks import collect_submodules
 
 
-project_root = Path(SPEC).resolve().parents[2]
+project_root = Path(SPEC).resolve().parents[1]
 entry_script = project_root / "backend" / "desktop_launcher.py"
 bundled_sites = project_root / "backend" / "scraper" / "sites.toml"
 frontend_dist = project_root / "frontend-web" / "dist"
 playwright_browsers = project_root / ".cache" / "playwright-browsers"
-app_icon = project_root / "packaging" / "windows" / "assets" / "gabada.ico"
+
+if sys.platform == "win32":
+    icon_candidate = project_root / "packaging" / "windows" / "assets" / "gabada.ico"
+elif sys.platform == "darwin":
+    icon_candidate = project_root / "packaging" / "macos" / "assets" / "gabada.icns"
+else:
+    icon_candidate = project_root / "packaging" / "linux" / "assets" / "gabada.png"
+
+icon_path = icon_candidate if icon_candidate.exists() else None
 
 datas = [
     (str(frontend_dist), "frontend-web/dist"),
@@ -47,7 +56,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
-    icon=str(app_icon) if app_icon.exists() else None,
+    icon=str(icon_path) if icon_path else None,
 )
 
 coll = COLLECT(
