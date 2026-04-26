@@ -414,7 +414,7 @@ The backend API is mounted under `/api`. Interactive docs are available at [`/do
 
 ### 🏷 Latest stable release
 
-> 🟢 **`v0.2.3`** — Facebook Marketplace extraction hardened (item-id scoped, brace-balanced JSON, DOM strikethrough fallback).
+> 🟢 **`v0.2.4`** — terminology cleanup (login session wording), README refresh; rolls up `v0.2.3` Facebook Marketplace extraction fixes (item-id scoped, brace-balanced JSON, DOM strikethrough fallback).
 >
 > Full history in [`CHANGELOG.md`](./CHANGELOG.md).
 
@@ -452,10 +452,10 @@ The script builds the frontend, downloads the Playwright Chromium bundle, runs P
 
 ```bash
 cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
-./packaging/build_release.sh --app-version 0.2.3
+./packaging/build_release.sh --app-version 0.2.4
 ```
 
-Output lands in `packaging/output/Gabada-v0.2.3-<platform>-<arch>.tar.gz`. Architecture is auto-detected (`x64`/`arm64`).
+Output lands in `packaging/output/Gabada-v0.2.4-<platform>-<arch>.tar.gz`. Architecture is auto-detected (`x64`/`arm64`).
 
 </details>
 
