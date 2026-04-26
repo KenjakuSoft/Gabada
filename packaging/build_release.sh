@@ -5,6 +5,12 @@
 
 set -euo pipefail
 
+# Verbose tracing — every command echoes before execution. Cheap on disk,
+# invaluable when CI fails with no other context.
+if [[ -n "${BUILD_RELEASE_TRACE:-1}" ]]; then
+    set -x
+fi
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [--skip-frontend-build] [--app-version VERSION]
