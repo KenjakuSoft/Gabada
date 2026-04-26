@@ -15,7 +15,6 @@ Design goals:
 One shared Playwright browser for the app lifetime.
 """
 import json
-import os
 import re
 import asyncio
 import logging
@@ -67,7 +66,6 @@ async def start_browser() -> None:
 
 
 async def stop_browser() -> None:
-    global _playwright, _browser
     if _browser:
         await _browser.close()
     if _playwright:
