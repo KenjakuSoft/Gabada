@@ -103,8 +103,9 @@ async def _do_scrape(product_store_id: int):
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
-            """SELECT ps.product_url, ps.scrape_config
+            """SELECT ps.product_url, ps.scrape_config, s.manual_only, s.dealer_storage_state_path
                FROM product_stores ps
+               JOIN stores s ON s.id = ps.store_id
                WHERE ps.id = ? AND ps.is_active = 1""",
             (product_store_id,),
         )
@@ -113,7 +114,12 @@ async def _do_scrape(product_store_id: int):
             return
 
         row = rows[0]
+        if bool(row["manual_only"]):
+            logger.info("Skipping scrape for manual-only store link ps_id=%d", product_store_id)
+            return
         config = ScrapeConfig(**json.loads(row["scrape_config"] or "{}"))
+        if not config.storage_state_path and row["dealer_storage_state_path"]:
+            config.storage_state_path = row["dealer_storage_state_path"]
         result = await scrape(row["product_url"], config)
 
         if result.error:
@@ -208,16 +214,12 @@ async def probe_url(request: ProbeRequest) -> ProbeResponse:
     extracted right now. Use this to debug why a site scrapes incorrectly
     before wiring it up as a product_store.
     """
-    config = ScrapeConfig(
-        use_playwright=request.use_playwright,
-        wait_for=request.wait_for,
-        wait_timeout=request.wait_timeout,
-        cookies=request.cookies,
-        headers=request.headers,
-        storage_state_path=request.storage_state_path,
-    )
+    config, session_note = await _diagnostic_config(request)
     try:
-        return await probe(request.url, config)
+        response = await probe(request.url, config)
+        if session_note:
+            response.notes.insert(0, session_note)
+        return response
     except Exception as exc:
         logger.error("Probe endpoint failed for %s: %s", request.url, exc)
         raise HTTPException(status_code=500, detail=f"Probe failed: {exc}")
@@ -246,6 +248,56 @@ def _config_from_selector_body(
             image=selector_values.get("image"),
         ),
     )
+
+
+async def _resolve_saved_store_session(url: str) -> tuple[Optional[str], Optional[str]]:
+    hostname = site_profiles.normalize_hostname(url)
+    if not hostname:
+        return None, None
+
+    db = await get_db()
+    try:
+        rows = await db.execute_fetchall(
+            """SELECT name, base_url, dealer_storage_state_path
+               FROM stores
+               WHERE dealer_storage_state_path IS NOT NULL
+               ORDER BY dealer_session_updated_at IS NULL, dealer_session_updated_at DESC, id DESC"""
+        )
+    finally:
+        await db.close()
+
+    for row in rows:
+        if site_profiles.normalize_hostname(row["base_url"]) == hostname:
+            return row["dealer_storage_state_path"], row["name"]
+    return None, None
+
+
+async def _diagnostic_config(
+    body: ProbeRequest | SelectorLabRequest,
+    selectors: Optional[dict[str, Optional[str]]] = None,
+    platform: Optional[str] = None,
+) -> tuple[ScrapeConfig, Optional[str]]:
+    if isinstance(body, ProbeRequest):
+        config = ScrapeConfig(
+            use_playwright=body.use_playwright,
+            wait_for=body.wait_for,
+            wait_timeout=body.wait_timeout,
+            cookies=body.cookies,
+            headers=body.headers,
+            storage_state_path=body.storage_state_path,
+        )
+    else:
+        config = _config_from_selector_body(body, selectors=selectors, platform=platform)
+
+    if config.storage_state_path:
+        return config, None
+
+    storage_state_path, store_name = await _resolve_saved_store_session(body.url)
+    if not storage_state_path:
+        return config, None
+
+    config.storage_state_path = storage_state_path
+    return config, f"Using saved dealer session from {store_name}."
 
 
 def _profile_response(profile: site_profiles.SiteProfile) -> SelectorLabProfile:
@@ -287,8 +339,11 @@ async def _resolve_profile_hostname(
 async def selector_lab(request: SelectorLabRequest) -> SelectorLabResponse:
     """Inspect a product page and return selector candidates for manual mapping."""
     try:
-        config = _config_from_selector_body(request)
-        return await inspect_selectors(request.url, config)
+        config, session_note = await _diagnostic_config(request)
+        response = await inspect_selectors(request.url, config)
+        if session_note:
+            response.notes.insert(0, session_note)
+        return response
     except Exception as exc:
         logger.error("Selector lab failed for %s: %s", request.url, exc)
         raise HTTPException(status_code=500, detail=f"Selector lab failed: {exc}")
@@ -298,7 +353,7 @@ async def selector_lab(request: SelectorLabRequest) -> SelectorLabResponse:
 async def selector_lab_test(request: SelectorLabTestRequest) -> ScrapeResult:
     """Run a scrape using the Selector Lab's currently selected fields."""
     try:
-        config = _config_from_selector_body(
+        config, _ = await _diagnostic_config(
             request,
             selectors=request.selectors,
             platform=request.platform,
@@ -364,14 +419,21 @@ async def reprobe_store(product_store_id: int) -> dict:
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
-            "SELECT product_url, scrape_config FROM product_stores WHERE id=?",
+            """SELECT ps.product_url, ps.scrape_config, s.manual_only, s.dealer_storage_state_path
+               FROM product_stores ps
+               JOIN stores s ON s.id = ps.store_id
+               WHERE ps.id=?""",
             (product_store_id,),
         )
         if not rows:
             raise HTTPException(status_code=404, detail="product_store not found")
 
         row = rows[0]
+        if bool(row["manual_only"]):
+            raise HTTPException(status_code=400, detail="Manual-only store links cannot be reprobed")
         config = ScrapeConfig(**json.loads(row["scrape_config"] or "{}"))
+        if not config.storage_state_path and row["dealer_storage_state_path"]:
+            config.storage_state_path = row["dealer_storage_state_path"]
         try:
             report = await probe(row["product_url"], config)
         except Exception as exc:

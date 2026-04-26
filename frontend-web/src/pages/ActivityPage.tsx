@@ -1,17 +1,24 @@
-import { useMemo } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
   Activity as ActivityIcon,
+  ArrowRight,
   CircleDot,
   Radio,
+  Store as StoreIcon,
+  Tag,
   TrendingDown,
   TrendingUp,
+  Search,
+  X,
   type LucideIcon,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StockPill } from '@/components/products/StockPill'
@@ -23,6 +30,7 @@ import { cn, formatDelta, formatMoney } from '@/lib/utils'
 
 const REFRESH_MS = 30_000
 const EMPTY_ENTRIES: ActivityEntry[] = []
+const MAX_CHANGE_BADGES = 3
 
 type NormalizedChangeType =
   | 'price_down'
@@ -38,6 +46,13 @@ interface ChangePresentation {
   label: string
   icon: LucideIcon
   variant: 'success' | 'warning' | 'info' | 'destructive' | 'outline'
+}
+
+interface ActivityGroup {
+  productId: number
+  productName: string
+  latestAt: string
+  entries: ActivityEntry[]
 }
 
 const CHANGE_PRESENTATION: Record<NormalizedChangeType, ChangePresentation> = {
@@ -110,6 +125,8 @@ function normalizeChangeType(changeType: string): NormalizedChangeType {
 
 export function ActivityPage() {
   const symbol = useCurrencySymbol()
+  const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search.trim())
   const activity = useQuery<ActivityEntry[]>({
     queryKey: ['activity'],
     queryFn: () => activityApi.list(100),
@@ -119,12 +136,22 @@ export function ActivityPage() {
 
   const entries = activity.data ?? EMPTY_ENTRIES
   const stats = useMemo(() => computeStats(entries), [entries])
+  const groups = useMemo(() => groupActivity(entries), [entries])
+  const filteredGroups = useMemo(
+    () => filterActivityGroups(groups, deferredSearch),
+    [groups, deferredSearch],
+  )
+  const filteredEntriesCount = useMemo(
+    () => filteredGroups.reduce((total, group) => total + group.entries.length, 0),
+    [filteredGroups],
+  )
+  const hasSearch = search.trim().length > 0
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Activity"
-        description="Live feed of scrapes, errors, and price changes."
+        description="Live feed of scrapes, stock shifts, and price changes."
         actions={
           <Badge
             variant="outline"
@@ -138,11 +165,18 @@ export function ActivityPage() {
 
       <BentoGrid cols={6}>
         <StatTile
-          label="Events"
+          label="Changes"
           value={stats.total}
           icon={<ActivityIcon className="h-4 w-4" />}
           hint="last 100"
           tone="primary"
+          loading={activity.isLoading}
+        />
+        <StatTile
+          label="Products"
+          value={groups.length}
+          icon={<StoreIcon className="h-4 w-4" />}
+          hint="grouped rows"
           loading={activity.isLoading}
         />
         <StatTile
@@ -182,14 +216,52 @@ export function ActivityPage() {
           <BentoTile colSpan={6}>
             <TileHeader
               eyebrow="Feed"
-              title={`${entries.length} recent events`}
+              title={
+                hasSearch
+                  ? `${filteredGroups.length} matches, ${filteredEntriesCount} changes`
+                  : `${groups.length} products, ${entries.length} changes`
+              }
               icon={<ActivityIcon className="h-4 w-4" />}
+              action={
+                <div className="relative w-full max-w-md">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search product, store, change, or stock"
+                    className="pl-9 pr-10"
+                    aria-label="Search activity"
+                  />
+                  {hasSearch ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 hover:translate-y-[-50%]"
+                      onClick={() => setSearch('')}
+                      aria-label="Clear activity search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : null}
+                </div>
+              }
             />
-            <ul className="gbd-stagger mt-3 space-y-1.5">
-              {entries.map((e) => (
-                <ActivityRow key={e.id} entry={e} symbol={symbol} />
-              ))}
-            </ul>
+            {filteredGroups.length === 0 ? (
+              <div className="mt-3 rounded-md border border-dashed border-border bg-card/35 p-8 text-center text-sm text-muted-foreground">
+                No activity matched <span className="font-medium text-foreground">{search.trim()}</span>.
+              </div>
+            ) : (
+              <ul className="gbd-stagger mt-3 space-y-1.5">
+                {filteredGroups.map((group) => (
+                  <ActivityProductRow
+                    key={group.productId}
+                    group={group}
+                    symbol={symbol}
+                  />
+                ))}
+              </ul>
+            )}
           </BentoTile>
         </BentoGrid>
       )}
@@ -197,70 +269,178 @@ export function ActivityPage() {
   )
 }
 
-interface ActivityRowProps {
+interface ActivityProductRowProps {
+  group: ActivityGroup
+  symbol: string
+}
+
+function ActivityProductRow({ group, symbol }: ActivityProductRowProps) {
+  const live = useLiveTime(group.latestAt)
+  const primaryChange = normalizeChangeType(group.entries[0]?.change_type ?? 'unknown')
+  const changePresentation = CHANGE_PRESENTATION[primaryChange]
+  const ChangeIcon = changePresentation.icon
+  const changes = uniqueChanges(group.entries)
+  const hasDrop = changes.includes('price_down')
+  const hasRise = changes.includes('price_up')
+
+  return (
+    <li
+      className={cn(
+        'rounded-md border border-border bg-background/40 px-3 py-3 transition-colors hover:bg-accent/25',
+        hasDrop && 'border-emerald-500/20',
+        hasRise && 'border-destructive/20',
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <Link
+            to={`/product/${group.productId}`}
+            className="line-clamp-1 text-sm font-medium hover:underline"
+          >
+            {group.productName}
+          </Link>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <StoreIcon className="h-3 w-3" />
+              {group.entries.length} {group.entries.length === 1 ? 'change' : 'changes'}
+            </span>
+            <span>{live}</span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <Badge
+            variant={changePresentation.variant}
+            className="flex items-center gap-1.5 whitespace-nowrap text-[10px]"
+          >
+            <ChangeIcon className="h-3 w-3" />
+            {changePresentation.label}
+          </Badge>
+          {changes.slice(1, MAX_CHANGE_BADGES).map((change) => {
+            const presentation = CHANGE_PRESENTATION[change]
+            const Icon = presentation.icon
+            return (
+              <Badge
+                key={change}
+                variant={presentation.variant}
+                className="flex items-center gap-1.5 whitespace-nowrap text-[10px]"
+              >
+                <Icon className="h-3 w-3" />
+                {presentation.label}
+              </Badge>
+            )
+          })}
+          {changes.length > MAX_CHANGE_BADGES ? (
+            <Badge variant="muted" className="text-[10px]">
+              +{changes.length - MAX_CHANGE_BADGES}
+            </Badge>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-3 divide-y divide-border/70 rounded-md border border-border/70 bg-card/40">
+        {group.entries.map((entry) => (
+          <ActivityChangeLine key={entry.id} entry={entry} symbol={symbol} />
+        ))}
+      </div>
+    </li>
+  )
+}
+
+interface ActivityChangeLineProps {
   entry: ActivityEntry
   symbol: string
 }
 
-function ActivityRow({ entry, symbol }: ActivityRowProps) {
-  const live = useLiveTime(entry.scraped_at)
-  const delta = entry.price_delta
+function ActivityChangeLine({ entry, symbol }: ActivityChangeLineProps) {
   const normalizedChange = normalizeChangeType(entry.change_type)
   const changePresentation = CHANGE_PRESENTATION[normalizedChange]
   const ChangeIcon = changePresentation.icon
+  const priceNow = entry.discounted_price ?? entry.price
+  const hasPriceMovement =
+    normalizedChange === 'price_down' ||
+    normalizedChange === 'price_up' ||
+    normalizedChange === 'price_and_stock' ||
+    (entry.previous_price != null &&
+      priceNow != null &&
+      Math.abs(entry.previous_price - priceNow) > 0.001)
+  const delta = entry.price_delta
   const deltaColor =
     delta == null || delta === 0
       ? 'text-muted-foreground'
       : delta < 0
         ? 'text-success'
         : 'text-destructive'
-  const priceNow = entry.discounted_price ?? entry.price
-  const isDrop = normalizedChange === 'price_down'
-  const isRise = normalizedChange === 'price_up'
 
   return (
-    <li
-      className={cn(
-        'grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-3 rounded-md border border-border bg-background/40 px-3 py-2 transition-colors hover:bg-accent/25',
-        isDrop && 'border-emerald-500/20',
-        isRise && 'border-destructive/20',
-      )}
-    >
-      <div className="flex min-w-0 flex-col">
-        <Link
-          to={`/product/${entry.product_id}`}
-          className="truncate text-sm font-medium hover:underline"
-        >
-          {entry.product_name}
-        </Link>
-        <span className="truncate text-xs text-muted-foreground">
-          {entry.store_name}
-        </span>
+    <div className="grid gap-3 px-3 py-2 md:grid-cols-[minmax(150px,1fr)_auto_minmax(210px,auto)_minmax(160px,auto)] md:items-center">
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium">{entry.store_name}</div>
+        <div className="mt-0.5 text-[11px] text-muted-foreground">
+          {new Date(entry.scraped_at).toLocaleString()}
+        </div>
       </div>
 
       <Badge
         variant={changePresentation.variant}
-        className="flex items-center gap-1.5 whitespace-nowrap text-[10px]"
+        className="w-fit items-center gap-1.5 whitespace-nowrap text-[10px]"
       >
         <ChangeIcon className="h-3 w-3" />
         {changePresentation.label}
       </Badge>
 
-      <div className="w-20 text-right text-sm font-semibold tabular-nums sm:w-24">
-        {priceNow != null ? formatMoney(priceNow, symbol) : '—'}
+      <div className="flex flex-wrap items-center gap-2 md:justify-end">
+        {hasPriceMovement && entry.previous_price != null && priceNow != null ? (
+          <>
+            <span className="text-xs tabular-nums text-muted-foreground line-through">
+              {formatMoney(entry.previous_price, symbol)}
+            </span>
+            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-sm font-semibold tabular-nums">
+              {formatMoney(priceNow, symbol)}
+            </span>
+          </>
+        ) : priceNow != null ? (
+          <span className="text-sm font-semibold tabular-nums">
+            {formatMoney(priceNow, symbol)}
+          </span>
+        ) : (
+          <span className="text-sm text-muted-foreground">-</span>
+        )}
+        {delta != null ? (
+          <span className={`text-xs tabular-nums ${deltaColor}`}>
+            {formatDelta(delta)}
+          </span>
+        ) : null}
+        {entry.dealer_price != null ? (
+          <Badge variant="outline" className="gap-1.5 whitespace-nowrap text-[10px]">
+            <Tag className="h-3 w-3" />
+            Dealer {formatMoney(entry.dealer_price, symbol)}
+          </Badge>
+        ) : null}
       </div>
 
-      <div className={`w-16 text-right text-xs tabular-nums sm:w-20 ${deltaColor}`}>
-        {formatDelta(delta)}
-      </div>
+      <StockTransition entry={entry} />
+    </div>
+  )
+}
 
-      <div className="flex items-center gap-2">
-        <StockPill status={entry.stock_status} />
-        <span className="hidden w-20 text-right text-[11px] text-muted-foreground sm:block">
-          {live}
-        </span>
+function StockTransition({ entry }: { entry: ActivityEntry }) {
+  const previous = entry.previous_stock_status
+  const current = entry.stock_status
+  if (previous && current && previous !== current) {
+    return (
+      <div className="flex items-center gap-2 md:justify-end">
+        <StockPill status={previous} />
+        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+        <StockPill status={current} />
       </div>
-    </li>
+    )
+  }
+  return (
+    <div className="flex md:justify-end">
+      <StockPill status={current} />
+    </div>
   )
 }
 
@@ -291,6 +471,76 @@ function computeStats(entries: ActivityEntry[]): StatsResult {
   return { total: entries.length, drops, rises, stockShifts }
 }
 
+function groupActivity(entries: ActivityEntry[]): ActivityGroup[] {
+  const byProduct = new Map<number, ActivityGroup>()
+  for (const entry of entries) {
+    const current = byProduct.get(entry.product_id)
+    if (!current) {
+      byProduct.set(entry.product_id, {
+        productId: entry.product_id,
+        productName: entry.product_name,
+        latestAt: entry.scraped_at,
+        entries: [entry],
+      })
+      continue
+    }
+
+    current.entries.push(entry)
+    if (new Date(entry.scraped_at).getTime() > new Date(current.latestAt).getTime()) {
+      current.latestAt = entry.scraped_at
+    }
+  }
+
+  return Array.from(byProduct.values())
+    .map((group) => ({
+      ...group,
+      entries: [...group.entries].sort(
+        (a, b) => new Date(b.scraped_at).getTime() - new Date(a.scraped_at).getTime(),
+      ),
+    }))
+    .sort(
+      (a, b) => new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime(),
+    )
+}
+
+function uniqueChanges(entries: ActivityEntry[]): NormalizedChangeType[] {
+  const seen = new Set<NormalizedChangeType>()
+  for (const entry of entries) {
+    seen.add(normalizeChangeType(entry.change_type))
+  }
+  return Array.from(seen)
+}
+
+function filterActivityGroups(
+  groups: ActivityGroup[],
+  query: string,
+): ActivityGroup[] {
+  const normalizedQuery = query.trim().toLowerCase()
+  if (!normalizedQuery) return groups
+
+  const terms = normalizedQuery.split(/\s+/).filter(Boolean)
+  return groups.filter((group) => matchesActivityGroup(group, terms))
+}
+
+function matchesActivityGroup(group: ActivityGroup, terms: string[]): boolean {
+  const haystack = [
+    group.productName,
+    ...group.entries.flatMap((entry) => [
+      entry.store_name,
+      entry.change_type,
+      CHANGE_PRESENTATION[normalizeChangeType(entry.change_type)].label,
+      entry.stock_status ?? '',
+      entry.previous_stock_status ?? '',
+      entry.dealer_price != null ? 'dealer' : '',
+    ]),
+  ]
+    .join(' ')
+    .toLowerCase()
+    .replace(/_/g, ' ')
+
+  return terms.every((term) => haystack.includes(term))
+}
+
 function LoadingList() {
   return (
     <BentoGrid cols={6}>
@@ -308,7 +558,7 @@ function LoadingList() {
 
 function EmptyState({ text }: { text: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-border bg-card/50 p-12 text-center text-sm text-muted-foreground">
+    <div className="rounded-md border border-dashed border-border bg-card/50 p-12 text-center text-sm text-muted-foreground">
       {text}
     </div>
   )

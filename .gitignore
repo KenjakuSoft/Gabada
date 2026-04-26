@@ -16,6 +16,9 @@ backend/gabada.db
 backend/gabada.db-wal
 backend/gabada.db-shm
 backend/*.db-journal
+backend/backups/
+backend/stores/
+backend/sessions/
 
 # Frontend (Vite/React)
 frontend-web/node_modules/
@@ -42,6 +45,7 @@ desktop.ini
 gcm-diagnose.log
 
 # Packaging outputs
+.cache/
 .cache/playwright-browsers/
 packaging/windows/build/
 packaging/windows/dist/

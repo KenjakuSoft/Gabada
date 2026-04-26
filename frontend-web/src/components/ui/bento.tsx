@@ -90,14 +90,14 @@ export const BentoTile = forwardRef<HTMLDivElement, BentoTileProps>(
     <div
       ref={ref}
       className={cn(
-        'relative overflow-hidden rounded-xl border border-border text-card-foreground shadow-sm',
-        'transition-[transform,box-shadow,border-color] duration-300',
+        'gbd-glass group/bento relative isolate overflow-hidden rounded-xl border border-border/80 text-card-foreground shadow-sm',
+        'transition-[transform,box-shadow,border-color,background-color] duration-150 hover:border-primary/25 hover:shadow-[var(--shadow-elevated)]',
         toneClass[tone],
         colSpanClass[colSpan],
         rowSpanClass[rowSpan],
         padded && 'p-5',
         interactive &&
-          'cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:border-foreground/20',
+          'cursor-pointer hover:-translate-y-px active:translate-y-0',
         className,
       )}
       {...props}
@@ -127,7 +127,7 @@ export function TileHeader({
     <div className={cn('flex items-start justify-between gap-3', className)}>
       <div className="flex min-w-0 items-start gap-2.5">
         {icon ? (
-          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent/60 text-foreground/80">
+          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-accent/60 text-foreground/80 shadow-sm transition-colors duration-150 group-hover/bento:border-primary/25">
             {icon}
           </div>
         ) : null}

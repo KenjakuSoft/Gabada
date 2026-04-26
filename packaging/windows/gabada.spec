@@ -11,6 +11,7 @@ entry_script = project_root / "backend" / "desktop_launcher.py"
 bundled_sites = project_root / "backend" / "scraper" / "sites.toml"
 frontend_dist = project_root / "frontend-web" / "dist"
 playwright_browsers = project_root / ".cache" / "playwright-browsers"
+app_icon = project_root / "packaging" / "windows" / "assets" / "gabada.ico"
 
 datas = [
     (str(frontend_dist), "frontend-web/dist"),
@@ -46,6 +47,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
+    icon=str(app_icon) if app_icon.exists() else None,
 )
 
 coll = COLLECT(

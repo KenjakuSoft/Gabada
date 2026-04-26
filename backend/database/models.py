@@ -19,7 +19,9 @@ class Category(CategoryCreate):
 
 class StoreCreate(BaseModel):
     name: str
-    base_url: str
+    base_url: str = ""
+    manual_only: bool = False
+    dealer_login_url: Optional[str] = None
     woo_enabled: bool = False
     woo_site_url: Optional[str] = None
     woo_consumer_key: Optional[str] = None
@@ -30,6 +32,9 @@ class StoreCreate(BaseModel):
 class StoreUpdate(BaseModel):
     name: Optional[str] = None
     base_url: Optional[str] = None
+    manual_only: Optional[bool] = None
+    dealer_login_url: Optional[str] = None
+    dealer_storage_state_path: Optional[str] = None
     woo_enabled: Optional[bool] = None
     woo_site_url: Optional[str] = None
     woo_consumer_key: Optional[str] = None
@@ -38,9 +43,22 @@ class StoreUpdate(BaseModel):
 
 class Store(StoreCreate):
     id: int
+    dealer_storage_state_path: Optional[str] = None
+    dealer_session_updated_at: Optional[datetime] = None
     created_at: datetime
     woo_last_synced_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
+
+
+class StoreDealerSessionRequest(BaseModel):
+    wait_seconds: int = 180
+    headless: bool = False
+
+
+class StoreDealerSessionResponse(BaseModel):
+    store: Store
+    saved_to: str
+    final_url: str
 
 
 class WooSyncResult(BaseModel):
@@ -81,6 +99,7 @@ class ScrapeConfig(BaseModel):
 class ProductStoreOverrideUpsert(BaseModel):
     manual_price: Optional[float] = None
     manual_stock_status: Optional[str] = None
+    manual_warranty: Optional[str] = None
     override_note: Optional[str] = None
 
 class ProductStoreOverride(ProductStoreOverrideUpsert):
@@ -99,17 +118,25 @@ class ProductCreate(BaseModel):
 
 class ProductStoreCreate(BaseModel):
     store_id: int
-    product_url: str
+    product_url: Optional[str] = None
     scrape_config: ScrapeConfig = ScrapeConfig()
     # Probe the URL and auto-fill wait_for + selectors based on detected
     # platform. Any fields already set in scrape_config are preserved.
     auto_detect: bool = True
+
+class ProductStoreUpdate(BaseModel):
+    product_url: Optional[str] = None
+    manual_price: Optional[float] = None
+    manual_stock_status: Optional[str] = None
+    manual_warranty: Optional[str] = None
+    override_note: Optional[str] = None
 
 class ProductStoreSummary(BaseModel):
     id: int
     store_id: int
     store_name: str
     store_base_url: str
+    store_manual_only: bool = False
     product_url: str
     is_active: bool
     latest_price: Optional[float] = None
@@ -122,6 +149,7 @@ class ProductStoreSummary(BaseModel):
     latest_price_delta: Optional[float] = None
     manual_price: Optional[float] = None
     manual_stock_status: Optional[str] = None
+    manual_warranty: Optional[str] = None
     override_note: Optional[str] = None
 
     model_config = {"from_attributes": True}
@@ -153,6 +181,8 @@ class PriceLog(BaseModel):
     stock_status: Optional[str] = None
     change_type: Optional[str] = None
     price_delta: Optional[float] = None
+    previous_price: Optional[float] = None
+    previous_stock_status: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -165,6 +195,7 @@ class ActivityEntry(BaseModel):
     change_type: str
     price: Optional[float] = None
     discounted_price: Optional[float] = None
+    dealer_price: Optional[float] = None
     price_delta: Optional[float] = None
     previous_price: Optional[float] = None
     stock_status: Optional[str] = None
@@ -246,12 +277,19 @@ class FileImportCommitRequest(BaseModel):
     rows: list[FileImportRow]
     store_id: int
     category_id: Optional[int] = None
+    create_missing_products: bool = True
+    missing_rows_policy: str = "ignore"
+    full_catalog_seen_product_store_ids: list[int] = Field(default_factory=list)
+    dealer_column_mapped: bool = False
+    warranty_column_mapped: bool = False
 
 
 class FileImportCommitResponse(BaseModel):
     imported: int
     created: int = 0
     updated: int = 0
+    skipped: int = 0
+    dealer_unavailable_marked: int = 0
 
 
 # ── Quick-add (paste URLs → tracked products) ────────────────────────────────

@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 import shutil
@@ -7,7 +8,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from apscheduler.triggers.cron import CronTrigger
@@ -198,6 +199,13 @@ def _database_transfer_info() -> DatabaseTransferInfo:
     )
 
 
+async def _run_shutdown_callback(callback) -> None:
+    await asyncio.sleep(0.2)
+    result = callback()
+    if inspect.isawaitable(result):
+        await result
+
+
 @router.get("/", response_model=Settings)
 async def get_settings() -> Settings:
     db = await get_db()
@@ -280,6 +288,21 @@ async def schedule_next() -> dict:
 @router.get("/database/info", response_model=DatabaseTransferInfo)
 async def get_database_info() -> DatabaseTransferInfo:
     return await asyncio.to_thread(_database_transfer_info)
+
+
+@router.post("/shutdown")
+async def shutdown_app(
+    request: Request, background_tasks: BackgroundTasks
+) -> dict[str, str]:
+    callback = getattr(request.app.state, "request_shutdown", None)
+    if not callable(callback):
+        raise HTTPException(
+            status_code=503,
+            detail="Shutdown is only available when Gabada is running from its desktop launcher.",
+        )
+
+    background_tasks.add_task(_run_shutdown_callback, callback)
+    return {"status": "shutting_down"}
 
 
 @router.get("/database/export")

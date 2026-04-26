@@ -6,6 +6,8 @@ import {
   Clock,
   ExternalLink,
   Globe,
+  KeyRound,
+  LogOut,
   Plus,
   RefreshCw,
   Store as StoreIcon,
@@ -55,7 +57,7 @@ function computeAggregates(
       inStockCount: 0,
       dropsCount: 0,
       lastScrapedAt: null,
-      hostname: hostnameOf(s.base_url),
+      hostname: s.manual_only ? 'manual source' : hostnameOf(s.base_url),
     })
   }
   for (const p of products) {
@@ -86,6 +88,8 @@ export function StoresPage() {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
+  const [manualOnly, setManualOnly] = useState(false)
+  const [dealerLoginUrl, setDealerLoginUrl] = useState('')
 
   const stores = useQuery<Store[]>({
     queryKey: ['stores'],
@@ -120,11 +124,18 @@ export function StoresPage() {
 
   const create = useMutation({
     mutationFn: () =>
-      storesApi.create({ name: name.trim(), base_url: baseUrl.trim() }),
+      storesApi.create({
+        name: name.trim(),
+        base_url: baseUrl.trim(),
+        manual_only: manualOnly,
+        dealer_login_url: dealerLoginUrl.trim() || null,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['stores'] })
       setName('')
       setBaseUrl('')
+      setManualOnly(false)
+      setDealerLoginUrl('')
       setAdding(false)
       toast.success('Store added')
     },
@@ -157,6 +168,41 @@ export function StoresPage() {
       const detail =
         error instanceof Error ? error.message : 'Could not sync Woo catalog'
       toast.error('Woo sync failed', detail)
+    },
+  })
+
+  const captureDealerSession = useMutation({
+    mutationFn: (id: number) => storesApi.captureDealerSession(id),
+    onMutate: () => {
+      toast.info(
+        'Login opened',
+        'Log in, then click the green Save login to Gabada button in the browser.',
+      )
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['stores'] })
+      toast.success(
+        `${result.store.name} login saved`,
+        result.final_url,
+      )
+    },
+    onError: (error) => {
+      const detail =
+        error instanceof Error ? error.message : 'Could not save login'
+      toast.error('Login failed', detail)
+    },
+  })
+
+  const clearDealerSession = useMutation({
+    mutationFn: (id: number) => storesApi.clearDealerSession(id),
+    onSuccess: (store) => {
+      qc.invalidateQueries({ queryKey: ['stores'] })
+      toast.info(`${store.name} logged out`)
+    },
+    onError: (error) => {
+      const detail =
+        error instanceof Error ? error.message : 'Could not log out'
+      toast.error('Logout failed', detail)
     },
   })
 
@@ -230,7 +276,9 @@ export function StoresPage() {
                   id="store-url"
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="https://shop.example.com"
+                  placeholder={
+                    manualOnly ? 'Optional for manual-only suppliers' : 'https://shop.example.com'
+                  }
                   disabled={create.isPending}
                 />
               </div>
@@ -239,7 +287,7 @@ export function StoresPage() {
                   size="sm"
                   onClick={() => create.mutate()}
                   disabled={
-                    create.isPending || !name.trim() || !baseUrl.trim()
+                    create.isPending || !name.trim() || (!manualOnly && !baseUrl.trim())
                   }
                 >
                   Save
@@ -251,10 +299,33 @@ export function StoresPage() {
                     setAdding(false)
                     setName('')
                     setBaseUrl('')
+                    setManualOnly(false)
+                    setDealerLoginUrl('')
                   }}
                 >
                   Cancel
                 </Button>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={manualOnly}
+                  onChange={(e) => setManualOnly(e.target.checked)}
+                  className="h-4 w-4 accent-primary"
+                />
+                No website / manual-only supplier
+              </label>
+              <div className="space-y-1.5">
+                <Label htmlFor="dealer-login-url">Login URL (optional)</Label>
+                <Input
+                  id="dealer-login-url"
+                  value={dealerLoginUrl}
+                  onChange={(e) => setDealerLoginUrl(e.target.value)}
+                  placeholder="https://shop.example.com/login"
+                  disabled={create.isPending || manualOnly}
+                />
               </div>
             </div>
           </BentoTile>
@@ -286,7 +357,25 @@ export function StoresPage() {
                   ? () => syncWoo.mutate(agg.store.id)
                   : undefined
               }
+              onCaptureDealerSession={
+                agg.store.manual_only
+                  ? undefined
+                  : () => captureDealerSession.mutate(agg.store.id)
+              }
               syncingWoo={syncWoo.isPending}
+              capturingDealerSession={
+                captureDealerSession.isPending &&
+                captureDealerSession.variables === agg.store.id
+              }
+              onClearDealerSession={
+                agg.store.dealer_storage_state_path
+                  ? () => clearDealerSession.mutate(agg.store.id)
+                  : undefined
+              }
+              clearingDealerSession={
+                clearDealerSession.isPending &&
+                clearDealerSession.variables === agg.store.id
+              }
               onDelete={() => {
                 if (
                   confirm(
@@ -308,14 +397,29 @@ export function StoresPage() {
 interface StoreTileProps {
   agg: StoreAggregate
   onSyncWoo?: () => void
+  onCaptureDealerSession?: () => void
+  onClearDealerSession?: () => void
   syncingWoo: boolean
+  capturingDealerSession: boolean
+  clearingDealerSession: boolean
   onDelete: () => void
   deleting: boolean
 }
 
-function StoreTile({ agg, onSyncWoo, syncingWoo, onDelete, deleting }: StoreTileProps) {
+function StoreTile({
+  agg,
+  onSyncWoo,
+  onCaptureDealerSession,
+  onClearDealerSession,
+  syncingWoo,
+  capturingDealerSession,
+  clearingDealerSession,
+  onDelete,
+  deleting,
+}: StoreTileProps) {
   const live = useLiveTime(agg.lastScrapedAt)
   const wooLive = useLiveTime(agg.store.woo_last_synced_at)
+  const dealerLive = useLiveTime(agg.store.dealer_session_updated_at)
   const { store, productCount, inStockCount, dropsCount } = agg
   const coverage =
     productCount > 0 ? Math.round((inStockCount / productCount) * 100) : 0
@@ -330,16 +434,20 @@ function StoreTile({ agg, onSyncWoo, syncingWoo, onDelete, deleting }: StoreTile
             </div>
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{store.name}</div>
-              <a
-                href={store.base_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 truncate text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {agg.hostname}
-                <ExternalLink className="h-3 w-3 shrink-0" />
-              </a>
+              {store.manual_only ? (
+                <div className="text-[11px] text-muted-foreground">{agg.hostname}</div>
+              ) : (
+                <a
+                  href={store.base_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 truncate text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {agg.hostname}
+                  <ExternalLink className="h-3 w-3 shrink-0" />
+                </a>
+              )}
             </div>
           </div>
         </div>
@@ -379,6 +487,57 @@ function StoreTile({ agg, onSyncWoo, syncingWoo, onDelete, deleting }: StoreTile
           </Button>
         </div>
       ) : null}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {store.manual_only ? (
+          <Badge variant="muted" className="text-[10px]">
+            manual-only
+          </Badge>
+        ) : null}
+        {store.dealer_storage_state_path ? (
+          <Badge variant="success" className="text-[10px]">
+            login pricing on
+          </Badge>
+        ) : null}
+        {!store.manual_only ? (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onCaptureDealerSession}
+              disabled={
+                capturingDealerSession ||
+                clearingDealerSession ||
+                !onCaptureDealerSession
+              }
+              className="h-7 px-2 text-[11px]"
+            >
+              {capturingDealerSession ? (
+                <LoaderIcon />
+              ) : (
+                <KeyRound className="h-3.5 w-3.5" />
+              )}
+              {store.dealer_storage_state_path ? 'Refresh login' : 'Login'}
+            </Button>
+            {store.dealer_storage_state_path ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onClearDealerSession}
+                disabled={capturingDealerSession || clearingDealerSession || !onClearDealerSession}
+                className="h-7 px-2 text-[11px] text-destructive hover:text-destructive"
+              >
+                {clearingDealerSession ? (
+                  <LoaderIcon />
+                ) : (
+                  <LogOut className="h-3.5 w-3.5" />
+                )}
+                Logout
+              </Button>
+            ) : null}
+          </>
+        ) : null}
+      </div>
 
       <div className="mt-4 grid grid-cols-3 gap-3 text-center">
         <StoreStat
@@ -424,6 +583,12 @@ function StoreTile({ agg, onSyncWoo, syncingWoo, onDelete, deleting }: StoreTile
             <div className="inline-flex items-center gap-1">
               <RefreshCw className="h-3 w-3" />
               {store.woo_last_synced_at ? wooLive : 'never synced'}
+            </div>
+          ) : null}
+          {!store.manual_only && store.dealer_session_updated_at ? (
+            <div className="inline-flex items-center gap-1">
+              <KeyRound className="h-3 w-3" />
+              Login saved {dealerLive}
             </div>
           ) : null}
         </div>

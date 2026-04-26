@@ -62,7 +62,7 @@ export const productsApi = {
     productId: number,
     body: {
       store_id: number
-      product_url: string
+      product_url?: string | null
       auto_detect?: boolean
     },
   ): Promise<ProductStoreSummary> => {
@@ -77,12 +77,31 @@ export const productsApi = {
     await http.delete(`/products/${productId}/stores/${storeLinkId}`)
   },
 
+  updateStore: async (
+    productId: number,
+    storeLinkId: number,
+    body: {
+      product_url?: string | null
+      manual_price?: number | null
+      manual_stock_status?: string | null
+      manual_warranty?: string | null
+      override_note?: string | null
+    },
+  ): Promise<ProductStoreSummary> => {
+    const { data } = await http.patch<ProductStoreSummary>(
+      `/products/${productId}/stores/${storeLinkId}`,
+      body,
+    )
+    return data
+  },
+
   setOverride: async (
     productId: number,
     storeLinkId: number,
     body: {
       manual_price?: number | null
       manual_stock_status?: string | null
+      manual_warranty?: string | null
       override_note?: string | null
     },
   ) => {

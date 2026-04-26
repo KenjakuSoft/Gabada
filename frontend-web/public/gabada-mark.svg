@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="gabada-bg" x1="28" y1="24" x2="226" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0EA5E9" />
+      <stop offset="0.58" stop-color="#14B8A6" />
+      <stop offset="1" stop-color="#F59E0B" />
+    </linearGradient>
+    <linearGradient id="gabada-shine" x1="52" y1="44" x2="188" y2="188" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC" stop-opacity="0.85" />
+      <stop offset="1" stop-color="#F8FAFC" stop-opacity="0.08" />
+    </linearGradient>
+  </defs>
+
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#gabada-bg)" />
+  <path
+    d="M176 90C163 75 146 68 128 68C94.863 68 68 94.863 68 128C68 161.137 94.863 188 128 188C156.193 188 180.002 168.566 186.654 142H141"
+    stroke="#07141B"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="24"
+  />
+  <path
+    d="M196 142H141"
+    stroke="#07141B"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="24"
+  />
+  <path
+    d="M42 64C69 40 110 31 158 39C175 42 191 48 205 58"
+    stroke="url(#gabada-shine)"
+    stroke-linecap="round"
+    stroke-width="18"
+  />
+  <circle cx="186" cy="70" r="12" fill="#F8FAFC" fill-opacity="0.95" />
+</svg>

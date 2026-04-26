@@ -34,16 +34,24 @@ _STORE_SUMMARIES_SELECT = """
         ps.is_active,
         s.name AS store_name,
         s.base_url AS store_base_url,
+        s.manual_only AS store_manual_only,
         pl.price AS latest_price,
         pl.discounted_price AS latest_discounted_price,
-        pl.dealer_price AS latest_dealer_price,
-        pl.warranty AS latest_warranty,
+        COALESCE(
+            pl.dealer_price,
+            pso.imported_dealer_price
+        ) AS latest_dealer_price,
+        COALESCE(
+            NULLIF(TRIM(pl.warranty), ''),
+            NULLIF(TRIM(pso.imported_warranty), '')
+        ) AS latest_warranty,
         pl.stock_status AS latest_stock_status,
         pl.scraped_at AS latest_scraped_at,
         pl.change_type AS latest_change_type,
         pl.price_delta AS latest_price_delta,
         pso.manual_price,
         pso.manual_stock_status,
+        pso.manual_warranty,
         pso.override_note
     FROM product_stores ps
     JOIN stores s ON s.id = ps.store_id
@@ -157,6 +165,7 @@ def _row_to_product_store_summary(row: aiosqlite.Row) -> ProductStoreSummary:
         store_id=row["store_id"],
         store_name=row["store_name"],
         store_base_url=row["store_base_url"],
+        store_manual_only=bool(row["store_manual_only"]),
         product_url=row["product_url"],
         is_active=bool(row["is_active"]),
         latest_price=row["latest_price"],
@@ -169,6 +178,7 @@ def _row_to_product_store_summary(row: aiosqlite.Row) -> ProductStoreSummary:
         latest_price_delta=row["latest_price_delta"],
         manual_price=row["manual_price"],
         manual_stock_status=row["manual_stock_status"],
+        manual_warranty=row["manual_warranty"],
         override_note=row["override_note"],
     )
 

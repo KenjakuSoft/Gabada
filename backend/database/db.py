@@ -32,6 +32,10 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 base_url TEXT NOT NULL UNIQUE,
+                manual_only INTEGER NOT NULL DEFAULT 0,
+                dealer_login_url TEXT,
+                dealer_storage_state_path TEXT,
+                dealer_session_updated_at DATETIME,
                 woo_enabled INTEGER NOT NULL DEFAULT 0,
                 woo_site_url TEXT,
                 woo_consumer_key TEXT,
@@ -72,6 +76,9 @@ async def init_db():
                 product_store_id INTEGER NOT NULL REFERENCES product_stores(id) ON DELETE CASCADE UNIQUE,
                 manual_price REAL,
                 manual_stock_status TEXT,
+                manual_warranty TEXT,
+                imported_dealer_price REAL,
+                imported_warranty TEXT,
                 override_note TEXT,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
@@ -104,6 +111,10 @@ async def init_db():
             pass
 
         for col_sql in [
+            "ALTER TABLE stores ADD COLUMN manual_only INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE stores ADD COLUMN dealer_login_url TEXT",
+            "ALTER TABLE stores ADD COLUMN dealer_storage_state_path TEXT",
+            "ALTER TABLE stores ADD COLUMN dealer_session_updated_at DATETIME",
             "ALTER TABLE stores ADD COLUMN woo_enabled INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE stores ADD COLUMN woo_site_url TEXT",
             "ALTER TABLE stores ADD COLUMN woo_consumer_key TEXT",
@@ -132,9 +143,74 @@ async def init_db():
             except Exception:
                 pass
 
+        for col_sql in [
+            "ALTER TABLE product_store_overrides ADD COLUMN manual_warranty TEXT",
+            "ALTER TABLE product_store_overrides ADD COLUMN imported_dealer_price REAL",
+            "ALTER TABLE product_store_overrides ADD COLUMN imported_warranty TEXT",
+        ]:
+            try:
+                await db.execute(col_sql)
+                await db.commit()
+            except Exception:
+                pass
+
         try:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_price_logs_change ON price_logs(change_type, scraped_at)"
+            )
+            await db.commit()
+        except Exception:
+            pass
+
+        try:
+            await db.execute(
+                """
+                INSERT INTO product_store_overrides (
+                    product_store_id,
+                    imported_dealer_price,
+                    imported_warranty
+                )
+                SELECT
+                    ps.id,
+                    (
+                        SELECT pl.dealer_price
+                        FROM price_logs pl
+                        WHERE pl.product_store_id = ps.id
+                          AND pl.dealer_price IS NOT NULL
+                        ORDER BY pl.scraped_at DESC, pl.id DESC
+                        LIMIT 1
+                    ) AS imported_dealer_price,
+                    (
+                        SELECT pl.warranty
+                        FROM price_logs pl
+                        WHERE pl.product_store_id = ps.id
+                          AND NULLIF(TRIM(pl.warranty), '') IS NOT NULL
+                        ORDER BY pl.scraped_at DESC, pl.id DESC
+                        LIMIT 1
+                    ) AS imported_warranty
+                FROM product_stores ps
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM price_logs pl
+                    WHERE pl.product_store_id = ps.id
+                      AND (
+                          pl.dealer_price IS NOT NULL
+                          OR NULLIF(TRIM(pl.warranty), '') IS NOT NULL
+                      )
+                )
+                ON CONFLICT(product_store_id) DO UPDATE SET
+                    imported_dealer_price = COALESCE(
+                        product_store_overrides.imported_dealer_price,
+                        excluded.imported_dealer_price
+                    ),
+                    imported_warranty = COALESCE(
+                        NULLIF(TRIM(product_store_overrides.imported_warranty), ''),
+                        NULLIF(TRIM(excluded.imported_warranty), '')
+                    ),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE product_store_overrides.imported_dealer_price IS NULL
+                   OR NULLIF(TRIM(product_store_overrides.imported_warranty), '') IS NULL
+                """
             )
             await db.commit()
         except Exception:

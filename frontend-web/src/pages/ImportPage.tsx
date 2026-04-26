@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { FileSpreadsheet, ShoppingBag } from 'lucide-react'
+import { FileSpreadsheet, Share2, ShoppingBag } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { cn } from '@/lib/utils'
 import { WooImport } from '@/components/import/WooImport'
 import { FileImport } from '@/components/import/FileImport'
+import { GabadaShare } from '@/components/import/GabadaShare'
 
-type Tab = 'woo' | 'file'
+type Tab = 'woo' | 'file' | 'share'
 
 export function ImportPage() {
   const [tab, setTab] = useState<Tab>('woo')
@@ -15,7 +16,7 @@ export function ImportPage() {
     <div className="max-w-6xl space-y-6">
       <PageHeader
         title="Import"
-        description="Bulk-add products from WooCommerce or a spreadsheet."
+        description="Pull products from WooCommerce, use supplier files, or share selected Gabada products between users."
       />
 
       <BentoGrid cols={6}>
@@ -26,6 +27,7 @@ export function ImportPage() {
           eyebrow="Source · API"
           title="WooCommerce"
           description="Pull live products via REST credentials."
+          colSpan={2}
         />
         <SourceTile
           active={tab === 'file'}
@@ -33,11 +35,27 @@ export function ImportPage() {
           icon={<FileSpreadsheet className="h-4 w-4" />}
           eyebrow="Source · File"
           title="CSV / Excel / PDF"
-          description="Map columns and commit rows in one pass."
+          description="Update existing store prices from dealer sheets or import rows into Gabada."
+          colSpan={2}
+        />
+        <SourceTile
+          active={tab === 'share'}
+          onClick={() => setTab('share')}
+          icon={<Share2 className="h-4 w-4" />}
+          eyebrow="Source · Share"
+          title="Gabada Share"
+          description="Export selected store rows to share, or import a shared Gabada product file."
+          colSpan={2}
         />
       </BentoGrid>
 
-      {tab === 'woo' ? <WooImport /> : <FileImport />}
+      {tab === 'woo' ? (
+        <WooImport />
+      ) : tab === 'file' ? (
+        <FileImport />
+      ) : (
+        <GabadaShare />
+      )}
     </div>
   )
 }
@@ -49,6 +67,7 @@ interface SourceTileProps {
   eyebrow: string
   title: string
   description: string
+  colSpan?: 1 | 2 | 3 | 4 | 5 | 6
 }
 
 function SourceTile({
@@ -58,10 +77,11 @@ function SourceTile({
   eyebrow,
   title,
   description,
+  colSpan = 3,
 }: SourceTileProps) {
   return (
     <BentoTile
-      colSpan={3}
+      colSpan={colSpan}
       interactive
       tone={active ? 'primary' : 'default'}
       className={cn(

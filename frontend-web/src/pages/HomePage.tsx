@@ -187,14 +187,11 @@ export function HomePage() {
           }
         />
       ) : (
-        <BentoGrid
-          cols={6}
-          className="auto-rows-[minmax(260px,auto)] md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-        >
+        <div className="space-y-2">
           {filtered.map((p) => (
             <ProductTile key={p.id} product={p} symbol={symbol} />
           ))}
-        </BentoGrid>
+        </div>
       )}
     </div>
   )
@@ -239,21 +236,31 @@ function computeStats(list: Product[]): Stats {
 
 function LoadingGrid() {
   return (
-    <BentoGrid
-      cols={6}
-      className="auto-rows-[minmax(260px,auto)] md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-    >
+    <div className="space-y-2">
       {Array.from({ length: 8 }).map((_, i) => (
-        <BentoTile key={i} padded={false}>
-          <Skeleton className="h-32 w-full rounded-none" />
-          <div className="space-y-2 p-4">
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-4 w-1/2" />
-            <Skeleton className="h-6 w-20" />
+        <div
+          key={i}
+          className="rounded-xl border border-border bg-card px-4 py-3 shadow-sm"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-4 w-3/4" />
+              <div className="flex flex-wrap gap-1.5">
+                <Skeleton className="h-6 w-16 rounded-full" />
+                <Skeleton className="h-6 w-24 rounded-full" />
+                <Skeleton className="h-6 w-28 rounded-full" />
+                <Skeleton className="h-6 w-20 rounded-full" />
+              </div>
+            </div>
+            <div className="flex gap-1.5">
+              <Skeleton className="h-8 w-16 rounded-md" />
+              <Skeleton className="h-8 w-14 rounded-md" />
+              <Skeleton className="h-8 w-14 rounded-md" />
+            </div>
           </div>
-        </BentoTile>
+        </div>
       ))}
-    </BentoGrid>
+    </div>
   )
 }
 

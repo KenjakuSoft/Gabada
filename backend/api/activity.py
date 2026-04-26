@@ -14,6 +14,7 @@ _ACTIVITY_QUERY = """
         pl.change_type,
         pl.price,
         pl.discounted_price,
+        pl.dealer_price,
         pl.price_delta,
         pl.previous_price,
         pl.stock_status,

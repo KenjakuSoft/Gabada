@@ -252,7 +252,7 @@ function ProbeResults({
             <div className="mt-3 overflow-hidden rounded-md border border-border">
               <div className="max-h-[360px] overflow-auto">
                 <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-muted/80 text-muted-foreground backdrop-blur">
+                  <thead className="sticky top-0 bg-muted/95 text-muted-foreground">
                     <tr>
                       <th className="px-2 py-1.5 text-left font-medium">
                         Text

@@ -1,4 +1,5 @@
-import { formatMoney } from '@/lib/utils'
+import type { ReactNode } from 'react'
+import { cn, formatMoney } from '@/lib/utils'
 import type { ProductStoreSummary } from '@/api'
 
 interface PriceCellProps {
@@ -14,46 +15,109 @@ export function PriceCell({ store, symbol }: PriceCellProps) {
 
   if (manualPrice != null) {
     return (
-      <div className="flex flex-col">
-        <span className="font-semibold tabular-nums">
-          {formatMoney(manualPrice, symbol)}
-        </span>
-        <span className="text-xs text-muted-foreground">manual</span>
-      </div>
+      <PriceStack>
+        <PriceLine label="Manual" value={manualPrice} symbol={symbol} />
+        {dealer != null ? (
+          <PriceLine label="Dealer" value={dealer} symbol={symbol} tone="dealer" />
+        ) : null}
+      </PriceStack>
     )
   }
 
   if (discounted != null && regular != null && discounted < regular) {
     return (
-      <div className="flex items-baseline gap-2">
-        <span className="font-semibold tabular-nums text-success">
-          {formatMoney(discounted, symbol)}
-        </span>
-        <span className="text-xs text-muted-foreground line-through tabular-nums">
-          {formatMoney(regular, symbol)}
-        </span>
-      </div>
+      <PriceStack>
+        <SalePriceLine
+          label="Retail"
+          value={discounted}
+          compareAt={regular}
+          symbol={symbol}
+        />
+        {dealer != null ? (
+          <PriceLine label="Dealer" value={dealer} symbol={symbol} tone="dealer" />
+        ) : null}
+      </PriceStack>
     )
   }
 
   if (regular != null) {
     return (
-      <span className="font-semibold tabular-nums">
-        {formatMoney(regular, symbol)}
-      </span>
+      <PriceStack>
+        <PriceLine label="Retail" value={regular} symbol={symbol} />
+        {dealer != null ? (
+          <PriceLine label="Dealer" value={dealer} symbol={symbol} tone="dealer" />
+        ) : null}
+      </PriceStack>
     )
   }
 
   if (dealer != null) {
     return (
-      <div className="flex flex-col">
-        <span className="font-semibold tabular-nums">
-          {formatMoney(dealer, symbol)}
-        </span>
-        <span className="text-xs text-muted-foreground">dealer</span>
-      </div>
+      <PriceStack>
+        <PriceLine label="Dealer" value={dealer} symbol={symbol} tone="dealer" />
+      </PriceStack>
     )
   }
 
-  return <span className="text-sm text-muted-foreground">—</span>
+  return <span className="text-sm text-muted-foreground">-</span>
+}
+
+function PriceStack({ children }: { children: ReactNode }) {
+  return <div className="flex min-w-[9.5rem] flex-col items-end gap-1">{children}</div>
+}
+
+function PriceLine({
+  label,
+  value,
+  symbol,
+  tone = 'default',
+}: {
+  label: string
+  value: number
+  symbol: string
+  tone?: 'default' | 'dealer'
+}) {
+  return (
+    <div className="flex items-baseline justify-end gap-2 text-right">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={cn(
+          'text-sm font-semibold tabular-nums text-foreground',
+          tone === 'dealer' && 'text-success',
+        )}
+      >
+        {formatMoney(value, symbol)}
+      </span>
+    </div>
+  )
+}
+
+function SalePriceLine({
+  label,
+  value,
+  compareAt,
+  symbol,
+}: {
+  label: string
+  value: number
+  compareAt: number
+  symbol: string
+}) {
+  return (
+    <div className="flex items-baseline justify-end gap-2 text-right">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span className="flex items-baseline gap-1.5">
+        <span className="text-sm font-semibold tabular-nums text-success">
+          {formatMoney(value, symbol)}
+        </span>
+        <span className="text-[11px] text-muted-foreground line-through tabular-nums">
+          {formatMoney(compareAt, symbol)}
+        </span>
+      </span>
+    </div>
+  )
 }

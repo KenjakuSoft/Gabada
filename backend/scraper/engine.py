@@ -19,9 +19,10 @@ import os
 import re
 import asyncio
 import logging
+from hashlib import sha1
 from typing import Any, Optional
 
-from app_paths import configure_runtime_environment, resolve_storage_state_path
+from app_paths import configure_runtime_environment, resolve_storage_state_path, sessions_dir
 from playwright.async_api import (
     async_playwright,
     Browser,
@@ -730,6 +731,59 @@ def _merge_price_candidate(target: ScrapeResult, candidate: ScrapeResult) -> Non
     elif target.discounted_price is None and candidate.discounted_price is not None:
         target.discounted_price = candidate.discounted_price
         target.raw_discounted = candidate.raw_discounted
+
+
+def _merge_public_and_authenticated_result(
+    public: ScrapeResult,
+    authenticated: ScrapeResult,
+) -> ScrapeResult:
+    if public.error and not authenticated.error:
+        return _normalize_scrape_result(authenticated)
+    if authenticated.error and not public.error:
+        return _normalize_scrape_result(public)
+    if public.price is None and public.discounted_price is None:
+        return _normalize_scrape_result(authenticated)
+
+    merged = public.model_copy(deep=True)
+
+    if not merged.title and authenticated.title:
+        merged.title = authenticated.title
+    if merged.stock_status in (None, "unknown") and authenticated.stock_status not in (
+        None,
+        "unknown",
+    ):
+        merged.stock_status = authenticated.stock_status
+
+    dealer_price = authenticated.dealer_price
+    dealer_raw = authenticated.raw_dealer
+
+    if dealer_price is None:
+        public_current, _ = _current_price_pair(public)
+        public_regular, _ = _regular_price_pair(public)
+        auth_current, auth_current_raw = _current_price_pair(authenticated)
+        auth_is_distinct = (
+            auth_current is not None
+            and public_current is not None
+            and not _prices_close(auth_current, public_current)
+            and (public_regular is None or not _prices_close(auth_current, public_regular))
+        )
+        if auth_is_distinct and auth_current < public_current:
+            dealer_price = auth_current
+            dealer_raw = auth_current_raw
+
+    if dealer_price is not None:
+        merged.dealer_price = dealer_price
+        merged.raw_dealer = dealer_raw
+        if authenticated.review_status == "corrected":
+            merged.review_status = "corrected"
+        for note in authenticated.review_notes:
+            _add_review_note(merged, note)
+        _add_review_note(
+            merged,
+            "Authenticated dealer session preserved the public price and stored the dealer price separately.",
+        )
+
+    return _normalize_scrape_result(merged)
 
 
 # ── Strategy 1: JSON-LD ───────────────────────────────────────────────────────
@@ -2393,11 +2447,14 @@ async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabRespon
         )
 
         effective = _apply_site_profile(url, config)
-        response.extracted = await scrape_with_open_page(
-            page,
-            effective,
-            platform_hint=response.platform,
-        )
+        if effective.storage_state_path:
+            response.extracted = await scrape(url, effective)
+        else:
+            response.extracted = await scrape_with_open_page(
+                page,
+                effective,
+                platform_hint=response.platform,
+            )
         response.suggested_assignments = _suggest_selector_assignments(
             response.candidates,
             response.current_profile,
@@ -2650,6 +2707,12 @@ _CLOUDFLARE_HINTS = (
     "ddos protection by",
 )
 
+_RENDERED_PRODUCT_HINTS_RE = re.compile(
+    r"\b(rs\.?|lkr|price|in stock|out of stock|add[\s-]?to[\s-]?cart|"
+    r"buy[\s-]?now|sku\s*:|category\s*:)\b",
+    re.IGNORECASE,
+)
+
 
 async def _detected_challenge(page: Page) -> bool:
     try:
@@ -2695,6 +2758,49 @@ async def _wait_for_challenge_clear(page: Page, timeout_ms: int = 25000) -> bool
     return not await _detected_challenge(page)
 
 
+async def _page_has_meaningful_product_content(page: Page) -> bool:
+    try:
+        payload = await page.evaluate(
+            """() => {
+                const body = document.body;
+                const text = (body && body.innerText || '').trim();
+                const hasTitle = !!document.querySelector(
+                    'h1, [itemprop="name"], .product_title, .product-title, .product-name'
+                );
+                return {
+                    text: text.slice(0, 4000),
+                    hasTitle,
+                };
+            }"""
+        )
+    except Exception:
+        return False
+
+    text = str(payload.get("text") or "")
+    if len(text) < 40:
+        return False
+    if payload.get("hasTitle") and len(text) >= 120:
+        return True
+    return bool(_RENDERED_PRODUCT_HINTS_RE.search(text))
+
+
+async def _wait_for_rendered_product_content(
+    page: Page, *, timeout_ms: int = 8000
+) -> bool:
+    import time as _time
+
+    deadline = _time.monotonic() + (timeout_ms / 1000.0)
+    while _time.monotonic() < deadline:
+        if await _page_has_meaningful_product_content(page):
+            return True
+        try:
+            await page.wait_for_load_state("networkidle", timeout=1000)
+        except Exception:
+            pass
+        await asyncio.sleep(0.4)
+    return await _page_has_meaningful_product_content(page)
+
+
 async def _navigate(page: Page, url: str, config: ScrapeConfig) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
@@ -2719,80 +2825,21 @@ async def _navigate(page: Page, url: str, config: ScrapeConfig) -> None:
         except Exception:
             pass
 
+    if not await _page_has_meaningful_product_content(page):
+        settled = await _wait_for_rendered_product_content(page)
+        if settled:
+            logger.debug("Waited for delayed product content on %s", url)
+
 
 # ── Main scrape function ──────────────────────────────────────────────────────
 
-async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
-    async with _lock:
-        if not _browser:
-            raise RuntimeError("Browser not started")
-
-    # Let sites.toml pin a platform / override selectors for this hostname
-    # before we touch the network. Unknown hosts pass through untouched.
-    config = _apply_site_profile(url, config)
-
+async def _scrape_url_once(url: str, config: ScrapeConfig) -> ScrapeResult:
     context = await _open_context(config)
     page = await context.new_page()
 
     try:
         await _navigate(page, url, config)
-
-        # Strategy waterfall. Structured data always wins.
-        result = await _try_json_ld(page)
-        if not result.price:
-            result = await _try_microdata(page)
-        structured_price_locked = result.price is not None
-        smart_data = await _run_smart_scan(page)
-        smart = _sanitize_smart_scan_result(_smart_scan_result_from_data(smart_data), smart_data)
-
-        # Smart scan fills gaps. Never overwrites a JSON-LD / microdata price.
-        if not result.price or result.stock_status in (None, "unknown"):
-            if not result.price and smart.price:
-                # Preserve title from earlier strategies if they found one
-                preserved_title = result.title
-                result = smart
-                result.title = preserved_title or smart.title
-            if result.stock_status in (None, "unknown") and smart.stock_status not in (None, "unknown"):
-                result.stock_status = smart.stock_status
-            # Opportunistic dealer / discounted fill-in
-            if smart.dealer_price and not result.dealer_price:
-                result.dealer_price = smart.dealer_price
-                result.raw_dealer = smart.raw_dealer
-            if smart.discounted_price and not result.discounted_price:
-                result.discounted_price = smart.discounted_price
-                result.raw_discounted = smart.raw_discounted
-
-        # CSS patterns as last-resort enrichment (fills fields still missing)
-        if not result.price or not result.dealer_price or not result.title:
-            common = await _try_common(page)
-            _merge_price_candidate(result, common)
-            if not result.dealer_price and common.dealer_price:
-                result.dealer_price = common.dealer_price
-                result.raw_dealer = common.raw_dealer
-            if not result.title and common.title:
-                result.title = common.title
-            if result.stock_status in (None, "unknown") and common.stock_status not in (None, "unknown"):
-                result.stock_status = common.stock_status
-
-        # User overrides always last
-        sel = config.selectors
-        has_custom = any([
-            sel.title, sel.price, sel.discounted_price, sel.dealer_price,
-            sel.stock_status,
-        ])
-        if has_custom:
-            result = await _apply_custom(page, config, result)
-        result = _review_result_with_smart_scan(
-            result,
-            smart,
-            smart_data,
-            has_custom=has_custom,
-            structured_price_locked=structured_price_locked,
-        )
-
-        if not result.stock_status:
-            result.stock_status = "unknown"
-        result = _normalize_scrape_result(result)
+        result = await scrape_with_open_page(page, config)
 
         logger.info(
             "Scrape done: %s → price=%s disc=%s dealer=%s stock=%s",
@@ -2812,6 +2859,29 @@ async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
 # Platform defaults now live in ``scraper.site_profiles`` so they can be
 # resolved both by the engine and by the ``sites.toml`` loader without a
 # circular import.
+
+
+async def scrape(url: str, config: ScrapeConfig) -> ScrapeResult:
+    async with _lock:
+        if not _browser:
+            raise RuntimeError("Browser not started")
+
+    # Let sites.toml pin a platform / override selectors for this hostname
+    # before we touch the network. Unknown hosts pass through untouched.
+    config = _apply_site_profile(url, config)
+
+    if not config.storage_state_path:
+        return await _scrape_url_once(url, config)
+
+    public_config = config.model_copy(deep=True)
+    public_config.storage_state_path = None
+
+    public_result = await _scrape_url_once(url, public_config)
+    authenticated_result = await _scrape_url_once(url, config)
+    return _merge_public_and_authenticated_result(
+        public_result,
+        authenticated_result,
+    )
 
 
 async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
@@ -2854,8 +2924,18 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
                 dom_path=c.get("dom_path"),
             ))
 
-        # Run the full scrape waterfall to compute an "extracted" snapshot
-        extracted = await scrape_with_open_page(page, config, platform_hint=response.platform)
+        # Run the full scrape waterfall to compute an "extracted" snapshot.
+        # When a saved dealer session is attached, use the normal scrape()
+        # entrypoint so the authenticated pass can preserve the public price
+        # and store the logged-in value as dealer_price.
+        if config.storage_state_path:
+            extracted = await scrape(url, config)
+        else:
+            extracted = await scrape_with_open_page(
+                page,
+                config,
+                platform_hint=response.platform,
+            )
         response.extracted = extracted
 
         # Suggested config
@@ -2948,45 +3028,174 @@ async def scrape_with_open_page(
 
 # ── Login helper ─────────────────────────────────────────────────────────────
 
+_LOGIN_DONE_BUTTON_SCRIPT = """
+(() => {
+  const id = "gabada-login-save-button";
+  window.__gabadaLoginDone = window.__gabadaLoginDone || false;
+  if (document.getElementById(id) || !document.documentElement) return;
+
+  const button = document.createElement("button");
+  button.id = id;
+  button.type = "button";
+  button.textContent = "Save login to Gabada";
+  button.style.cssText = [
+    "position:fixed",
+    "z-index:2147483647",
+    "right:18px",
+    "bottom:18px",
+    "height:42px",
+    "padding:0 16px",
+    "border:0",
+    "border-radius:999px",
+    "background:#0f9f6e",
+    "color:white",
+    "font:700 13px/42px Arial,sans-serif",
+    "box-shadow:0 12px 30px rgba(0,0,0,.22)",
+    "cursor:pointer"
+  ].join(";");
+  button.addEventListener("click", () => {
+    window.__gabadaLoginDone = true;
+    button.textContent = "Saving to Gabada...";
+    button.disabled = true;
+    button.style.opacity = "0.8";
+    button.style.cursor = "wait";
+  });
+  document.documentElement.appendChild(button);
+})();
+"""
+
+
+def _login_profile_dir(url: str, save_path: str) -> str:
+    key = sha1(f"{url}|{save_path}".encode("utf-8")).hexdigest()[:16]
+    profile_dir = sessions_dir() / "dealer-browser-profiles" / key
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    return str(profile_dir)
+
+
+def _looks_like_login_url(value: str) -> bool:
+    return bool(
+        re.search(
+            r"(login|signin|sign-in|account|customer|dealer|wholesale|auth)",
+            value or "",
+            re.IGNORECASE,
+        )
+    )
+
+
+async def _open_login_context(
+    pw: Playwright,
+    *,
+    url: str,
+    save_path: str,
+    headless: bool,
+) -> BrowserContext:
+    options = {
+        "user_data_dir": _login_profile_dir(url, save_path),
+        "headless": headless,
+        "args": [
+            "--no-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
+        ],
+        "ignore_default_args": ["--enable-automation"],
+        "user_agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "viewport": {"width": 1280, "height": 900},
+        "locale": "en-US",
+    }
+
+    if not headless:
+        for channel in ("chrome", "msedge"):
+            try:
+                context = await pw.chromium.launch_persistent_context(
+                    channel=channel,
+                    **options,
+                )
+                logger.info("Dealer login opened with installed %s", channel)
+                return context
+            except Exception as exc:
+                logger.info("Installed %s unavailable for dealer login: %s", channel, exc)
+
+    logger.info("Dealer login falling back to bundled Chromium")
+    return await pw.chromium.launch_persistent_context(**options)
+
+
+async def _install_login_done_button(page: Page) -> bool:
+    if page.is_closed():
+        return False
+    try:
+        await page.evaluate(_LOGIN_DONE_BUTTON_SCRIPT)
+        return bool(await page.evaluate("window.__gabadaLoginDone === true"))
+    except Exception:
+        return False
+
+
 async def save_login_state(
     url: str, save_path: str, headless: bool = False, wait_seconds: int = 180
 ) -> dict:
     """
-    Open a non-headless Chromium window, let the user log in manually,
-    then save the storage state (cookies + localStorage) to save_path.
+    Open a browser window, let the user log in manually, then save the
+    storage state (cookies + localStorage) to save_path.
 
     Returns a dict with status + final URL.
     """
-    # Use a fresh Playwright instance in non-headless mode for the login flow.
+    configure_runtime_environment()
     pw = await async_playwright().start()
-    browser = await pw.chromium.launch(
+    context = await _open_login_context(
+        pw,
+        url=url,
+        save_path=save_path,
         headless=headless,
-        args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
     )
     try:
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1280, "height": 900},
-            locale="en-US",
-        )
-        page = await context.new_page()
+        page = context.pages[0] if context.pages else await context.new_page()
         await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        initial_url = page.url
+        started_on_login_url = _looks_like_login_url(initial_url)
 
         logger.info(
             "Login window open at %s. Browser will close in %ds — complete login now.",
             url, wait_seconds,
         )
-        # Give the user up to wait_seconds to complete login in the opened window.
-        await asyncio.sleep(wait_seconds)
+        logger.info("Click the floating 'Save login to Gabada' button to return early.")
+        deadline = asyncio.get_running_loop().time() + max(5, wait_seconds)
+        redirected_at: Optional[float] = None
+        save_reason = "timeout"
+
+        while asyncio.get_running_loop().time() < deadline:
+            if page.is_closed():
+                save_reason = "page_closed"
+                break
+
+            if await _install_login_done_button(page):
+                save_reason = "save_button"
+                break
+
+            current_url = page.url
+            if (
+                started_on_login_url
+                and current_url != initial_url
+                and not _looks_like_login_url(current_url)
+            ):
+                now = asyncio.get_running_loop().time()
+                if redirected_at is None:
+                    redirected_at = now
+                elif now - redirected_at >= 4:
+                    save_reason = "login_redirect"
+                    break
+            else:
+                redirected_at = None
+
+            await asyncio.sleep(0.5)
 
         target_path = resolve_storage_state_path(save_path, for_write=True)
         await context.storage_state(path=str(target_path))
-        final_url = page.url
+        final_url = page.url if not page.is_closed() else url
+        logger.info("Dealer login state saved by %s to %s", save_reason, target_path)
         return {"saved_to": str(target_path), "final_url": final_url}
     finally:
-        await browser.close()
+        await context.close()
         await pw.stop()

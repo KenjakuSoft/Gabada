@@ -44,7 +44,7 @@ export function StatTile({
           })
 
   return (
-    <BentoTile tone={tone} colSpan={colSpan}>
+    <BentoTile tone={tone} colSpan={colSpan} className="gbd-spotlight">
       <TileHeader eyebrow={label} icon={icon} action={accent} />
       <div className="mt-4 flex items-baseline gap-1">
         {loading ? (
@@ -58,7 +58,7 @@ export function StatTile({
             ) : null}
             <span
               className={cn(
-                'text-3xl font-semibold tabular-nums tracking-tight',
+                'text-3xl font-black tabular-nums tracking-tight',
                 value == null && 'text-muted-foreground',
               )}
             >
