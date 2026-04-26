@@ -17,3 +17,10 @@ platform = "cs-cart"
 platform = "generic"
 wait_for = "#productPrice"
 selectors = { image = "button.owl-prev:nth-of-type(1) > img", price = "#productPrice", stock_status = "div.col-md-7.pt-lg-0", title = "h1.fw-600.text-24" }
+
+# Facebook Marketplace listings — extracted from inline GraphQL JSON in
+# engine.py (_try_facebook_marketplace). The platform hint and wait_for
+# below help the page settle before extraction; selectors are not used.
+["facebook.com"]
+platform = "generic"
+wait_for = "div[role='main']"

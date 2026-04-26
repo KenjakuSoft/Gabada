@@ -90,6 +90,20 @@ case "$(uname -m)" in
     *) ARCH="$(uname -m)" ;;
 esac
 
+# macOS: PyInstaller skips bundling the Playwright Chromium (codesign
+# breaks on the .app subcomponent). Copy it in here so the runtime hook
+# in app_paths.py finds it at <bundle>/_internal/ms-playwright/.
+if [[ "$PLATFORM" == "macos" && -d "$BROWSER_CACHE" ]]; then
+    BUNDLE_INTERNAL="$DIST_DIR/Gabada/_internal"
+    if [[ -d "$BUNDLE_INTERNAL" ]]; then
+        echo "Copying Playwright browsers into bundle (macOS .app workaround)..."
+        mkdir -p "$BUNDLE_INTERNAL/ms-playwright"
+        cp -R "$BROWSER_CACHE"/. "$BUNDLE_INTERNAL/ms-playwright/"
+    else
+        echo "Warning: $BUNDLE_INTERNAL not found; Playwright browsers not bundled." >&2
+    fi
+fi
+
 VERSION_TAG="${APP_VERSION:-dev}"
 ARCHIVE_NAME="Gabada-v${VERSION_TAG}-${PLATFORM}-${ARCH}.tar.gz"
 

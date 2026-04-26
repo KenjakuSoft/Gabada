@@ -103,7 +103,7 @@ async def _do_scrape(product_store_id: int):
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
-            """SELECT ps.product_url, ps.scrape_config, s.manual_only, s.dealer_storage_state_path
+            """SELECT ps.product_url, ps.scrape_config, s.manual_only, s.storage_state_path
                FROM product_stores ps
                JOIN stores s ON s.id = ps.store_id
                WHERE ps.id = ? AND ps.is_active = 1""",
@@ -118,8 +118,8 @@ async def _do_scrape(product_store_id: int):
             logger.info("Skipping scrape for manual-only store link ps_id=%d", product_store_id)
             return
         config = ScrapeConfig(**json.loads(row["scrape_config"] or "{}"))
-        if not config.storage_state_path and row["dealer_storage_state_path"]:
-            config.storage_state_path = row["dealer_storage_state_path"]
+        if not config.storage_state_path and row["storage_state_path"]:
+            config.storage_state_path = row["storage_state_path"]
         result = await scrape(row["product_url"], config)
 
         if result.error:
@@ -258,17 +258,17 @@ async def _resolve_saved_store_session(url: str) -> tuple[Optional[str], Optiona
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
-            """SELECT name, base_url, dealer_storage_state_path
+            """SELECT name, base_url, storage_state_path
                FROM stores
-               WHERE dealer_storage_state_path IS NOT NULL
-               ORDER BY dealer_session_updated_at IS NULL, dealer_session_updated_at DESC, id DESC"""
+               WHERE storage_state_path IS NOT NULL
+               ORDER BY session_updated_at IS NULL, session_updated_at DESC, id DESC"""
         )
     finally:
         await db.close()
 
     for row in rows:
         if site_profiles.normalize_hostname(row["base_url"]) == hostname:
-            return row["dealer_storage_state_path"], row["name"]
+            return row["storage_state_path"], row["name"]
     return None, None
 
 
@@ -419,7 +419,7 @@ async def reprobe_store(product_store_id: int) -> dict:
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
-            """SELECT ps.product_url, ps.scrape_config, s.manual_only, s.dealer_storage_state_path
+            """SELECT ps.product_url, ps.scrape_config, s.manual_only, s.storage_state_path
                FROM product_stores ps
                JOIN stores s ON s.id = ps.store_id
                WHERE ps.id=?""",
@@ -432,8 +432,8 @@ async def reprobe_store(product_store_id: int) -> dict:
         if bool(row["manual_only"]):
             raise HTTPException(status_code=400, detail="Manual-only store links cannot be reprobed")
         config = ScrapeConfig(**json.loads(row["scrape_config"] or "{}"))
-        if not config.storage_state_path and row["dealer_storage_state_path"]:
-            config.storage_state_path = row["dealer_storage_state_path"]
+        if not config.storage_state_path and row["storage_state_path"]:
+            config.storage_state_path = row["storage_state_path"]
         try:
             report = await probe(row["product_url"], config)
         except Exception as exc:

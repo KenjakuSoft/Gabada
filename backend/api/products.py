@@ -98,7 +98,7 @@ async def add_store_link(product_id: int, body: ProductStoreCreate):
     db = await get_db()
     try:
         store_rows = await db.execute_fetchall(
-            """SELECT manual_only, dealer_storage_state_path
+            """SELECT manual_only, storage_state_path
                FROM stores
                WHERE id = ?""",
             (body.store_id,),
@@ -108,8 +108,8 @@ async def add_store_link(product_id: int, body: ProductStoreCreate):
 
         store_row = store_rows[0]
         manual_only = bool(store_row["manual_only"])
-        if not config.storage_state_path and store_row["dealer_storage_state_path"]:
-            config.storage_state_path = store_row["dealer_storage_state_path"]
+        if not config.storage_state_path and store_row["storage_state_path"]:
+            config.storage_state_path = store_row["storage_state_path"]
 
         if not provided_url:
             if not manual_only:

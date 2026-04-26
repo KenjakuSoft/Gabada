@@ -1071,6 +1071,157 @@ async def _try_common(page: Page) -> ScrapeResult:
     return _normalize_scrape_result(result)
 
 
+# ── Strategy: Facebook Marketplace (inline JSON) ─────────────────────────────
+#
+# FB Marketplace embeds product data inside <script> tags as nested GraphQL
+# JSON. CSS-selector and JSON-LD extraction don't work because there are no
+# stable selectors and FB doesn't emit Schema.org markup. We pull the relevant
+# keys with regex from the script blob — order-independent, robust to the
+# layout shuffles FB does on every release.
+#
+# Keys we look for:
+#   - marketplace_listing_title          → title
+#   - listing_price.amount               → current price (sale price if sale)
+#   - strikethrough_price.amount         → original price (presence => discount)
+#   - listing_price.formatted_amount     → raw price string with currency
+#   - is_live / is_pending / is_sold     → stock status
+
+_FB_MARKETPLACE_HOSTS = {"facebook.com", "m.facebook.com"}
+
+
+def _is_facebook_marketplace_url(url: Optional[str]) -> bool:
+    if not url:
+        return False
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        if host not in _FB_MARKETPLACE_HOSTS:
+            return False
+        return "/marketplace/" in (parsed.path or "")
+    except Exception:
+        return False
+
+
+_FB_TITLE_RE = re.compile(r'"marketplace_listing_title"\s*:\s*"((?:[^"\\]|\\.)*)"')
+_FB_LISTING_PRICE_RE = re.compile(
+    r'"listing_price"\s*:\s*\{[^}]{0,400}?"amount"\s*:\s*"([^"]+)"'
+)
+_FB_LISTING_FORMATTED_RE = re.compile(
+    r'"listing_price"\s*:\s*\{[^}]{0,400}?"formatted_amount"\s*:\s*"([^"]+)"'
+)
+_FB_STRIKE_PRICE_RE = re.compile(
+    r'"strikethrough_price"\s*:\s*\{[^}]{0,400}?"amount"\s*:\s*"([^"]+)"'
+)
+_FB_STRIKE_FORMATTED_RE = re.compile(
+    r'"strikethrough_price"\s*:\s*\{[^}]{0,400}?"formatted_amount"\s*:\s*"([^"]+)"'
+)
+_FB_IS_LIVE_RE = re.compile(r'"is_live"\s*:\s*(true|false)')
+_FB_IS_PENDING_RE = re.compile(r'"is_pending"\s*:\s*(true|false)')
+_FB_IS_SOLD_RE = re.compile(r'"is_sold"\s*:\s*(true|false)')
+
+
+def _decode_fb_json_string(value: str) -> str:
+    if not value:
+        return value
+    try:
+        return json.loads(f'"{value}"')
+    except Exception:
+        return value
+
+
+async def _try_facebook_marketplace(page: Page) -> ScrapeResult:
+    """Pull title / price / discount / stock from FB Marketplace inline JSON.
+
+    Only runs when the URL is a Marketplace listing. Returns an empty
+    ScrapeResult on any failure so the regular waterfall continues.
+    """
+    result = ScrapeResult()
+    if not _is_facebook_marketplace_url(getattr(page, "url", "")):
+        return result
+    try:
+        blob = await page.evaluate(
+            """() => {
+                const scripts = Array.from(document.querySelectorAll('script'));
+                const parts = [];
+                for (const s of scripts) {
+                    const text = s.textContent || '';
+                    if (
+                        text.indexOf('marketplace_listing_title') !== -1 ||
+                        text.indexOf('listing_price') !== -1 ||
+                        text.indexOf('strikethrough_price') !== -1
+                    ) {
+                        parts.push(text);
+                    }
+                }
+                return parts.join('\\n');
+            }"""
+        )
+    except Exception as e:
+        logger.debug("FB Marketplace blob fetch failed: %s", e)
+        return result
+
+    if not blob:
+        return result
+
+    title_match = _FB_TITLE_RE.search(blob)
+    if title_match:
+        result.title = _decode_fb_json_string(title_match.group(1))
+
+    listing_amount = _FB_LISTING_PRICE_RE.search(blob)
+    listing_formatted = _FB_LISTING_FORMATTED_RE.search(blob)
+    strike_amount = _FB_STRIKE_PRICE_RE.search(blob)
+    strike_formatted = _FB_STRIKE_FORMATTED_RE.search(blob)
+
+    listing_value = _parse_price(listing_amount.group(1)) if listing_amount else None
+    strike_value = _parse_price(strike_amount.group(1)) if strike_amount else None
+
+    if listing_value is not None and strike_value is not None and strike_value > listing_value:
+        # Strikethrough is the original; listing_price is the sale price.
+        result.price = strike_value
+        result.raw_price = (
+            _decode_fb_json_string(strike_formatted.group(1))
+            if strike_formatted
+            else strike_amount.group(1)
+        )
+        result.discounted_price = listing_value
+        result.raw_discounted = (
+            _decode_fb_json_string(listing_formatted.group(1))
+            if listing_formatted
+            else listing_amount.group(1)
+        )
+    elif listing_value is not None:
+        result.price = listing_value
+        result.raw_price = (
+            _decode_fb_json_string(listing_formatted.group(1))
+            if listing_formatted
+            else listing_amount.group(1)
+        )
+
+    # Stock: FB exposes is_live (current public status) and the legacy
+    # is_pending / is_sold flags. Treat any "sold" marker as out-of-stock.
+    is_sold = _FB_IS_SOLD_RE.search(blob)
+    if is_sold and is_sold.group(1) == "true":
+        result.stock_status = "out_of_stock"
+    else:
+        is_live = _FB_IS_LIVE_RE.search(blob)
+        if is_live:
+            result.stock_status = "in_stock" if is_live.group(1) == "true" else "out_of_stock"
+        else:
+            is_pending = _FB_IS_PENDING_RE.search(blob)
+            if is_pending and is_pending.group(1) == "false":
+                result.stock_status = "in_stock"
+
+    if result.price or result.title:
+        logger.info(
+            "FB Marketplace hit: name=%s price=%s disc=%s stock=%s",
+            result.title, result.price, result.discounted_price, result.stock_status,
+        )
+    return _normalize_scrape_result(result)
+
+
 # ── Strategy 3b: Deterministic smart scan ────────────────────────────────────
 #
 # Rather than pick the top-scored text node (unstable when multiple candidates
@@ -2971,6 +3122,15 @@ async def scrape_with_open_page(
     Run the full strategy waterfall on an already-open Page. Used by probe()
     to avoid re-navigating.
     """
+    # Facebook Marketplace listings have no JSON-LD or stable selectors —
+    # pull straight from the inline GraphQL JSON before the generic waterfall.
+    if _is_facebook_marketplace_url(getattr(page, "url", "")):
+        fb_result = await _try_facebook_marketplace(page)
+        if fb_result.price or fb_result.title:
+            if not fb_result.stock_status:
+                fb_result.stock_status = "unknown"
+            return _normalize_scrape_result(fb_result)
+
     result = await _try_json_ld(page)
     if not result.price:
         result = await _try_microdata(page)
