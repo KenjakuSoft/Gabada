@@ -5,6 +5,15 @@ All notable changes to Gabada are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-04-26
+
+### Changed
+- Build script (`packaging/build_release.sh`) runs with `set -x` for trace output.
+- Release workflow tees Linux/macOS build output to `packaging/output/build.log` and uploads workflow artifacts even on failure, so build logs survive when PyInstaller errors.
+
+### Note
+- v0.2.0's macOS job failed at the PyInstaller step. v0.2.1 keeps the same intent but adds the diagnostics needed to surface the actual error in CI.
+
 ## [0.2.0] — 2026-04-26
 
 First multi-platform release. Windows installer + portable bundles for Linux and macOS.
@@ -84,6 +93,7 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
+[0.2.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.0
 [0.1.4]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.4
 [0.1.3]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.3

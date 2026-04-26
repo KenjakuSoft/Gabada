@@ -111,9 +111,12 @@ jobs:
           APP_VERSION: ${{ steps.version.outputs.version }}
         run: |
           chmod +x packaging/build_release.sh
+          mkdir -p packaging/output
+          # Capture full output so it can be retrieved as an artifact on failure.
+          set -o pipefail
           PYTHON="$VENV_PY" packaging/build_release.sh \
             --skip-frontend-build \
-            --app-version "$APP_VERSION"
+            --app-version "$APP_VERSION" 2>&1 | tee packaging/output/build.log
 
       - name: Stage Windows release assets
         if: matrix.platform == 'windows'
@@ -149,11 +152,12 @@ jobs:
         run: ls -la packaging/output
 
       - name: Upload workflow artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gabada-${{ matrix.platform }}-${{ matrix.arch }}
           path: packaging/output/*
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Attach assets to GitHub release
         if: ${{ env.RELEASE_TAG != '' }}
