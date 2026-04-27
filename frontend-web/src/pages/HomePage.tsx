@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   CircleCheck,
   Layers,
@@ -27,8 +27,30 @@ export function HomePage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const symbol = useCurrencySymbol()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [search, setSearch] = useState('')
-  const [categoryId, setCategoryId] = useState<number | null>(null)
+  const initialCategoryId = (() => {
+    const raw = searchParams.get('category')
+    const parsed = raw == null ? NaN : Number(raw)
+    return Number.isFinite(parsed) ? parsed : null
+  })()
+  const [categoryId, setCategoryId] = useState<number | null>(initialCategoryId)
+
+  // Keep URL `?category=<id>` in sync with the selected filter so links to
+  // /?category=<id> from the Categories page land on a pre-filtered Home,
+  // and clearing the filter cleans up the URL.
+  useEffect(() => {
+    const current = searchParams.get('category')
+    const next = categoryId == null ? null : String(categoryId)
+    if (current === next) return
+    const params = new URLSearchParams(searchParams)
+    if (next == null) {
+      params.delete('category')
+    } else {
+      params.set('category', next)
+    }
+    setSearchParams(params, { replace: true })
+  }, [categoryId, searchParams, setSearchParams])
 
   const products = useQuery<Product[]>({
     queryKey: ['products', { categoryId }],

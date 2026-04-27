@@ -586,6 +586,35 @@ def _review_result_with_smart_scan(
             and _price_ratio(result_regular, smart_regular) >= 1.25
         )
     )
+    extreme_divergence = (
+        _price_ratio(result_current, smart_current) >= 50
+        or (
+            smart_regular is not None
+            and _price_ratio(result_regular, smart_regular) >= 50
+        )
+    )
+    if (
+        structured_price_locked
+        and extreme_divergence
+        and not has_custom
+        and result_current is not None
+    ):
+        # JSON-LD / microdata reported a price and smart-scan disagrees by
+        # 50x+. That ratio is implausible as a real sale — far more likely
+        # the smart-scan latched onto a stray number (e.g. "Rs 4" embedded
+        # in the product description) and would corrupt the structured value.
+        _add_review_note(
+            reviewed,
+            f"Ignored smart-scan override (Rs {smart_current:.2f}) — "
+            f"too far from structured-data price (Rs {result_current:.2f}) "
+            "to be a real sale price. Use Selector Lab to map a custom "
+            "price selector if the structured price is wrong.",
+        )
+        # Surface the rejected candidate so the UI can offer a manual switch.
+        reviewed.review_alternative_price = smart_current
+        reviewed.review_alternative_raw = smart_current_raw or smart.raw_price
+        reviewed.review_alternative_label = "smart-scan candidate (rejected)"
+        return _normalize_scrape_result(reviewed)
     suspicious_current_raw = _raw_price_signal(current_raw) <= 1
     suspicious_regular_raw = reviewed.discounted_price is not None and _raw_price_signal(reviewed.raw_price) <= 1
     smart_supports_current = (
@@ -640,6 +669,7 @@ def _review_result_with_smart_scan(
 
     if should_adopt:
         previous_current = result_current
+        previous_current_raw = current_raw
         previous_regular = result_regular
         logger.info(
             "Price review replaced extracted pair with smart scan: reasons=%s extracted=(%s,%s) smart=(%s,%s)",
@@ -651,6 +681,12 @@ def _review_result_with_smart_scan(
         )
         _adopt_smart_prices(reviewed, smart)
         reviewed.review_status = "corrected"
+        # Surface the original extracted price so the UI can offer a manual
+        # switch if the user disagrees with the auto-correction.
+        if previous_current is not None:
+            reviewed.review_alternative_price = previous_current
+            reviewed.review_alternative_raw = previous_current_raw
+            reviewed.review_alternative_label = "original extracted price"
         _add_review_note(
             reviewed,
             "Review corrected a suspicious price selection using the main product price scan.",

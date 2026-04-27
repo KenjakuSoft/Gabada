@@ -218,6 +218,11 @@ class ScrapeResult(BaseModel):
     raw_dealer: Optional[str] = None
     review_status: str = "ok"
     review_notes: list[str] = Field(default_factory=list)
+    # When the price-review step keeps one price over a competing candidate,
+    # surface the rejected candidate so the UI can offer a manual choice.
+    review_alternative_price: Optional[float] = None
+    review_alternative_raw: Optional[str] = None
+    review_alternative_label: Optional[str] = None
     error: Optional[str] = None
 
 

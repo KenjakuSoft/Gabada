@@ -18,6 +18,10 @@ platform = "generic"
 wait_for = "#productPrice"
 selectors = { image = "button.owl-prev:nth-of-type(1) > img", price = "#productPrice", stock_status = "div.col-md-7.pt-lg-0", title = "h1.fw-600.text-24" }
 
+["redacted-store.lk"]
+platform = "woocommerce"
+wait_for = "p.price, .price .amount"
+
 # Facebook Marketplace listings — extracted from inline GraphQL JSON in
 # engine.py (_try_facebook_marketplace). The platform hint and wait_for
 # below help the page settle before extraction; selectors are not used.

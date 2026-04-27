@@ -1,23 +1,50 @@
 import type { HTMLAttributes } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
+import { cn, formatMoney } from '@/lib/utils'
 import type { ScrapeResult } from '@/api'
 
+export type PriceReviewChoice = 'kept' | 'alternative'
+
 interface ScrapeReviewNoticeProps extends HTMLAttributes<HTMLDivElement> {
-  result: Pick<ScrapeResult, 'review_status' | 'review_notes'>
+  result: Pick<
+    ScrapeResult,
+    | 'review_status'
+    | 'review_notes'
+    | 'review_alternative_price'
+    | 'review_alternative_raw'
+    | 'review_alternative_label'
+    | 'price'
+    | 'discounted_price'
+    | 'raw_price'
+  >
+  symbol?: string
+  choice?: PriceReviewChoice
+  onChoiceChange?: (choice: PriceReviewChoice) => void
 }
 
 export function ScrapeReviewNotice({
   result,
+  symbol = '',
+  choice = 'kept',
+  onChoiceChange,
   className,
   ...props
 }: ScrapeReviewNoticeProps) {
-  if (result.review_status === 'ok' && result.review_notes.length === 0) {
+  const hasAlternative = result.review_alternative_price != null
+  if (
+    result.review_status === 'ok'
+    && result.review_notes.length === 0
+    && !hasAlternative
+  ) {
     return null
   }
 
   const corrected = result.review_status === 'corrected'
+  const keptPrice = result.discounted_price ?? result.price ?? null
+  const altPrice = result.review_alternative_price
+  const altLabel = result.review_alternative_label ?? 'alternative price'
+
   return (
     <div
       className={cn(
@@ -49,8 +76,75 @@ export function ScrapeReviewNotice({
               ))}
             </ul>
           ) : null}
+          {hasAlternative && altPrice != null && onChoiceChange ? (
+            <div className="space-y-1.5 pt-1">
+              <div className="text-xs font-medium opacity-80">
+                Choose which price to use:
+              </div>
+              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                <ChoiceButton
+                  selected={choice === 'kept'}
+                  onClick={() => onChoiceChange('kept')}
+                  label={corrected ? 'Auto-corrected (in use)' : 'Kept (in use)'}
+                  price={keptPrice}
+                  raw={result.raw_price}
+                  symbol={symbol}
+                />
+                <ChoiceButton
+                  selected={choice === 'alternative'}
+                  onClick={() => onChoiceChange('alternative')}
+                  label={altLabel}
+                  price={altPrice}
+                  raw={result.review_alternative_raw}
+                  symbol={symbol}
+                />
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
+  )
+}
+
+function ChoiceButton({
+  selected,
+  onClick,
+  label,
+  price,
+  raw,
+  symbol,
+}: {
+  selected: boolean
+  onClick: () => void
+  label: string
+  price: number | null
+  raw: string | null | undefined
+  symbol: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex flex-col items-start gap-0.5 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors',
+        selected
+          ? 'border-current bg-background/60 ring-1 ring-current'
+          : 'border-current/20 bg-transparent hover:bg-background/30',
+      )}
+      aria-pressed={selected}
+    >
+      <span className="font-medium uppercase tracking-wide opacity-70">
+        {label}
+      </span>
+      <span className="font-semibold tabular-nums text-base">
+        {price != null ? formatMoney(price, symbol) : '—'}
+      </span>
+      {raw ? (
+        <span className="truncate font-mono text-[10px] opacity-60">
+          raw: {raw}
+        </span>
+      ) : null}
+    </button>
   )
 }

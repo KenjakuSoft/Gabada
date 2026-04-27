@@ -1,6 +1,8 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import {
+  ArrowRight,
   Layers,
   Palette,
   Pencil,
@@ -17,6 +19,7 @@ import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toast-store'
+import { cn } from '@/lib/utils'
 import { categoriesApi, productsApi } from '@/api'
 import type { Category, Product } from '@/api'
 
@@ -29,6 +32,7 @@ interface CategorySummary {
 
 export function CategoriesPage() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [color, setColor] = useState(DEFAULT_COLOR)
@@ -235,10 +239,31 @@ export function CategoriesPage() {
             const category = summary.category
             const isEditing = editingId === category.id
 
+            const canOpen = !isEditing && summary.productCount > 0
+            const open = () =>
+              navigate(`/?category=${category.id}`)
+
             return (
               <BentoTile key={category.id}>
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex min-w-0 items-start gap-3">
+                  <button
+                    type="button"
+                    onClick={canOpen ? open : undefined}
+                    disabled={!canOpen}
+                    className={cn(
+                      'flex min-w-0 flex-1 items-start gap-3 rounded-md text-left transition-colors',
+                      canOpen
+                        ? 'cursor-pointer hover:text-primary'
+                        : 'cursor-default',
+                    )}
+                    title={
+                      canOpen
+                        ? `Open ${summary.productCount} product${summary.productCount === 1 ? '' : 's'} in ${category.name}`
+                        : summary.productCount === 0
+                          ? 'No products in this category yet'
+                          : undefined
+                    }
+                  >
                     <span
                       className="mt-0.5 h-4 w-4 shrink-0 rounded-full border border-border"
                       style={{ backgroundColor: category.color }}
@@ -251,7 +276,7 @@ export function CategoriesPage() {
                         {summary.productCount} product{summary.productCount === 1 ? '' : 's'}
                       </div>
                     </div>
-                  </div>
+                  </button>
                   <div className="flex items-center gap-1">
                     <Button
                       variant="ghost"
@@ -283,7 +308,7 @@ export function CategoriesPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-1.5">
+                <div className="mt-4 flex flex-wrap items-center gap-1.5">
                   <Badge variant="outline" className="font-mono text-[11px]">
                     {category.color}
                   </Badge>
@@ -296,6 +321,17 @@ export function CategoriesPage() {
                       unused
                     </Badge>
                   )}
+                  {canOpen ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto h-7 px-2 text-xs"
+                      onClick={open}
+                    >
+                      View products
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : null}
                 </div>
 
                 {isEditing ? (
