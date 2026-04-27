@@ -5,6 +5,17 @@ All notable changes to Gabada are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] — 2026-04-28
+
+### Fixed
+- **Smart-scan no longer corrupts JSON-LD prices on extreme mismatches.** When a site published a structured price (e.g. JSON-LD `Rs 54,000`) and the smart-scan latched onto a stray fragment (e.g. `"Rs 4"` embedded in the product short-description), the review logic adopted the tiny value because its raw-text "signal" looked stronger than JSON-LD's plain `"54000"`. Added an extreme-divergence guardrail in `_review_result_with_smart_scan`: when a structured price is locked and the smart-scan candidate differs by 50× or more without a custom selector, the structured price is kept and a review note explains why. Bug surfaced on `nexxcom.lk` Elgato HD60 S+ listing (Rs 54,000 → Rs 4).
+
+### Added
+- **`nexxcom.lk` site profile** in `sites.toml` pinned to the `woocommerce` platform with a `p.price, .price .amount` wait-for. This activates the WooCommerce default selectors (`del .amount` / `ins .amount`) so regular and discounted prices are picked up directly via `del`/`ins` markup instead of relying on the generic smart-scan.
+- **Manual price choice when the review is uncertain.** `ScrapeResult` now carries `review_alternative_price` / `_raw` / `_label` whenever the review step picks one candidate over a competing one — both for the new extreme-divergence guardrail (alternative = rejected smart-scan candidate) and for the existing auto-correction path (alternative = original extracted price). The Probe page `ScrapeReviewNotice` renders both candidates as side-by-side buttons; clicking the alternative swaps the displayed price and raw value live. Lets the user override the auto-decision in either direction without leaving Probe.
+- **Categories drill-in.** Category tiles on the Categories page are now clickable and navigate to `/?category=<id>` — Home reads the URL param and pre-applies the filter so the user lands on the products inside that category. URL stays in sync with the active filter (sharable / back-button friendly). Empty categories show a disabled state instead of a dead-end click.
+- **Regression tests** at `backend/tests/test_review_extreme_divergence.py` covering all five branches (extreme divergence, moderate divergence sale, custom-selector bypass, no structured lock, alternative exposure).
+
 ## [0.2.4] — 2026-04-27
 
 ### Changed
@@ -129,6 +140,7 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
+[0.2.5]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.5
 [0.2.4]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.4
 [0.2.3]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.3
 [0.2.2]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.2

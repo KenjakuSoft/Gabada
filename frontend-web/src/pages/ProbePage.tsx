@@ -21,7 +21,10 @@ import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { StatTile } from '@/components/ui/stat-tile'
 import { toast } from '@/components/ui/toast-store'
-import { ScrapeReviewNotice } from '@/components/scraper/ScrapeReviewNotice'
+import {
+  ScrapeReviewNotice,
+  type PriceReviewChoice,
+} from '@/components/scraper/ScrapeReviewNotice'
 import { scraperApi } from '@/api'
 import { useCurrencySymbol } from '@/hooks/useSettings'
 import { formatMoney } from '@/lib/utils'
@@ -153,6 +156,13 @@ function ProbeResults({
 }) {
   const e = result.extracted
   const suggestedEntries = Object.entries(result.suggested_selectors ?? {})
+  const hasAlternative = e.review_alternative_price != null
+  const [priceChoice, setPriceChoice] = useState<PriceReviewChoice>('kept')
+  const useAlternative = hasAlternative && priceChoice === 'alternative'
+  const displayedPrice = useAlternative
+    ? e.review_alternative_price
+    : (e.discounted_price ?? e.price)
+  const displayedRaw = useAlternative ? e.review_alternative_raw : e.raw_price
 
   return (
     <div className="space-y-6">
@@ -182,9 +192,16 @@ function ProbeResults({
             </dd>
             <dt className="text-muted-foreground">Price</dt>
             <dd className="font-semibold tabular-nums">
-              {e.price != null ? formatMoney(e.price, symbol) : '—'}
+              {displayedPrice != null
+                ? formatMoney(displayedPrice, symbol)
+                : '—'}
+              {useAlternative ? (
+                <Badge variant="info" className="ml-2 text-[10px]">
+                  user choice
+                </Badge>
+              ) : null}
             </dd>
-            {e.discounted_price != null ? (
+            {!useAlternative && e.discounted_price != null ? (
               <>
                 <dt className="text-muted-foreground">Discounted</dt>
                 <dd className="font-semibold tabular-nums text-success">
@@ -204,10 +221,10 @@ function ProbeResults({
             <dd>
               <StockBadge status={e.stock_status} />
             </dd>
-            {e.raw_price ? (
+            {displayedRaw ? (
               <>
                 <dt className="text-muted-foreground">Raw price</dt>
-                <dd className="truncate font-mono text-xs">{e.raw_price}</dd>
+                <dd className="truncate font-mono text-xs">{displayedRaw}</dd>
               </>
             ) : null}
           </dl>
@@ -217,7 +234,13 @@ function ProbeResults({
               <span>{e.error}</span>
             </div>
           ) : null}
-          <ScrapeReviewNotice result={e} className="mt-4" />
+          <ScrapeReviewNotice
+            result={e}
+            symbol={symbol}
+            choice={priceChoice}
+            onChoiceChange={setPriceChoice}
+            className="mt-4"
+          />
         </BentoTile>
 
         <BentoTile colSpan={3}>
