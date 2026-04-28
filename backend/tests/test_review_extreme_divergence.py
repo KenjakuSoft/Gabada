@@ -108,9 +108,9 @@ def test_moderate_divergence_still_adopts_smart() -> None:
     assert reviewed.review_status == "corrected"
 
 
-def test_extreme_divergence_with_custom_selector_still_runs_review() -> None:
-    # If the user pinned a custom selector, they presumably know what
-    # they're doing — skip the guardrail and let the normal logic run.
+def test_extreme_divergence_with_non_price_custom_keeps_structured_price() -> None:
+    # Platform defaults or a title-only custom selector should not weaken the
+    # structured-price guardrail. Only an actual price lock is authoritative.
     result = ScrapeResult(price=54000.0, raw_price="54000")
     smart = ScrapeResult(price=4.0, raw_price="rs 4")
     smart_data = _smart_data(value=4.0, score=54)
@@ -121,11 +121,12 @@ def test_extreme_divergence_with_custom_selector_still_runs_review() -> None:
         smart_data,
         has_custom=True,
         structured_price_locked=True,
+        user_locks={"title"},
     )
 
-    # With custom selector, the guardrail does not short-circuit, so the
-    # original review behaviour applies.
-    assert reviewed.price in (54000.0, 4.0)
+    assert reviewed.price == 54000.0
+    assert reviewed.review_status != "corrected"
+    assert reviewed.review_alternative_price == 4.0
 
 
 def test_no_structured_price_lock_runs_normal_review() -> None:
@@ -236,7 +237,7 @@ if __name__ == "__main__":
         test_extreme_divergence_keeps_structured_price,
         test_corrected_price_exposes_original_as_alternative,
         test_moderate_divergence_still_adopts_smart,
-        test_extreme_divergence_with_custom_selector_still_runs_review,
+        test_extreme_divergence_with_non_price_custom_keeps_structured_price,
         test_no_structured_price_lock_runs_normal_review,
         test_user_locked_price_is_authoritative_over_smart_scan,
         test_user_driven_test_does_not_emit_corrected_for_added_dealer,

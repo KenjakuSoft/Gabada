@@ -5,6 +5,15 @@ All notable changes to Gabada are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-04-29
+
+### Fixed
+- **redacted-store Probe / Selector Lab price regression** — smart-scan no longer treats embedded text like `offers 4K` as a fake `rs 4` price. The same embedded-token guard now applies in Selector Lab so bogus fragments are not suggested as selectors.
+- **Structured prices are protected from extreme smart-scan mismatches even when platform defaults are active.** A WooCommerce default title/price profile should not let a 50x+ smart-scan mismatch overwrite JSON-LD or selector-backed prices unless the user actually pinned a price selector.
+
+### Changed
+- **App version** bumped to **0.3.1** (FastAPI `app.version`, Inno Setup `MyAppVersion`) for the scraper hotfix release.
+
 ## [0.3.0] — 2026-04-28
 
 ### Added

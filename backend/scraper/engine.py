@@ -603,7 +603,7 @@ def _review_result_with_smart_scan(
     if (
         structured_price_locked
         and extreme_divergence
-        and not has_custom
+        and not price_locked
         and result_current is not None
     ):
         # JSON-LD / microdata reported a price and smart-scan disagrees by
@@ -2045,7 +2045,10 @@ _SMART_SCAN_JS = r"""() => {
                 const nextPos = idx + fragment.length;
                 const nextChar = nextPos < normalizedText.length ? normalizedText[nextPos] : '';
                 const embeddedToken = /[A-Za-z0-9]/.test(prevChar) || /[A-Za-z0-9]/.test(nextChar);
+                const embeddedCurrencyPrefix = /[A-Za-z]/.test(prevChar) && /^[A-Za-z]/.test(fragment);
+                const embeddedNumericSuffix = /[A-Za-z]/.test(nextChar) && /\d$/.test(fragment);
 
+                if (embeddedCurrencyPrefix || embeddedNumericSuffix) continue;
                 if (textLooksSpec && !hasPriceSignal && !hasCurrency && context < 20) continue;
                 if (hasMeasureUnit && !hasPriceSignal && !hasCurrency && context < 20) continue;
                 if (!hasCurrency && !hasPriceSignal && embeddedToken) continue;
@@ -2596,6 +2599,14 @@ _SELECTOR_LAB_JS = r"""() => {
             if (!numeric) continue;
             const value = parseFloat(numeric.replace(/,/g, ''));
             if (!(value > 0) || value > 50000000) continue;
+
+            const idx = match.index || 0;
+            const prevChar = idx > 0 ? text[idx - 1] : '';
+            const nextPos = idx + fragment.length;
+            const nextChar = nextPos < text.length ? text[nextPos] : '';
+            const embeddedCurrencyPrefix = /[A-Za-z]/.test(prevChar) && /^[A-Za-z]/.test(fragment);
+            const embeddedNumericSuffix = /[A-Za-z]/.test(nextChar) && /\d$/.test(fragment);
+            if (embeddedCurrencyPrefix || embeddedNumericSuffix) continue;
 
             const hasCurrency = CURRENCY_SIGNAL.test(fragment) || CURRENCY_SIGNAL.test(text);
             const hasPriceHint = PRICE_HINT.test(text) || PRICE_HINT.test(meta);
