@@ -1,14 +1,17 @@
 import asyncio
 import sys
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Playwright requires ProactorEventLoop on Windows to spawn subprocesses
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
@@ -53,6 +56,37 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+API_PREFIX = "/api"
+
+_LOCAL_BROWSER_ORIGIN_PORTS = {5173, *range(8000, 8011)}
+
+
+def _build_allowed_browser_origins() -> list[str]:
+    origins: set[str] = set()
+    for host in ("localhost", "127.0.0.1", "[::1]"):
+        for port in _LOCAL_BROWSER_ORIGIN_PORTS:
+            origins.add(f"http://{host}:{port}")
+
+    extra = os.environ.get("GABADA_ALLOWED_ORIGINS", "")
+    for item in extra.split(","):
+        origin = item.strip().rstrip("/")
+        if origin:
+            origins.add(origin)
+    return sorted(origins)
+
+
+_ALLOWED_BROWSER_ORIGINS = _build_allowed_browser_origins()
+
+
+def _is_allowed_browser_origin(origin: str) -> bool:
+    if origin in _ALLOWED_BROWSER_ORIGINS:
+        return True
+    parsed = urlparse(origin)
+    return (
+        parsed.scheme == "http"
+        and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        and parsed.port in _LOCAL_BROWSER_ORIGIN_PORTS
+    )
 
 
 @asynccontextmanager
@@ -75,12 +109,31 @@ app = FastAPI(title="Gabada API", version="0.3.1", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_BROWSER_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-API_PREFIX = "/api"
+
+@app.middleware("http")
+async def block_cross_origin_api_requests(request: Request, call_next):
+    if request.url.path.startswith(API_PREFIX):
+        origin = request.headers.get("origin")
+        if origin and not _is_allowed_browser_origin(origin):
+            logger.warning("Blocked cross-origin API request from %s", origin)
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Cross-origin API requests are not allowed"},
+            )
+
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            logger.warning("Blocked cross-site API request without trusted origin")
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Cross-origin API requests are not allowed"},
+            )
+
+    return await call_next(request)
 
 app.include_router(categories.router, prefix=API_PREFIX)
 app.include_router(products.router, prefix=API_PREFIX)

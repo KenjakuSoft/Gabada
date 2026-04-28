@@ -65,10 +65,19 @@ export function HomePage() {
 
   const scrapeAll = useMutation({
     mutationFn: () => scraperApi.scrapeAll(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['products'] })
-      qc.invalidateQueries({ queryKey: ['activity'] })
-      toast.success('Scrape started', 'All stores queued in the background')
+    onSuccess: async (summary) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['products'] }),
+        qc.invalidateQueries({ queryKey: ['activity'] }),
+      ])
+      if (summary.failed > 0) {
+        toast.error(
+          'Scrape finished with issues',
+          `${summary.scraped} refreshed, ${summary.failed} failed`,
+        )
+      } else {
+        toast.success('Scrape complete', `${summary.scraped} stores refreshed`)
+      }
     },
     onError: () => toast.error('Scrape failed', 'Check the backend is reachable'),
   })

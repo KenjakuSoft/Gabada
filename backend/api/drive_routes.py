@@ -40,7 +40,7 @@ from database.models import (
     DriveSnapshotList,
     DriveStatus,
 )
-from scheduler.jobs import pause_scheduler, resume_scheduler
+from scheduler.jobs import pause_scheduler, reschedule, resume_scheduler
 from services import drive_sync
 from services.backup_bundle import (
     backup_sqlite_file,
@@ -322,6 +322,10 @@ async def restore_snapshot(snapshot_id: str) -> DriveRestoreResponse:
 
                 await init_db()
             finally:
+                try:
+                    await reschedule()
+                except Exception as exc:  # pragma: no cover
+                    logger.warning("Failed to reschedule after Drive restore: %s", exc)
                 try:
                     await resume_scheduler()
                 except Exception as exc:  # pragma: no cover

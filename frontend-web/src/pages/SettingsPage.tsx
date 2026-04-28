@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Check,
@@ -883,13 +883,6 @@ function DriveSyncCard() {
   const configured = !!status.data?.configured
   const signedIn = !!status.data?.signed_in
 
-  // Once status loads, hide the credential editor by default if creds exist.
-  useEffect(() => {
-    if (status.isSuccess) {
-      setShowCredentialEditor(!status.data?.configured)
-    }
-  }, [status.isSuccess, status.data?.configured])
-
   const saveCreds = useMutation({
     mutationFn: () =>
       driveApi.saveCredentials({
@@ -948,8 +941,25 @@ function DriveSyncCard() {
           qc.invalidateQueries({ queryKey: ['drive', 'snapshots'] })
         }
         return next
-      } catch {
-        return status.data ?? { configured, signed_in: false, account_email: null, auth_in_progress: false, last_push_at: null, last_push_name: null }
+      } catch (err: unknown) {
+        const detail =
+          (err as { response?: { data?: { detail?: string } } })?.response
+            ?.data?.detail ?? 'Google sign-in did not complete'
+        const next: DriveStatus = {
+          ...(status.data ?? {
+            configured,
+            signed_in: false,
+            account_email: null,
+            auth_in_progress: false,
+            last_push_at: null,
+            last_push_name: null,
+          }),
+          signed_in: false,
+          auth_in_progress: false,
+        }
+        qc.setQueryData(['drive', 'status'], next)
+        toast.error('Sign-in failed', detail)
+        return next
       }
     },
     enabled: !!status.data?.auth_in_progress,

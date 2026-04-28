@@ -12,8 +12,10 @@ import type {
   FileImportRow,
   FileImportCommitResponse,
   PriceLog,
+  ScrapeAllResponse,
   ProbeResponse,
   ScrapeResult,
+  ScrapeRunResponse,
   ScrapeSelectorMap,
   SelectorLabResponse,
   SelectorLabSaveResponse,
@@ -200,12 +202,20 @@ export const settingsApi = {
 }
 
 export const scraperApi = {
-  scrapeOne: async (productStoreId: number): Promise<{ status: string }> => {
-    const { data } = await http.post(`/scraper/scrape/${productStoreId}`)
+  scrapeOne: async (productStoreId: number): Promise<ScrapeRunResponse> => {
+    const { data } = await http.post<ScrapeRunResponse>(
+      `/scraper/scrape/${productStoreId}`,
+      undefined,
+      { timeout: 300_000 },
+    )
     return data
   },
-  scrapeAll: async (): Promise<{ status: string }> => {
-    const { data } = await http.post('/scraper/scrape-all')
+  scrapeAll: async (): Promise<ScrapeAllResponse> => {
+    const { data } = await http.post<ScrapeAllResponse>(
+      '/scraper/scrape-all',
+      undefined,
+      { timeout: 600_000 },
+    )
     return data
   },
   probe: async (body: {

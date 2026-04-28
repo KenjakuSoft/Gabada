@@ -199,6 +199,26 @@ export interface ScrapeResult {
   error: string | null
 }
 
+export interface ScrapeRunResponse {
+  status: 'scraped'
+  product_store_id: number
+  change_type: string | null
+  price_delta: number | null
+  result: ScrapeResult
+}
+
+export interface ScrapeAllResponse {
+  status: 'complete' | 'partial_failure'
+  total: number
+  scraped: number
+  skipped: number
+  failed: number
+  errors: Array<{
+    product_store_id: number | null
+    error: string
+  }>
+}
+
 export interface SelectorLabCandidate {
   selector: string
   dom_path: string | null
