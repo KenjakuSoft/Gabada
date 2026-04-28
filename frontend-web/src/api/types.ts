@@ -302,3 +302,38 @@ export interface FileImportCommitResponse {
   skipped: number
   dealer_unavailable_marked: number
 }
+
+export interface DriveStatus {
+  configured: boolean
+  signed_in: boolean
+  account_email: string | null
+  auth_in_progress: boolean
+  last_push_at: string | null
+  last_push_name: string | null
+}
+
+export interface DriveSnapshot {
+  id: string
+  name: string
+  size: number | null
+  created_time: string | null
+  modified_time: string | null
+}
+
+export interface DriveSnapshotList {
+  snapshots: DriveSnapshot[]
+}
+
+export interface DrivePushResponse {
+  snapshot: DriveSnapshot
+  pruned: number
+  counts: DatabaseCounts
+}
+
+export interface DriveRestoreResponse {
+  snapshot_id: string
+  snapshot_name: string
+  backup_path: string
+  site_profiles_restored: boolean
+  counts: DatabaseCounts
+}

@@ -146,6 +146,91 @@ def test_no_structured_price_lock_runs_normal_review() -> None:
     assert reviewed.price in (54000.0, 4.0)
 
 
+def test_user_locked_price_is_authoritative_over_smart_scan() -> None:
+    # User explicitly mapped the price selector in Selector Lab. Even if smart
+    # scan disagrees, the user's pick wins; smart scan is surfaced as an
+    # alternative for one-click switching, not as a silent override.
+    result = ScrapeResult(price=42000.0, raw_price="Rs 42,000.00")
+    smart = ScrapeResult(price=4200.0, raw_price="Rs 4,200")
+    smart_data = _smart_data(value=4200.0, score=80)
+
+    reviewed = _review_result_with_smart_scan(
+        result,
+        smart,
+        smart_data,
+        has_custom=True,
+        structured_price_locked=False,
+        user_locks={"price"},
+    )
+
+    assert reviewed.price == 42000.0, f"expected user-locked 42000.0, got {reviewed.price}"
+    assert reviewed.review_status != "corrected"
+    assert reviewed.review_alternative_price == 4200.0
+    assert reviewed.review_alternative_label == "smart-scan candidate"
+
+
+def test_user_driven_test_does_not_emit_corrected_for_added_dealer() -> None:
+    # Selector Lab test: user pinned price, did NOT pin dealer. Smart scan
+    # invents a dealer-looking number. The result must NOT be marked
+    # "corrected" — that banner ("Review corrected a suspicious scrape result")
+    # was misleading the user into thinking their pick was rejected.
+    result = ScrapeResult(price=15000.0, raw_price="Rs 15,000.00")
+    smart = ScrapeResult(
+        price=15000.0,
+        raw_price="Rs 15,000",
+        dealer_price=12345.0,
+        raw_dealer="Rs 12,345",
+    )
+    smart_data = _smart_data(value=15000.0, score=70)
+
+    reviewed = _review_result_with_smart_scan(
+        result,
+        smart,
+        smart_data,
+        has_custom=True,
+        structured_price_locked=False,
+        user_locks={"price"},
+    )
+
+    assert reviewed.price == 15000.0
+    assert reviewed.review_status != "corrected", (
+        f"User-driven Selector Lab test must not flip review_status to "
+        f"'corrected'; got {reviewed.review_status}"
+    )
+    # Smart-scan dealer should NOT be silently added when user is driving.
+    assert reviewed.dealer_price is None
+
+
+def test_user_locked_dealer_price_is_authoritative() -> None:
+    # User mapped a dealer-price selector. Smart scan's dealer guess must not
+    # silently overwrite it.
+    result = ScrapeResult(
+        price=42000.0,
+        raw_price="Rs 42,000",
+        dealer_price=38000.0,
+        raw_dealer="Rs 38,000",
+    )
+    smart = ScrapeResult(
+        price=42000.0,
+        raw_price="Rs 42,000",
+        dealer_price=12345.0,
+        raw_dealer="Rs 12,345",
+    )
+    smart_data = _smart_data(value=42000.0, score=80)
+
+    reviewed = _review_result_with_smart_scan(
+        result,
+        smart,
+        smart_data,
+        has_custom=True,
+        structured_price_locked=False,
+        user_locks={"price", "dealer_price"},
+    )
+
+    assert reviewed.dealer_price == 38000.0
+    assert reviewed.raw_dealer == "Rs 38,000"
+
+
 if __name__ == "__main__":
     tests = [
         test_extreme_divergence_keeps_structured_price,
@@ -153,6 +238,9 @@ if __name__ == "__main__":
         test_moderate_divergence_still_adopts_smart,
         test_extreme_divergence_with_custom_selector_still_runs_review,
         test_no_structured_price_lock_runs_normal_review,
+        test_user_locked_price_is_authoritative_over_smart_scan,
+        test_user_driven_test_does_not_emit_corrected_for_added_dealer,
+        test_user_locked_dealer_price_is_authoritative,
     ]
     for t in tests:
         t()

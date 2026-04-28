@@ -1,18 +1,25 @@
-import { useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Check,
   Clock,
+  Cloud,
+  CloudOff,
   Database,
   Download,
   FileCode,
   Globe2,
+  HardDriveDownload,
+  HardDriveUpload,
   Loader2,
+  LogIn,
+  LogOut,
   Power,
   Radio,
   RefreshCw,
   ShieldCheck,
   Timer,
+  Trash2,
   Upload,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -24,8 +31,15 @@ import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { toast } from '@/components/ui/toast-store'
 import { useLiveTime } from '@/hooks/useLiveTime'
-import { scraperApi, settingsApi } from '@/api'
-import type { DatabaseTransferInfo, Settings, SitesConfigResponse } from '@/api'
+import { driveApi, scraperApi, settingsApi } from '@/api'
+import type {
+  DatabaseTransferInfo,
+  DriveSnapshot,
+  DriveSnapshotList,
+  DriveStatus,
+  Settings,
+  SitesConfigResponse,
+} from '@/api'
 
 // Full ISO 4217 set of actively-circulating national currencies plus a few
 // widely-used dependent-territory currencies. Sorted alphabetically by code
@@ -541,6 +555,7 @@ export function SettingsPage() {
       </BentoGrid>
 
       <DataPortabilityCard />
+      <DriveSyncCard />
       <SiteProfilesCard />
     </div>
   )
@@ -846,5 +861,451 @@ function TransferStat({ label, value }: { label: string; value: string }) {
       </div>
       <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
     </div>
+  )
+}
+
+function DriveSyncCard() {
+  const qc = useQueryClient()
+  const status = useQuery<DriveStatus>({
+    queryKey: ['drive', 'status'],
+    queryFn: () => driveApi.status(),
+  })
+  const snapshots = useQuery<DriveSnapshotList>({
+    queryKey: ['drive', 'snapshots'],
+    queryFn: () => driveApi.listSnapshots(),
+    enabled: !!status.data?.signed_in,
+  })
+
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
+  const [showCredentialEditor, setShowCredentialEditor] = useState(false)
+
+  const configured = !!status.data?.configured
+  const signedIn = !!status.data?.signed_in
+
+  // Once status loads, hide the credential editor by default if creds exist.
+  useEffect(() => {
+    if (status.isSuccess) {
+      setShowCredentialEditor(!status.data?.configured)
+    }
+  }, [status.isSuccess, status.data?.configured])
+
+  const saveCreds = useMutation({
+    mutationFn: () =>
+      driveApi.saveCredentials({
+        client_id: clientId.trim(),
+        client_secret: clientSecret.trim(),
+      }),
+    onSuccess: (next) => {
+      qc.setQueryData(['drive', 'status'], next)
+      setClientSecret('')
+      setShowCredentialEditor(false)
+      toast.success('Drive credentials saved')
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'Could not save credentials'
+      toast.error('Save failed', detail)
+    },
+  })
+
+  const clearCreds = useMutation({
+    mutationFn: () => driveApi.clearCredentials(),
+    onSuccess: (next) => {
+      qc.setQueryData(['drive', 'status'], next)
+      qc.removeQueries({ queryKey: ['drive', 'snapshots'] })
+      toast.success('Drive credentials cleared')
+    },
+  })
+
+  const startAuth = useMutation({
+    mutationFn: () => driveApi.authStart(),
+    onSuccess: ({ auth_url }) => {
+      window.open(auth_url, '_blank', 'noopener,noreferrer')
+      qc.invalidateQueries({ queryKey: ['drive', 'status'] })
+      toast.success(
+        'Sign-in started',
+        'Complete the consent screen in the new tab — Gabada is polling for the result.',
+      )
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'Could not start Google sign-in'
+      toast.error('Sign-in failed', detail)
+    },
+  })
+
+  // Poll while sign-in is in progress.
+  useQuery<DriveStatus>({
+    queryKey: ['drive', 'auth-poll'],
+    queryFn: async () => {
+      try {
+        const next = await driveApi.authPoll()
+        qc.setQueryData(['drive', 'status'], next)
+        if (next.signed_in) {
+          qc.invalidateQueries({ queryKey: ['drive', 'snapshots'] })
+        }
+        return next
+      } catch {
+        return status.data ?? { configured, signed_in: false, account_email: null, auth_in_progress: false, last_push_at: null, last_push_name: null }
+      }
+    },
+    enabled: !!status.data?.auth_in_progress,
+    refetchInterval: 2_000,
+  })
+
+  const cancelAuth = useMutation({
+    mutationFn: () => driveApi.authCancel(),
+    onSuccess: (next) => {
+      qc.setQueryData(['drive', 'status'], next)
+    },
+  })
+
+  const signOut = useMutation({
+    mutationFn: () => driveApi.signOut(),
+    onSuccess: (next) => {
+      qc.setQueryData(['drive', 'status'], next)
+      qc.removeQueries({ queryKey: ['drive', 'snapshots'] })
+      toast.success('Signed out of Drive')
+    },
+  })
+
+  const push = useMutation({
+    mutationFn: () => driveApi.push(),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['drive', 'status'] })
+      qc.invalidateQueries({ queryKey: ['drive', 'snapshots'] })
+      toast.success(
+        'Snapshot uploaded',
+        `${result.snapshot.name} — ${result.counts.products} products, ${result.counts.stores} stores.`,
+      )
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'Could not upload snapshot'
+      toast.error('Upload failed', detail)
+    },
+  })
+
+  const restore = useMutation({
+    mutationFn: (snapshotId: string) => driveApi.restore(snapshotId),
+    onSuccess: (result) => {
+      qc.invalidateQueries()
+      toast.success(
+        'Snapshot restored',
+        `Restored ${result.snapshot_name}. Safety backup at ${result.backup_path}. Reloading.`,
+      )
+      window.setTimeout(() => window.location.reload(), 1_000)
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'Could not restore snapshot'
+      toast.error('Restore failed', detail)
+    },
+  })
+
+  const removeSnapshot = useMutation({
+    mutationFn: (snapshotId: string) => driveApi.delete(snapshotId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['drive', 'snapshots'] })
+      toast.success('Snapshot deleted')
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'Could not delete snapshot'
+      toast.error('Delete failed', detail)
+    },
+  })
+
+  function confirmRestore(snapshot: DriveSnapshot) {
+    const ok = window.confirm(
+      `Restore "${snapshot.name}"? This replaces your current local Gabada data with this snapshot. A safety backup of the current data will be saved first.`,
+    )
+    if (ok) restore.mutate(snapshot.id)
+  }
+
+  function confirmDelete(snapshot: DriveSnapshot) {
+    const ok = window.confirm(
+      `Delete "${snapshot.name}" from Google Drive? This cannot be undone.`,
+    )
+    if (ok) removeSnapshot.mutate(snapshot.id)
+  }
+
+  const headerIcon = signedIn ? (
+    <Cloud className="h-4 w-4" />
+  ) : (
+    <CloudOff className="h-4 w-4" />
+  )
+  const lastPushLabel = status.data?.last_push_at
+    ? new Date(status.data.last_push_at).toLocaleString()
+    : 'never'
+
+  return (
+    <BentoGrid cols={6}>
+      <BentoTile colSpan={6} tone={signedIn ? 'primary' : 'default'}>
+        <TileHeader
+          eyebrow="Multi-device sync"
+          title={signedIn ? `Signed in as ${status.data?.account_email ?? 'Google account'}` : 'Google Drive sync'}
+          icon={headerIcon}
+          action={
+            signedIn ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => push.mutate()}
+                  disabled={push.isPending || restore.isPending}
+                >
+                  {push.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <HardDriveUpload className="h-4 w-4" />
+                  )}
+                  Push snapshot
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => snapshots.refetch()}
+                  disabled={snapshots.isFetching}
+                >
+                  {snapshots.isFetching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  Refresh
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => signOut.mutate()}
+                  disabled={signOut.isPending}
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sign out
+                </Button>
+              </div>
+            ) : null
+          }
+        />
+
+        <div className="mt-3 space-y-4">
+          <div className="rounded-2xl border border-border/70 bg-background/60 p-4 text-sm text-muted-foreground">
+            Push timestamped backup snapshots to a <span className="font-medium text-foreground">Gabada</span> folder
+            in your Google Drive, then sign in on another machine with the same Google account to restore them.
+            This is a manual workflow — Gabada does not sync continuously, so coordinate pushes/restores between
+            users to avoid overwriting each other.
+          </div>
+
+          {showCredentialEditor || !configured ? (
+            <div className="rounded-2xl border border-border/70 bg-background/60 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <ShieldCheck className="h-4 w-4 text-primary" />
+                Google OAuth credentials
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Create a <span className="font-medium text-foreground">Desktop</span> OAuth client in the
+                {' '}
+                <a
+                  href="https://console.cloud.google.com/apis/credentials"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-2"
+                >
+                  Google Cloud Console
+                </a>
+                , enable the Drive API, then paste the client ID and secret here. Credentials stay on this machine.
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="drive-client-id">Client ID</Label>
+                  <Input
+                    id="drive-client-id"
+                    value={clientId}
+                    onChange={(e) => setClientId(e.target.value)}
+                    placeholder="123456789-xxxxx.apps.googleusercontent.com"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="drive-client-secret">Client secret</Label>
+                  <Input
+                    id="drive-client-secret"
+                    type="password"
+                    value={clientSecret}
+                    onChange={(e) => setClientSecret(e.target.value)}
+                    placeholder={configured ? '•••••••• (replace existing)' : 'GOCSPX-...'}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => saveCreds.mutate()}
+                  disabled={
+                    saveCreds.isPending ||
+                    clientId.trim() === '' ||
+                    clientSecret.trim() === ''
+                  }
+                >
+                  {saveCreds.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4" />
+                  )}
+                  Save credentials
+                </Button>
+                {configured ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowCredentialEditor(false)}
+                  >
+                    Cancel
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-border/70 bg-background/60 p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-muted-foreground">
+                <span className="font-semibold text-foreground">OAuth credentials saved.</span>{' '}
+                Last push: <span className="font-medium text-foreground">{lastPushLabel}</span>
+                {status.data?.last_push_name ? (
+                  <span className="ml-1 text-muted-foreground/80">({status.data.last_push_name})</span>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setClientId('')
+                    setClientSecret('')
+                    setShowCredentialEditor(true)
+                  }}
+                >
+                  Replace credentials
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => clearCreds.mutate()}
+                  disabled={clearCreds.isPending}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Clear
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {!signedIn ? (
+            <div className="rounded-2xl border border-border/70 bg-background/60 p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-muted-foreground">
+                {status.data?.auth_in_progress
+                  ? 'Waiting for Google consent — finish in the browser tab.'
+                  : configured
+                    ? 'Sign in to your Google account to push and restore snapshots.'
+                    : 'Save credentials above to enable Google sign-in.'}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {status.data?.auth_in_progress ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => cancelAuth.mutate()}
+                    disabled={cancelAuth.isPending}
+                  >
+                    Cancel sign-in
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() => startAuth.mutate()}
+                    disabled={!configured || startAuth.isPending}
+                  >
+                    {startAuth.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <LogIn className="h-4 w-4" />
+                    )}
+                    Sign in with Google
+                  </Button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <HardDriveDownload className="h-4 w-4 text-primary" />
+                Snapshots in Drive
+              </div>
+              {snapshots.isLoading ? (
+                <div className="mt-3 text-sm text-muted-foreground">Loading…</div>
+              ) : snapshots.isError ? (
+                <div className="mt-3 text-sm text-destructive">
+                  Could not list snapshots — try Refresh, or sign out and back in.
+                </div>
+              ) : !snapshots.data || snapshots.data.snapshots.length === 0 ? (
+                <div className="mt-3 text-sm text-muted-foreground">
+                  No snapshots yet. Click Push snapshot to upload your current database.
+                </div>
+              ) : (
+                <ul className="mt-3 divide-y divide-border/60">
+                  {snapshots.data.snapshots.map((snap) => {
+                    const created = snap.created_time
+                      ? new Date(snap.created_time).toLocaleString()
+                      : '—'
+                    const sizeKb = snap.size != null ? Math.round(snap.size / 1024) : null
+                    return (
+                      <li
+                        key={snap.id}
+                        className="flex flex-wrap items-center justify-between gap-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-foreground truncate">
+                            {snap.name}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {created}
+                            {sizeKb != null ? ` · ${sizeKb.toLocaleString()} KB` : ''}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => confirmRestore(snap)}
+                            disabled={restore.isPending}
+                          >
+                            <HardDriveDownload className="h-4 w-4" />
+                            Restore
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => confirmDelete(snap)}
+                            disabled={removeSnapshot.isPending}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      </BentoTile>
+    </BentoGrid>
   )
 }
