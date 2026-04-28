@@ -485,3 +485,50 @@ class DatabaseImportResponse(BaseModel):
     backup_path: str
     site_profiles_restored: bool = False
     counts: DatabaseCounts = DatabaseCounts()
+
+
+# ── Drive sync ────────────────────────────────────────────────────────────────
+
+
+class DriveCredentialsRequest(BaseModel):
+    client_id: str
+    client_secret: str
+
+
+class DriveAuthStartResponse(BaseModel):
+    auth_url: str
+
+
+class DriveStatus(BaseModel):
+    configured: bool = False  # client_id + secret saved
+    signed_in: bool = False
+    account_email: Optional[str] = None
+    auth_in_progress: bool = False
+    last_push_at: Optional[datetime] = None
+    last_push_name: Optional[str] = None
+
+
+class DriveSnapshot(BaseModel):
+    id: str
+    name: str
+    size: Optional[int] = None
+    created_time: Optional[datetime] = None
+    modified_time: Optional[datetime] = None
+
+
+class DriveSnapshotList(BaseModel):
+    snapshots: list[DriveSnapshot] = []
+
+
+class DrivePushResponse(BaseModel):
+    snapshot: DriveSnapshot
+    pruned: int = 0
+    counts: DatabaseCounts = DatabaseCounts()
+
+
+class DriveRestoreResponse(BaseModel):
+    snapshot_id: str
+    snapshot_name: str
+    backup_path: str
+    site_profiles_restored: bool = False
+    counts: DatabaseCounts = DatabaseCounts()

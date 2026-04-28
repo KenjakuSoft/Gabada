@@ -5,6 +5,27 @@ All notable changes to Gabada are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-04-28
+
+### Added
+- **Manual Google Drive sync for multi-device editing.** New Settings → Drive Sync section pushes a complete backup bundle (SQLite DB + `sites.toml` + metadata) as a timestamped snapshot to a `Gabada` folder in your Google Drive, and lets you restore any snapshot from another machine signed into the same Google account. Workflow is intentionally **manual** (push when done editing, restore on the next machine before editing) to avoid SQLite/cloud-sync corruption — no live two-way sync, no conflict resolution. Snapshots are pruned to the last 30 automatically.
+- **Google Drive sync internals.** `backend/services/drive_sync.py` runs the OAuth 2.0 Installed App flow with a loopback redirect on a random local port (no port collision with the uvicorn server), persists tokens at `data_dir()/drive-tokens.json` (chmod 0600), refreshes the access token automatically, and uses the `drive.file` scope so Gabada can only see files it created. New endpoints under `/api/drive`: `status`, `credentials` (CRUD), `auth/start`, `auth/poll`, `auth/cancel`, `auth/signout`, `snapshots`, `snapshots/push`, `snapshots/restore/{id}`, `snapshots/{id}` (DELETE). The push/restore flow shares the `_TRANSFER_LOCK` with manual import/export so they cannot interleave.
+- **Shared backup-bundle module** at `backend/services/backup_bundle.py` consolidating `validate_backup_database`, `backup_sqlite_file`, `create_backup_bundle`, `extract_backup_bundle`, `restore_live_database`, `restore_site_profiles`, and `timestamp_slug`. Used by both `/api/settings` (manual export/import) and `/api/drive` (snapshot push/restore) so the same validation and zip layout governs both paths.
+
+### Fixed
+- **Selector Lab now respects user-pinned selectors.** Previously, a price selector pinned via Selector Lab was overwritten by the smart-scan review pass — the user's selection appeared to be ignored, and the preview popped a misleading "Review corrected a suspicious scrape result" banner. `_apply_custom` now returns a per-field `user_locks` set; `_review_result_with_smart_scan` honours those locks (skips price/dealer overrides, surfaces smart-scan as `review_alternative_price` for one-click switching instead of silently replacing). Verified end-to-end against `barclays.lk` and `sense.lk` with `review_status='ok'` across pure-smart, user-pinned, alt-pinned, and bogus-selector scenarios.
+- **Dealer-price auto-fill no longer flips `review_status` to `corrected`.** Filling in a missing dealer field with a smart-scan guess was triggering the amber review banner as if something was actually wrong. The "corrected" status now only fires when an *existing* dealer price was replaced. When the user is driving Selector Lab (any lock set) the dealer auto-fill is skipped entirely.
+- **Smart-scan focuses on the product card / buy box.** When no static `PRODUCT_ROOT_SELECTORS` match, the in-page scan now walks up from the strongest H1/title to an ancestor that contains both the heading and an add-to-cart control, then scans only inside that buy box. Stops smart-scan from picking up "related products" prices, footer pricing, and other off-card noise. Falls back to `document.body` if the focused scope yields fewer than 2 candidates so unusual templates still scrape.
+
+### Changed
+- **`api/settings.py`** trimmed: backup helpers moved to the shared module; settings.py now imports them as private aliases. Behaviour is unchanged.
+- **App version** bumped to **0.3.0** (FastAPI `app.version`, Inno Setup `MyAppVersion`) to reflect the substantial new feature surface.
+- **Regression coverage** in `backend/tests/test_review_extreme_divergence.py` extended to 8 cases (5 prior + user-locked price authority, user-driven dealer non-emission, user-locked dealer authority).
+
+### Notes
+- Drive sync requires the user to create their own **Desktop** OAuth client in the Google Cloud Console and paste the client ID/secret into Settings. Credentials stay on the local machine; tokens are stored alongside Gabada data, never inside the SQLite database.
+- This is *not* real-time sync. Two devices editing simultaneously will overwrite each other on the next push. Use restore-before-edit, push-after-edit on each machine.
+
 ## [0.2.5] — 2026-04-28
 
 ### Fixed

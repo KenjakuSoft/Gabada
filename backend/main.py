@@ -19,7 +19,7 @@ from scraper.engine import start_browser, stop_browser
 from scheduler.jobs import start_scheduler, stop_scheduler
 from api import (
     products, stores, logs, scraper_routes, categories, activity,
-    import_routes, settings,
+    import_routes, settings, drive_routes,
 )
 
 
@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
     logger.info("Lifespan shutdown: complete")
 
 
-app = FastAPI(title="Gabada API", version="0.2.1", lifespan=lifespan)
+app = FastAPI(title="Gabada API", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,6 +90,7 @@ app.include_router(scraper_routes.router, prefix=API_PREFIX)
 app.include_router(activity.router, prefix=API_PREFIX)
 app.include_router(import_routes.router, prefix=API_PREFIX)
 app.include_router(settings.router, prefix=API_PREFIX)
+app.include_router(drive_routes.router, prefix=API_PREFIX)
 
 
 @app.get("/health")

@@ -1,10 +1,7 @@
 import asyncio
 import inspect
-import json
 import logging
 import shutil
-import sqlite3
-import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,15 +20,21 @@ from database.models import (
     SettingsUpdate,
 )
 from scheduler.jobs import next_run_time, pause_scheduler, reschedule, resume_scheduler
+from services.backup_bundle import (
+    backup_sqlite_file as _backup_sqlite_file,
+    create_backup_bundle as _create_backup_bundle,
+    extract_backup_bundle as _extract_backup_bundle,
+    restore_live_database as _restore_live_database,
+    restore_site_profiles as _restore_site_profiles,
+    timestamp_slug as _timestamp_slug,
+    validate_backup_database as _validate_backup_database,
+    BACKUP_DB_NAME as _BACKUP_DB_NAME,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings", tags=["settings"])
 _TRANSFER_LOCK = asyncio.Lock()
-_BACKUP_DB_NAME = "gabada.db"
-_BACKUP_SITE_PROFILES_NAME = "sites.toml"
-_BACKUP_METADATA_NAME = "metadata.json"
 _ALLOWED_IMPORT_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".zip"}
-_REQUIRED_BACKUP_TABLES = {"products", "stores", "product_stores", "price_logs", "settings"}
 
 
 async def _ensure_row(db) -> None:
@@ -57,117 +60,6 @@ def _backups_dir() -> Path:
     path = data_dir() / "backups"
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def _timestamp_slug() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-
-
-def _read_database_counts(conn: sqlite3.Connection) -> DatabaseCounts:
-    counts: dict[str, int] = {}
-    for table in ("products", "stores", "categories", "product_stores", "price_logs"):
-        try:
-            row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
-            counts[table] = int(row[0] if row else 0)
-        except sqlite3.Error:
-            counts[table] = 0
-    return DatabaseCounts(**counts)
-
-
-def _validate_backup_database(path: Path) -> DatabaseCounts:
-    try:
-        conn = sqlite3.connect(str(path))
-    except sqlite3.Error as exc:
-        raise ValueError(f"Could not open SQLite backup: {exc}") from exc
-
-    try:
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
-        missing = sorted(_REQUIRED_BACKUP_TABLES - tables)
-        if missing:
-            raise ValueError(
-                "Backup is missing required tables: " + ", ".join(missing)
-            )
-        return _read_database_counts(conn)
-    except sqlite3.Error as exc:
-        raise ValueError(f"Backup is not a valid SQLite database: {exc}") from exc
-    finally:
-        conn.close()
-
-
-def _backup_sqlite_file(source: Path, target: Path) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        target.unlink()
-    with sqlite3.connect(str(source)) as src, sqlite3.connect(str(target)) as dst:
-        src.backup(dst)
-        dst.commit()
-
-
-def _create_backup_bundle(snapshot_path: Path, bundle_path: Path, *, counts: DatabaseCounts) -> None:
-    metadata = {
-        "format": "gabada-backup",
-        "version": 1,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "install_mode": "desktop" if is_frozen() else "source",
-        "counts": counts.model_dump(),
-        "includes_site_profiles": site_profiles_path().exists(),
-    }
-    bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.write(snapshot_path, arcname=_BACKUP_DB_NAME)
-        profiles_path = site_profiles_path()
-        if profiles_path.exists():
-            archive.write(profiles_path, arcname=_BACKUP_SITE_PROFILES_NAME)
-        archive.writestr(_BACKUP_METADATA_NAME, json.dumps(metadata, indent=2))
-
-
-def _extract_backup_bundle(bundle_path: Path, stage_dir: Path) -> tuple[Path, Path | None]:
-    extracted_db = stage_dir / _BACKUP_DB_NAME
-    extracted_profiles: Path | None = None
-    with zipfile.ZipFile(bundle_path, "r") as archive:
-        members = archive.namelist()
-        db_member = next(
-            (
-                name
-                for name in members
-                if Path(name).suffix.lower() in {".db", ".sqlite", ".sqlite3"}
-            ),
-            None,
-        )
-        if db_member is None:
-            raise ValueError("Backup archive does not contain a SQLite database")
-        extracted_db.write_bytes(archive.read(db_member))
-
-        profiles_member = next(
-            (name for name in members if Path(name).name == _BACKUP_SITE_PROFILES_NAME),
-            None,
-        )
-        if profiles_member is not None:
-            extracted_profiles = stage_dir / _BACKUP_SITE_PROFILES_NAME
-            extracted_profiles.write_bytes(archive.read(profiles_member))
-
-    return extracted_db, extracted_profiles
-
-
-def _restore_live_database(source_path: Path) -> None:
-    live_path = database_path()
-    live_path.parent.mkdir(parents=True, exist_ok=True)
-    if not live_path.exists():
-        sqlite3.connect(str(live_path)).close()
-    with sqlite3.connect(str(source_path)) as src, sqlite3.connect(str(live_path)) as dst:
-        src.backup(dst)
-        dst.commit()
-
-
-def _restore_site_profiles(source_path: Path) -> None:
-    target = site_profiles_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source_path, target)
 
 
 def _cleanup_directory(path: str) -> None:

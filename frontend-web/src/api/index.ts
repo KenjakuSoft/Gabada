@@ -4,6 +4,10 @@ import type {
   Category,
   DatabaseImportResponse,
   DatabaseTransferInfo,
+  DrivePushResponse,
+  DriveRestoreResponse,
+  DriveSnapshotList,
+  DriveStatus,
   FileImportPreviewResponse,
   FileImportRow,
   FileImportCommitResponse,
@@ -339,6 +343,66 @@ export const importApi = {
     const { data } = await http.post<FileImportCommitResponse>(
       '/import/file/commit',
       body,
+    )
+    return data
+  },
+}
+
+export const driveApi = {
+  status: async (): Promise<DriveStatus> => {
+    const { data } = await http.get<DriveStatus>('/drive/status')
+    return data
+  },
+  saveCredentials: async (body: {
+    client_id: string
+    client_secret: string
+  }): Promise<DriveStatus> => {
+    const { data } = await http.post<DriveStatus>('/drive/credentials', body)
+    return data
+  },
+  clearCredentials: async (): Promise<DriveStatus> => {
+    const { data } = await http.delete<DriveStatus>('/drive/credentials')
+    return data
+  },
+  authStart: async (): Promise<{ auth_url: string }> => {
+    const { data } = await http.post<{ auth_url: string }>('/drive/auth/start')
+    return data
+  },
+  authPoll: async (): Promise<DriveStatus> => {
+    const { data } = await http.get<DriveStatus>('/drive/auth/poll')
+    return data
+  },
+  authCancel: async (): Promise<DriveStatus> => {
+    const { data } = await http.post<DriveStatus>('/drive/auth/cancel')
+    return data
+  },
+  signOut: async (): Promise<DriveStatus> => {
+    const { data } = await http.post<DriveStatus>('/drive/auth/signout')
+    return data
+  },
+  listSnapshots: async (): Promise<DriveSnapshotList> => {
+    const { data } = await http.get<DriveSnapshotList>('/drive/snapshots')
+    return data
+  },
+  push: async (): Promise<DrivePushResponse> => {
+    const { data } = await http.post<DrivePushResponse>(
+      '/drive/snapshots/push',
+      undefined,
+      { timeout: 600_000 },
+    )
+    return data
+  },
+  restore: async (snapshotId: string): Promise<DriveRestoreResponse> => {
+    const { data } = await http.post<DriveRestoreResponse>(
+      `/drive/snapshots/restore/${encodeURIComponent(snapshotId)}`,
+      undefined,
+      { timeout: 600_000 },
+    )
+    return data
+  },
+  delete: async (snapshotId: string): Promise<{ status: string; id: string }> => {
+    const { data } = await http.delete<{ status: string; id: string }>(
+      `/drive/snapshots/${encodeURIComponent(snapshotId)}`,
     )
     return data
   },

@@ -553,7 +553,14 @@ def _review_result_with_smart_scan(
     *,
     has_custom: bool,
     structured_price_locked: bool,
+    user_locks: Optional[set[str]] = None,
 ) -> ScrapeResult:
+    locks = set(user_locks or set())
+    # If the user locked any price field via Selector Lab, their pick is
+    # authoritative and the smart-scan review must not overwrite it.
+    price_locked = bool(locks & {"price", "discounted_price"})
+    dealer_locked = "dealer_price" in locks
+
     if smart.price is None:
         return _normalize_scrape_result(result)
 
@@ -615,6 +622,20 @@ def _review_result_with_smart_scan(
         reviewed.review_alternative_raw = smart_current_raw or smart.raw_price
         reviewed.review_alternative_label = "smart-scan candidate (rejected)"
         return _normalize_scrape_result(reviewed)
+
+    if price_locked and current_mismatch and result_current is not None:
+        # User pinned the selector. Don't touch their price; just surface the
+        # smart-scan candidate so the UI can offer a one-click switch.
+        if reviewed.review_alternative_price is None:
+            reviewed.review_alternative_price = smart_current
+            reviewed.review_alternative_raw = smart_current_raw or smart.raw_price
+            reviewed.review_alternative_label = "smart-scan candidate"
+            _add_review_note(
+                reviewed,
+                f"Smart scan suggests {smart_current:.2f}; kept your Selector "
+                f"Lab pick of {result_current:.2f}.",
+            )
+
     suspicious_current_raw = _raw_price_signal(current_raw) <= 1
     suspicious_regular_raw = reviewed.discounted_price is not None and _raw_price_signal(reviewed.raw_price) <= 1
     smart_supports_current = (
@@ -636,7 +657,11 @@ def _review_result_with_smart_scan(
     should_adopt = False
     reasons: list[str] = []
 
-    if result_current is None:
+    if price_locked:
+        # User pinned the price selector in Selector Lab. Treat their value
+        # as ground truth — only surface smart-scan as an alternative.
+        pass
+    elif result_current is None:
         should_adopt = True
         reasons.append("missing current price")
     elif current_mismatch and (
@@ -648,24 +673,25 @@ def _review_result_with_smart_scan(
         should_adopt = True
         reasons.append("current price disagrees with smart scan")
 
-    if smart_regular is not None:
-        if result_regular is None and (has_custom or not structured_price_locked):
-            should_adopt = True
-            reasons.append("missing regular price")
-        elif regular_mismatch and (
-            has_custom
-            or not structured_price_locked
+    if not price_locked:
+        if smart_regular is not None:
+            if result_regular is None and (has_custom or not structured_price_locked):
+                should_adopt = True
+                reasons.append("missing regular price")
+            elif regular_mismatch and (
+                has_custom
+                or not structured_price_locked
+                or suspicious_regular_raw
+                or major_divergence
+            ) and smart_supports_regular:
+                should_adopt = True
+                reasons.append("regular price disagrees with smart scan")
+        elif reviewed.discounted_price is not None and (
+            suspicious_current_raw
             or suspicious_regular_raw
-            or major_divergence
-        ) and smart_supports_regular:
+        ):
             should_adopt = True
-            reasons.append("regular price disagrees with smart scan")
-    elif reviewed.discounted_price is not None and (
-        suspicious_current_raw
-        or suspicious_regular_raw
-    ):
-        should_adopt = True
-        reasons.append("smart scan found no sale pair")
+            reasons.append("smart scan found no sale pair")
 
     if should_adopt:
         previous_current = result_current
@@ -710,20 +736,30 @@ def _review_result_with_smart_scan(
                 f"Regular price changed from {previous_regular:.2f} to {smart_regular:.2f}.",
             )
 
-    if smart.dealer_price is not None and (
-        reviewed.dealer_price is None
-        or (
-            (_price_ratio(reviewed.dealer_price, smart.dealer_price) >= 1.25)
-            and (has_custom or _raw_price_signal(reviewed.raw_dealer) <= 1)
+    user_driven = bool(locks)
+    if (
+        not dealer_locked
+        and not user_driven
+        and smart.dealer_price is not None
+        and (
+            reviewed.dealer_price is None
+            or (
+                (_price_ratio(reviewed.dealer_price, smart.dealer_price) >= 1.25)
+                and (has_custom or _raw_price_signal(reviewed.raw_dealer) <= 1)
+            )
         )
     ):
         reviewed.dealer_price = smart.dealer_price
         reviewed.raw_dealer = smart.raw_dealer
-        reviewed.review_status = "corrected"
-        _add_review_note(
-            reviewed,
-            "Review replaced the dealer price with a stronger smart-scan match.",
-        )
+        # Only flag as "corrected" when we actually replaced an existing
+        # dealer price — silently filling in a missing field shouldn't pop
+        # the amber review banner.
+        if reviewed.dealer_price is not None and result.dealer_price is not None:
+            reviewed.review_status = "corrected"
+            _add_review_note(
+                reviewed,
+                "Review replaced the dealer price with a stronger smart-scan match.",
+            )
 
     return _normalize_scrape_result(reviewed)
 
@@ -1909,93 +1945,148 @@ _SMART_SCAN_JS = r"""() => {
         }
     }
 
-    const candidates = [];
-    const walker = document.createTreeWalker(scanRoot, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-        const text = (node.textContent || '').trim();
-        if (!text) continue;
-        const el = node.parentElement;
-        if (!el || !visible(el)) continue;
-        if (inBadContext(el)) continue;
-
-        let fontSize = 14, fontWeight = 400;
-        try {
-            const style = window.getComputedStyle(el);
-            fontSize = parseFloat(style.fontSize) || 14;
-            fontWeight = parseInt(style.fontWeight, 10) || 400;
-        } catch (_) {}
-
-        const normalizedText = text.replace(/\s+/g, ' ').trim();
-        const textHasCurrency = CURRENCY_SIGNAL.test(normalizedText);
-        const textHasPriceSignal = INLINE_PRICE_SIGNAL.test(normalizedText);
-        const textLooksSpec = INLINE_SPEC_SIGNAL.test(normalizedText);
-        const titleLike = looksTitleLike(el, normalizedText);
-        if (PHONE_LIKE.test(normalizedText) && !textHasCurrency && !textHasPriceSignal) continue;
-        const matches = Array.from(normalizedText.matchAll(PRICE_FRAGMENT_RE));
-        if (matches.length === 0) continue;
-
-        // Scan up to 4 ancestors for any sale-signal text ("was", "save",
-        // "%", "rrp", "mrp", etc.). This lets us recognize original prices
-        // that aren't visually struck but sit near a discount hint.
-        let nearSaleSignal = false;
-        let ancestor = el;
-        for (let i = 0; i < 4 && ancestor; i++, ancestor = ancestor.parentElement) {
-            const txt = (ancestor.textContent || '').slice(0, 400);
-            if (SALE_SIGNAL.test(txt)) { nearSaleSignal = true; break; }
+    // Restrict the scan to the product card / buy box when no explicit
+    // PRODUCT_ROOT matches. Walk up from the strongest H1/title heading to
+    // an ancestor that contains both the title AND an add-to-cart button —
+    // that container is almost always the buy box. This prevents the scan
+    // from picking up "related products" prices, footer prices, etc.
+    function focusedBuyBoxRoot() {
+        const titleSelectors = ['h1', '[itemprop="name"]', '.product_title', '.product-title', '.product-name'];
+        let anchor = null;
+        let bestLen = 0;
+        for (const sel of titleSelectors) {
+            for (const el of document.querySelectorAll(sel)) {
+                if (!visible(el)) continue;
+                const text = normalizeText(el.textContent || '');
+                if (text.length < 12) continue;
+                if (text.length > bestLen) {
+                    bestLen = text.length;
+                    anchor = el;
+                }
+            }
+            if (anchor) break;
         }
-
-        const context = contextScore(el);
-        for (const match of matches) {
-            const fragment = (match[0] || '').trim();
-            const numeric = (fragment.match(/\d[\d,]*(?:\.\d{1,2})?/) || [null])[0];
-            if (!numeric) continue;
-            const num = parseFloat(numeric.replace(/,/g, ''));
-            if (!(num > 0) || num > 50000000) continue;
-
-            const idx = match.index || 0;
-            const local = normalizedText.slice(
-                Math.max(0, idx - 16),
-                Math.min(normalizedText.length, idx + fragment.length + 16)
+        if (!anchor) return null;
+        let cur = anchor;
+        for (let i = 0; i < 8 && cur; i += 1, cur = cur.parentElement) {
+            if (!cur.querySelectorAll) continue;
+            const innerText = normalizeText(cur.innerText || '');
+            if (!innerText || innerText.length < 60 || innerText.length > 18000) continue;
+            const hasAddToCart = !!cur.querySelector(
+                'button, input[type="submit"], [role="button"], .add-to-cart, .buy-now, '
+                + '#add-to-cart-button, [data-action*="cart"], [class*="add-to-cart"], '
+                + '[class*="buy-now"], a[href*="cart"]'
             );
-            const hasCurrency = textHasCurrency || CURRENCY_SIGNAL.test(fragment);
-            const hasPriceSignal = textHasPriceSignal || INLINE_PRICE_SIGNAL.test(local);
-            const hasMeasureUnit = MEASURE_UNIT.test(local);
-            const prevChar = idx > 0 ? normalizedText[idx - 1] : '';
-            const nextPos = idx + fragment.length;
-            const nextChar = nextPos < normalizedText.length ? normalizedText[nextPos] : '';
-            const embeddedToken = /[A-Za-z0-9]/.test(prevChar) || /[A-Za-z0-9]/.test(nextChar);
-
-            if (textLooksSpec && !hasPriceSignal && !hasCurrency && context < 20) continue;
-            if (hasMeasureUnit && !hasPriceSignal && !hasCurrency && context < 20) continue;
-            if (!hasCurrency && !hasPriceSignal && embeddedToken) continue;
-            if (!hasCurrency && !hasPriceSignal && titleLike) continue;
-            if (!hasCurrency && !hasPriceSignal && context < 20) continue;
-
-            let score = context;
-            if (hasCurrency) score += 30;
-            if (hasPriceSignal) score += 24;
-            if (textLooksSpec && !hasPriceSignal && !hasCurrency) score -= 18;
-            if (hasMeasureUnit && !hasPriceSignal && !hasCurrency) score -= 18;
-
-            candidates.push({
-                text: fragment,
-                node_text: normalizedText,
-                value: num,
-                score,
-                font_size: fontSize,
-                font_weight: fontWeight,
-                struck: isStruck(el),
-                dealer: isDealer(el),
-                variant_alt: variantAlt(el),
-                near_sale_signal: nearSaleSignal,
-                dom_path: domPath(el),
-                selector: elementSelector(el),
-                tag: el.tagName ? el.tagName.toLowerCase() : null,
-                lineage: lineageKeys(el),
-                _el: el,
-            });
+            if (!hasAddToCart) continue;
+            const hasPriceText = /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/.test(innerText)
+                || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d{2,}/i.test(innerText);
+            if (!hasPriceText) continue;
+            return cur;
         }
+        return null;
+    }
+
+    if (scanRoot === document.body) {
+        const focused = focusedBuyBoxRoot();
+        if (focused) scanRoot = focused;
+    }
+
+    function collectCandidates(root) {
+        const out = [];
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+            const text = (node.textContent || '').trim();
+            if (!text) continue;
+            const el = node.parentElement;
+            if (!el || !visible(el)) continue;
+            if (inBadContext(el)) continue;
+
+            let fontSize = 14, fontWeight = 400;
+            try {
+                const style = window.getComputedStyle(el);
+                fontSize = parseFloat(style.fontSize) || 14;
+                fontWeight = parseInt(style.fontWeight, 10) || 400;
+            } catch (_) {}
+
+            const normalizedText = text.replace(/\s+/g, ' ').trim();
+            const textHasCurrency = CURRENCY_SIGNAL.test(normalizedText);
+            const textHasPriceSignal = INLINE_PRICE_SIGNAL.test(normalizedText);
+            const textLooksSpec = INLINE_SPEC_SIGNAL.test(normalizedText);
+            const titleLike = looksTitleLike(el, normalizedText);
+            if (PHONE_LIKE.test(normalizedText) && !textHasCurrency && !textHasPriceSignal) continue;
+            const matches = Array.from(normalizedText.matchAll(PRICE_FRAGMENT_RE));
+            if (matches.length === 0) continue;
+
+            let nearSaleSignal = false;
+            let ancestor = el;
+            for (let i = 0; i < 4 && ancestor; i++, ancestor = ancestor.parentElement) {
+                const txt = (ancestor.textContent || '').slice(0, 400);
+                if (SALE_SIGNAL.test(txt)) { nearSaleSignal = true; break; }
+            }
+
+            const context = contextScore(el);
+            for (const match of matches) {
+                const fragment = (match[0] || '').trim();
+                const numeric = (fragment.match(/\d[\d,]*(?:\.\d{1,2})?/) || [null])[0];
+                if (!numeric) continue;
+                const num = parseFloat(numeric.replace(/,/g, ''));
+                if (!(num > 0) || num > 50000000) continue;
+
+                const idx = match.index || 0;
+                const local = normalizedText.slice(
+                    Math.max(0, idx - 16),
+                    Math.min(normalizedText.length, idx + fragment.length + 16)
+                );
+                const hasCurrency = textHasCurrency || CURRENCY_SIGNAL.test(fragment);
+                const hasPriceSignal = textHasPriceSignal || INLINE_PRICE_SIGNAL.test(local);
+                const hasMeasureUnit = MEASURE_UNIT.test(local);
+                const prevChar = idx > 0 ? normalizedText[idx - 1] : '';
+                const nextPos = idx + fragment.length;
+                const nextChar = nextPos < normalizedText.length ? normalizedText[nextPos] : '';
+                const embeddedToken = /[A-Za-z0-9]/.test(prevChar) || /[A-Za-z0-9]/.test(nextChar);
+
+                if (textLooksSpec && !hasPriceSignal && !hasCurrency && context < 20) continue;
+                if (hasMeasureUnit && !hasPriceSignal && !hasCurrency && context < 20) continue;
+                if (!hasCurrency && !hasPriceSignal && embeddedToken) continue;
+                if (!hasCurrency && !hasPriceSignal && titleLike) continue;
+                if (!hasCurrency && !hasPriceSignal && context < 20) continue;
+
+                let score = context;
+                if (hasCurrency) score += 30;
+                if (hasPriceSignal) score += 24;
+                if (textLooksSpec && !hasPriceSignal && !hasCurrency) score -= 18;
+                if (hasMeasureUnit && !hasPriceSignal && !hasCurrency) score -= 18;
+
+                out.push({
+                    text: fragment,
+                    node_text: normalizedText,
+                    value: num,
+                    score,
+                    font_size: fontSize,
+                    font_weight: fontWeight,
+                    struck: isStruck(el),
+                    dealer: isDealer(el),
+                    variant_alt: variantAlt(el),
+                    near_sale_signal: nearSaleSignal,
+                    dom_path: domPath(el),
+                    selector: elementSelector(el),
+                    tag: el.tagName ? el.tagName.toLowerCase() : null,
+                    lineage: lineageKeys(el),
+                    _el: el,
+                });
+            }
+        }
+        return out;
+    }
+
+    let candidates = collectCandidates(scanRoot);
+    // Safety fallback: if the focused buy-box scope yielded almost nothing,
+    // re-run against document.body so we don't shrink ourselves out of the
+    // real price (e.g. unusual templates where price sits outside the box).
+    if (candidates.length < 2 && scanRoot !== document.body) {
+        scanRoot = document.body;
+        candidates = collectCandidates(scanRoot);
     }
 
     // Deterministic main-price selection.
@@ -2991,7 +3082,10 @@ async def _try_smart_scan(page: Page) -> ScrapeResult:
 
 async def _apply_custom(
     page: Page, config: ScrapeConfig, base: ScrapeResult
-) -> ScrapeResult:
+) -> tuple[ScrapeResult, set[str]]:
+    """Apply user-supplied selectors and report which fields actually produced
+    a value. Locked fields are authoritative — downstream review must not
+    override them with smart-scan picks."""
     sel = config.selectors
     product_root = await _get_product_root(page)
     price_scope_only = product_root is not None
@@ -3035,19 +3129,38 @@ async def _apply_custom(
     if _is_installment_price(raw_dealer):
         raw_dealer = None
 
+    parsed_price = _parse_price(raw_price)
+    parsed_disc = _parse_price(raw_disc)
+    parsed_dealer = _parse_price(raw_dealer)
+    parsed_stock = _parse_stock(stock_raw) if stock_raw else None
+
+    locks: set[str] = set()
+    if sel.title and title:
+        locks.add("title")
+    if sel.price and parsed_price is not None:
+        locks.add("price")
+    if sel.discounted_price and parsed_disc is not None:
+        locks.add("discounted_price")
+    if sel.dealer_price and parsed_dealer is not None:
+        locks.add("dealer_price")
+    if sel.stock_status and parsed_stock:
+        locks.add("stock_status")
+
     result = ScrapeResult(
         title=title or base.title,
-        price=_parse_price(raw_price) or base.price,
-        discounted_price=_parse_price(raw_disc) or base.discounted_price,
-        dealer_price=_parse_price(raw_dealer) or base.dealer_price,
-        stock_status=(
-            _parse_stock(stock_raw) if stock_raw else None
-        ) or base.stock_status,
+        price=parsed_price if parsed_price is not None else base.price,
+        discounted_price=(
+            parsed_disc if parsed_disc is not None else base.discounted_price
+        ),
+        dealer_price=(
+            parsed_dealer if parsed_dealer is not None else base.dealer_price
+        ),
+        stock_status=parsed_stock or base.stock_status,
         raw_price=raw_price or base.raw_price,
         raw_discounted=raw_disc or base.raw_discounted,
         raw_dealer=raw_dealer or base.raw_dealer,
     )
-    return _normalize_scrape_result(result)
+    return _normalize_scrape_result(result), locks
 
 
 # ── Context factory (shared by scrape() and probe()) ─────────────────────────
@@ -3509,14 +3622,16 @@ async def scrape_with_open_page(
         sel.title, sel.price, sel.discounted_price, sel.dealer_price,
         sel.stock_status,
     ])
+    user_locks: set[str] = set()
     if has_custom:
-        result = await _apply_custom(page, config, result)
+        result, user_locks = await _apply_custom(page, config, result)
     result = _review_result_with_smart_scan(
         result,
         smart,
         smart_data,
         has_custom=has_custom,
         structured_price_locked=structured_price_locked,
+        user_locks=user_locks,
     )
     if is_facebook_marketplace:
         _clear_dealer_price(result)
