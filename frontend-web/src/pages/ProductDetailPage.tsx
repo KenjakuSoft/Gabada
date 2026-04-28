@@ -95,13 +95,20 @@ export function ProductDetailPage() {
       const stores = product.data?.stores ?? []
       await Promise.all(stores.map((s) => scraperApi.scrapeOne(s.id)))
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['product', productId] })
-      qc.invalidateQueries({ queryKey: ['product-logs', productId] })
-      qc.invalidateQueries({ queryKey: ['products'] })
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['product', productId] }),
+        qc.invalidateQueries({ queryKey: ['product-logs', productId] }),
+        qc.invalidateQueries({ queryKey: ['products'] }),
+      ])
       toast.success('Scrape complete', 'All stores refreshed')
     },
-    onError: () => toast.error('Scrape failed'),
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'At least one store scrape failed'
+      toast.error('Scrape failed', detail)
+    },
   })
 
   const remove = useMutation({

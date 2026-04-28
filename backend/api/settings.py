@@ -286,6 +286,10 @@ async def import_database(file: UploadFile = File(...)) -> DatabaseImportRespons
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             finally:
                 try:
+                    await reschedule()
+                except Exception as exc:  # pragma: no cover - runtime recovery
+                    logger.warning("Failed to reschedule after import: %s", exc)
+                try:
                     await resume_scheduler()
                 except Exception as exc:  # pragma: no cover - runtime recovery
                     logger.warning("Failed to restart scheduler after import: %s", exc)

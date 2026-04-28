@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from database.db import get_db
@@ -35,6 +35,9 @@ _SELECTOR_FIELDS = (
     "stock_status",
     "image",
 )
+
+
+ScrapeRunSummary = dict[str, object]
 
 
 def _effective_price(
@@ -99,7 +102,7 @@ async def _compute_change(
     return change_type, price_delta, previous_effective, previous_stock
 
 
-async def _do_scrape(product_store_id: int):
+async def _do_scrape(product_store_id: int) -> ScrapeRunSummary:
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
@@ -111,12 +114,20 @@ async def _do_scrape(product_store_id: int):
         )
         if not rows:
             logger.warning("product_store_id %d not found or inactive", product_store_id)
-            return
+            return {
+                "status": "not_found",
+                "product_store_id": product_store_id,
+                "error": "Product store not found or inactive",
+            }
 
         row = rows[0]
         if bool(row["manual_only"]):
             logger.info("Skipping scrape for manual-only store link ps_id=%d", product_store_id)
-            return
+            return {
+                "status": "skipped",
+                "product_store_id": product_store_id,
+                "reason": "manual_only",
+            }
         config = ScrapeConfig(**json.loads(row["scrape_config"] or "{}"))
         if not config.storage_state_path and row["storage_state_path"]:
             config.storage_state_path = row["storage_state_path"]
@@ -124,7 +135,12 @@ async def _do_scrape(product_store_id: int):
 
         if result.error:
             logger.error("Scrape error for ps_id=%d: %s", product_store_id, result.error)
-            return
+            return {
+                "status": "failed",
+                "product_store_id": product_store_id,
+                "error": result.error,
+                "result": result,
+            }
 
         change_type, price_delta, previous_price, previous_stock_status = (
             await _compute_change(db, product_store_id, result)
@@ -161,18 +177,27 @@ async def _do_scrape(product_store_id: int):
             change_type,
             price_delta,
         )
+        return {
+            "status": "scraped",
+            "product_store_id": product_store_id,
+            "change_type": change_type,
+            "price_delta": price_delta,
+            "result": result,
+        }
     finally:
         await db.close()
 
 
-async def scrape_all_active():
+async def scrape_all_active() -> ScrapeRunSummary:
     """Called by the scheduler. Scrapes every active product_store."""
+    woo_error = None
     try:
         from api.import_routes import sync_all_enabled_woo_stores
 
         await sync_all_enabled_woo_stores()
     except Exception as exc:
         logger.error("Failed syncing Woo stores before scrape-all: %s", exc)
+        woo_error = str(exc)
 
     db = await get_db()
     try:
@@ -183,25 +208,72 @@ async def scrape_all_active():
     finally:
         await db.close()
 
+    scraped = 0
+    skipped = 0
+    failed = 0
+    errors: list[dict[str, object]] = []
+
     for product_store_id in ids:
         try:
-            await _do_scrape(product_store_id)
+            summary = await _do_scrape(product_store_id)
         except Exception as exc:
             logger.error("Failed scraping ps_id=%d: %s", product_store_id, exc)
+            failed += 1
+            errors.append({"product_store_id": product_store_id, "error": str(exc)})
+            continue
+
+        status = summary.get("status")
+        if status == "scraped":
+            scraped += 1
+        elif status == "failed":
+            failed += 1
+            errors.append(
+                {
+                    "product_store_id": product_store_id,
+                    "error": summary.get("error") or "Scrape failed",
+                }
+            )
+        else:
+            skipped += 1
+
+    if woo_error:
+        failed += 1
+        errors.append({"product_store_id": None, "error": f"Woo sync failed: {woo_error}"})
+
+    return {
+        "status": "complete" if failed == 0 else "partial_failure",
+        "total": len(ids),
+        "scraped": scraped,
+        "skipped": skipped,
+        "failed": failed,
+        "errors": errors,
+    }
 
 
-@router.post("/scrape/{product_store_id}", status_code=202)
-async def manual_scrape(product_store_id: int, background_tasks: BackgroundTasks):
-    """Trigger an immediate scrape for a single product_store in the background."""
-    background_tasks.add_task(_do_scrape, product_store_id)
-    return {"status": "queued", "product_store_id": product_store_id}
+@router.post("/scrape/{product_store_id}")
+async def manual_scrape(product_store_id: int):
+    """Trigger an immediate scrape for a single product_store and return the result."""
+    summary = await _do_scrape(product_store_id)
+    status = summary.get("status")
+    if status == "not_found":
+        raise HTTPException(status_code=404, detail=summary.get("error"))
+    if status == "skipped":
+        raise HTTPException(
+            status_code=409,
+            detail="This store link is manual-only and cannot be scraped.",
+        )
+    if status == "failed":
+        raise HTTPException(
+            status_code=502,
+            detail=summary.get("error") or "Scrape failed",
+        )
+    return summary
 
 
-@router.post("/scrape-all", status_code=202)
-async def manual_scrape_all(background_tasks: BackgroundTasks):
-    """Trigger an immediate scrape for all active product_stores."""
-    background_tasks.add_task(scrape_all_active)
-    return {"status": "queued"}
+@router.post("/scrape-all")
+async def manual_scrape_all():
+    """Trigger an immediate scrape for all active product_stores and return a summary."""
+    return await scrape_all_active()
 
 
 @router.post("/probe", response_model=ProbeResponse)

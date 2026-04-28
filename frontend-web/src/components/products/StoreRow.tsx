@@ -47,12 +47,19 @@ export function StoreRow({ store, symbol, productId }: StoreRowProps) {
 
   const scrape = useMutation({
     mutationFn: () => scraperApi.scrapeOne(store.id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['products'] })
-      qc.invalidateQueries({ queryKey: ['product', productId] })
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['products'] }),
+        qc.invalidateQueries({ queryKey: ['product', productId] }),
+      ])
       toast.success(`${store.store_name} refreshed`)
     },
-    onError: () => toast.error(`Could not refresh ${store.store_name}`),
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? 'The scrape did not complete'
+      toast.error(`Could not refresh ${store.store_name}`, detail)
+    },
   })
 
   const save = useMutation({
