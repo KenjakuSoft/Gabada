@@ -1,5 +1,5 @@
 APP_NAME = "Gabada"
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.4.0"
 APP_REPOSITORY = "Xx-LiDAF-xX/Gabada"
 
 
