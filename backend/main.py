@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
+from app_version import APP_VERSION
 from app_paths import configure_runtime_environment, frontend_dist_dir
 from database.db import init_db
 from scraper.engine import start_browser, stop_browser
@@ -105,7 +106,7 @@ async def lifespan(app: FastAPI):
     logger.info("Lifespan shutdown: complete")
 
 
-app = FastAPI(title="Gabada API", version="0.3.1", lifespan=lifespan)
+app = FastAPI(title="Gabada API", version=APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

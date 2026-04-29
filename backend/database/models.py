@@ -487,6 +487,32 @@ class DatabaseImportResponse(BaseModel):
     counts: DatabaseCounts = DatabaseCounts()
 
 
+# ── Updates ───────────────────────────────────────────────────────────────────
+
+class UpdateAsset(BaseModel):
+    name: str
+    browser_download_url: str
+    size: Optional[int] = None
+    kind: str = "other"
+    platform: Optional[str] = None
+    arch: Optional[str] = None
+
+
+class UpdateCheckResponse(BaseModel):
+    current_version: str
+    latest_version: Optional[str] = None
+    update_available: bool = False
+    release_url: Optional[str] = None
+    release_name: Optional[str] = None
+    published_at: Optional[datetime] = None
+    install_mode: str = "source"
+    platform: str
+    arch: str
+    recommended_asset: Optional[UpdateAsset] = None
+    assets: list[UpdateAsset] = []
+    error: Optional[str] = None
+
+
 # ── Drive sync ────────────────────────────────────────────────────────────────
 
 

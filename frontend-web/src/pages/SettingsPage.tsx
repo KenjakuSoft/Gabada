@@ -7,6 +7,7 @@ import {
   CloudOff,
   Database,
   Download,
+  ExternalLink,
   FileCode,
   Globe2,
   HardDriveDownload,
@@ -39,6 +40,7 @@ import type {
   DriveStatus,
   Settings,
   SitesConfigResponse,
+  UpdateCheckResponse,
 } from '@/api'
 
 // Full ISO 4217 set of actively-circulating national currencies plus a few
@@ -555,6 +557,7 @@ export function SettingsPage() {
       </BentoGrid>
 
       <DataPortabilityCard />
+      <UpdatesCard />
       <DriveSyncCard />
       <SiteProfilesCard />
     </div>
@@ -853,6 +856,117 @@ function DataPortabilityCard() {
   )
 }
 
+function UpdatesCard() {
+  const update = useQuery<UpdateCheckResponse>({
+    queryKey: ['settings', 'updates'],
+    queryFn: () => settingsApi.checkUpdates(),
+    enabled: false,
+    retry: false,
+  })
+
+  const data = update.data
+  const hasChecked = update.isFetched
+  const recommended = data?.recommended_asset ?? null
+  const releaseUrl = data?.release_url ?? null
+  const downloadUrl = recommended?.browser_download_url ?? releaseUrl
+  const title = data?.error
+    ? 'Update check failed'
+    : data?.update_available
+      ? `Version ${data.latest_version} available`
+      : hasChecked
+        ? 'Up to date'
+        : 'App updates'
+  const tone = data?.update_available ? 'accent' : data?.error ? 'default' : 'primary'
+
+  return (
+    <BentoGrid cols={6}>
+      <BentoTile colSpan={6} tone={tone}>
+        <TileHeader
+          eyebrow="Updates"
+          title={title}
+          icon={<Download className="h-4 w-4" />}
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              {downloadUrl ? (
+                <Button
+                  size="sm"
+                  variant={data?.update_available ? 'default' : 'outline'}
+                  onClick={() => window.open(downloadUrl, '_blank', 'noopener,noreferrer')}
+                >
+                  <Download className="h-4 w-4" />
+                  {recommended ? 'Download update' : 'View release'}
+                </Button>
+              ) : null}
+              {releaseUrl && recommended ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => window.open(releaseUrl, '_blank', 'noopener,noreferrer')}
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Release notes
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => update.refetch()}
+                disabled={update.isFetching}
+              >
+                {update.isFetching ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Check
+              </Button>
+            </div>
+          }
+        />
+
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <TransferStat
+            label="Current"
+            value={data?.current_version ? `v${data.current_version}` : 'not checked'}
+          />
+          <TransferStat
+            label="Latest"
+            value={data?.latest_version ? `v${data.latest_version}` : 'not checked'}
+          />
+          <TransferStat
+            label="Build"
+            value={
+              data
+                ? `${data.install_mode} / ${data.platform}-${data.arch}`
+                : 'local'
+            }
+          />
+        </div>
+
+        <div className="mt-3 rounded-2xl border border-border/70 bg-background/60 p-4 text-sm text-muted-foreground">
+          {data?.error ? (
+            <span>{data.error}</span>
+          ) : data?.update_available ? (
+            <span>
+              A newer Gabada release is available.{' '}
+              {recommended
+                ? `${recommended.name} (${formatBytes(recommended.size)}) is the recommended asset for this machine.`
+                : 'Open the release page to pick the matching installer or portable bundle.'}
+            </span>
+          ) : hasChecked ? (
+            <span>This copy matches the latest GitHub release.</span>
+          ) : (
+            <span>
+              Check GitHub Releases from inside Gabada. Future releases include
+              an update manifest so the app can recommend the matching asset.
+            </span>
+          )}
+        </div>
+      </BentoTile>
+    </BentoGrid>
+  )
+}
+
 function TransferStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-border/70 bg-background/60 p-3">
@@ -862,6 +976,18 @@ function TransferStat({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
     </div>
   )
+}
+
+function formatBytes(value: number | null | undefined): string {
+  if (!value || value <= 0) return 'unknown size'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = value
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex += 1
+  }
+  return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
 }
 
 function DriveSyncCard() {
