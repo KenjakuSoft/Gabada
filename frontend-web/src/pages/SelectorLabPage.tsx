@@ -760,19 +760,11 @@ export function SelectorLabPage() {
                 <dd className="font-semibold tabular-nums">
                   {displayed ? regularPriceValue(displayed, symbol) : 'n/a'}
                 </dd>
-                <dt className="text-muted-foreground">Raw regular</dt>
-                <dd className="truncate font-mono text-xs">
-                  {displayed?.raw_price ?? 'n/a'}
-                </dd>
                 {showDisplayedDiscount && displayed?.discounted_price != null ? (
                   <>
                     <dt className="text-muted-foreground">Discounted</dt>
                     <dd className="font-semibold tabular-nums text-success">
                       {formatMoney(displayed.discounted_price, symbol)}
-                    </dd>
-                    <dt className="text-muted-foreground">Raw discount</dt>
-                    <dd className="truncate font-mono text-xs">
-                      {displayed?.raw_discounted ?? 'n/a'}
                     </dd>
                   </>
                 ) : null}
@@ -796,10 +788,6 @@ export function SelectorLabPage() {
                   >
                     {displayed?.stock_status ?? 'unknown'}
                   </Badge>
-                </dd>
-                <dt className="text-muted-foreground">Raw dealer</dt>
-                <dd className="truncate font-mono text-xs">
-                  {displayed?.raw_dealer ?? 'n/a'}
                 </dd>
               </dl>
               {displayed?.error ? (

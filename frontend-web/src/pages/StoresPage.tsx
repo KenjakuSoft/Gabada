@@ -175,21 +175,21 @@ export function StoresPage() {
     mutationFn: (id: number) => storesApi.captureLoginSession(id),
     onMutate: () => {
       toast.info(
-        'Login opened',
-        'Log in, then click the green Save login to Gabada button in the browser.',
+        'Session window opened',
+        'Complete login or bot check, then click the green Save login to Gabada button in the browser.',
       )
     },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['stores'] })
       toast.success(
-        `${result.store.name} login saved`,
+        `${result.store.name} session saved`,
         result.final_url,
       )
     },
     onError: (error) => {
       const detail =
         error instanceof Error ? error.message : 'Could not save login'
-      toast.error('Login failed', detail)
+      toast.error('Session capture failed', detail)
     },
   })
 
@@ -496,7 +496,7 @@ function StoreTile({
         ) : null}
         {store.storage_state_path ? (
           <Badge variant="success" className="text-[10px]">
-            logged in
+            session saved
           </Badge>
         ) : null}
         {!store.manual_only ? (
@@ -517,7 +517,7 @@ function StoreTile({
               ) : (
                 <KeyRound className="h-3.5 w-3.5" />
               )}
-              {store.storage_state_path ? 'Refresh login' : 'Login'}
+              {store.storage_state_path ? 'Refresh session' : 'Save session'}
             </Button>
             {store.storage_state_path ? (
               <Button

@@ -570,6 +570,7 @@ def _review_result_with_smart_scan(
         return _normalize_scrape_result(result)
 
     reviewed = result.model_copy(deep=True)
+    original = smart_data.get("original") or {}
     smart_current, smart_current_raw = _current_price_pair(smart)
     result_current, current_raw = _current_price_pair(reviewed)
     smart_regular, smart_regular_raw = _regular_price_pair(smart)
@@ -586,20 +587,14 @@ def _review_result_with_smart_scan(
     elif reviewed.discounted_price is not None:
         regular_mismatch = not _prices_close(reviewed.price, smart_current)
 
-    major_divergence = (
-        _price_ratio(result_current, smart_current) >= 1.25
-        or (
-            smart_regular is not None
-            and _price_ratio(result_regular, smart_regular) >= 1.25
-        )
+    current_ratio = _price_ratio(result_current, smart_current)
+    regular_ratio = (
+        _price_ratio(result_regular, smart_regular)
+        if result_regular is not None and smart_regular is not None
+        else 1.0
     )
-    extreme_divergence = (
-        _price_ratio(result_current, smart_current) >= 50
-        or (
-            smart_regular is not None
-            and _price_ratio(result_regular, smart_regular) >= 50
-        )
-    )
+    major_divergence = current_ratio >= 1.25 or regular_ratio >= 1.25
+    extreme_divergence = current_ratio >= 50 or regular_ratio >= 50
     if (
         structured_price_locked
         and extreme_divergence
@@ -653,6 +648,25 @@ def _review_result_with_smart_scan(
         or suspicious_regular_raw
         or smart_regular_signal >= result_regular_signal + 1
     )
+    structured_sale_pair_enrichment = (
+        not price_locked
+        and structured_price_locked
+        and result_regular is None
+        and result_current is not None
+        and smart.discounted_price is not None
+        and smart_regular is not None
+        and smart_current is not None
+        and smart_regular > smart_current
+        and _prices_close(result_current, smart_current)
+        and (
+            bool(original.get("struck"))
+            or bool(original.get("near_sale_signal"))
+            or smart_regular_signal >= 2
+        )
+    )
+    if structured_sale_pair_enrichment:
+        _adopt_smart_prices(reviewed, smart)
+        return _normalize_scrape_result(reviewed)
 
     should_adopt = False
     reasons: list[str] = []
@@ -2964,10 +2978,17 @@ async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabRespon
     context = await _open_context(nav_config)
     page = await context.new_page()
     try:
-        await _navigate(page, url, nav_config)
+        ready = await _navigate(page, url, nav_config)
         response.final_url = page.url
         response.hostname = _normalize_hostname(page.url or url)
         response.current_profile = current_profile
+        if not ready:
+            response.extracted = _bot_challenge_result()
+            response.notes.extend([
+                _BOT_CHALLENGE_NOTE,
+                _BOT_CHALLENGE_SESSION_NOTE,
+            ])
+            return response
         is_facebook_marketplace = (
             _is_facebook_marketplace_url(url)
             or _is_facebook_marketplace_url(page.url)
@@ -3176,9 +3197,8 @@ async def _apply_custom(
 
 # ── Context factory (shared by scrape() and probe()) ─────────────────────────
 
-# Stealth init script: mask the most obvious headless-Chromium fingerprints
-# before any site script runs. Needed to get past Cloudflare, DataDome,
-# PerimeterX, and similar bot walls that gate products behind a challenge page.
+# Browser compatibility init script for sites that read common navigator
+# fields before rendering product pages.
 _STEALTH_INIT_JS = r"""
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
@@ -3292,6 +3312,22 @@ _CLOUDFLARE_HINTS = (
     "ddos protection by",
 )
 
+_BOT_CHALLENGE_ERROR = (
+    "Bot-check challenge is blocking this page. Open the store in a visible "
+    "session window, complete the check manually, save the session, then retry. "
+    "If the site still blocks automation, use the store API/feed or track it manually."
+)
+
+_BOT_CHALLENGE_NOTE = (
+    "Unresolved anti-bot challenge detected; extraction stopped before reading "
+    "prices so Gabada does not save challenge-page text as product data."
+)
+
+_BOT_CHALLENGE_SESSION_NOTE = (
+    "Use the store Save session/Refresh session action, complete the check in "
+    "the opened browser window, then click Save login to Gabada."
+)
+
 _RENDERED_PRODUCT_HINTS_RE = re.compile(
     r"\b(rs\.?|lkr|price|in stock|out of stock|add[\s-]?to[\s-]?cart|"
     r"buy[\s-]?now|sku\s*:|category\s*:)\b",
@@ -3343,6 +3379,17 @@ async def _wait_for_challenge_clear(page: Page, timeout_ms: int = 25000) -> bool
     return not await _detected_challenge(page)
 
 
+def _bot_challenge_result() -> ScrapeResult:
+    return ScrapeResult(
+        error=_BOT_CHALLENGE_ERROR,
+        review_status="needs_review",
+        review_notes=[
+            _BOT_CHALLENGE_NOTE,
+            _BOT_CHALLENGE_SESSION_NOTE,
+        ],
+    )
+
+
 async def _page_has_meaningful_product_content(page: Page) -> bool:
     try:
         payload = await page.evaluate(
@@ -3386,16 +3433,17 @@ async def _wait_for_rendered_product_content(
     return await _page_has_meaningful_product_content(page)
 
 
-async def _navigate(page: Page, url: str, config: ScrapeConfig) -> None:
+async def _navigate(page: Page, url: str, config: ScrapeConfig) -> bool:
     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-    # Bot-wall handling: if the landing page is a challenge, give it a
+    # Challenge handling: if the landing page is a challenge, give it a
     # chance to auto-resolve before we look for product selectors.
     if await _detected_challenge(page):
         logger.info("Bot-check challenge detected on %s — waiting for clear", url)
         cleared = await _wait_for_challenge_clear(page)
         if not cleared:
             logger.warning("Bot-check challenge did not clear on %s", url)
+            return False
 
     if config.wait_for:
         try:
@@ -3414,6 +3462,10 @@ async def _navigate(page: Page, url: str, config: ScrapeConfig) -> None:
         settled = await _wait_for_rendered_product_content(page)
         if settled:
             logger.debug("Waited for delayed product content on %s", url)
+    if await _detected_challenge(page):
+        logger.warning("Bot-check challenge detected after render wait on %s", url)
+        return False
+    return True
 
 
 # ── Main scrape function ──────────────────────────────────────────────────────
@@ -3423,13 +3475,18 @@ async def _scrape_url_once(url: str, config: ScrapeConfig) -> ScrapeResult:
     page = await context.new_page()
 
     try:
-        await _navigate(page, url, config)
+        ready = await _navigate(page, url, config)
+        if not ready:
+            return _bot_challenge_result()
         result = await scrape_with_open_page(page, config)
 
         logger.info(
-            "Scrape done: %s → price=%s disc=%s dealer=%s stock=%s",
-            url, result.price, result.discounted_price,
-            result.dealer_price, result.stock_status,
+            "Scrape done: %s -> regular=%s discounted=%s dealer=%s stock=%s",
+            url,
+            result.price,
+            result.discounted_price,
+            result.dealer_price,
+            result.stock_status,
         )
         return result
 
@@ -3486,8 +3543,15 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
     page = await context.new_page()
 
     try:
-        await _navigate(page, url, config)
+        ready = await _navigate(page, url, config)
         response.final_url = page.url
+        if not ready:
+            response.extracted = _bot_challenge_result()
+            response.notes.extend([
+                _BOT_CHALLENGE_NOTE,
+                _BOT_CHALLENGE_SESSION_NOTE,
+            ])
+            return response
         is_facebook_marketplace = (
             _is_facebook_marketplace_url(url)
             or _is_facebook_marketplace_url(page.url)

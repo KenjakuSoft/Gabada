@@ -170,9 +170,11 @@ async def _do_scrape(product_store_id: int) -> ScrapeRunSummary:
         )
         await db.commit()
         logger.info(
-            "Scraped ps_id=%d -> price=%s stock=%s change=%s delta=%s",
+            "Scraped ps_id=%d -> regular=%s discounted=%s dealer=%s stock=%s change=%s delta=%s",
             product_store_id,
             result.price,
+            result.discounted_price,
+            result.dealer_price,
             result.stock_status,
             change_type,
             price_delta,

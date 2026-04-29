@@ -232,6 +232,57 @@ def test_user_locked_dealer_price_is_authoritative() -> None:
     assert reviewed.raw_dealer == "Rs 38,000"
 
 
+def test_structured_current_price_can_gain_struck_regular_price() -> None:
+    # Some product JSON-LD only exposes the current sale price. If smart scan
+    # finds the same current price plus a nearby struck higher price, keep the
+    # sale pair instead of treating the missing regular value as divergence.
+    result = ScrapeResult(
+        title="Armaggeddon Falcon V Stealth",
+        price=8500.0,
+        raw_price="8500",
+        stock_status="in_stock",
+    )
+    smart = ScrapeResult(
+        price=9200.0,
+        discounted_price=8500.0,
+        raw_price="Rs 9,200.00",
+        raw_discounted="Rs 8,500.00",
+        stock_status="in_stock",
+    )
+    smart_data = {
+        "main": {
+            "value": 8500.0,
+            "score": 114,
+            "text": "Rs 8,500.00",
+            "node_text": "Rs 8,500.00",
+        },
+        "original": {
+            "value": 9200.0,
+            "score": 108,
+            "text": "Rs 9,200.00",
+            "node_text": "Rs 9,200.00",
+            "struck": True,
+            "near_sale_signal": True,
+        },
+        "dealer": None,
+    }
+
+    reviewed = _review_result_with_smart_scan(
+        result,
+        smart,
+        smart_data,
+        has_custom=False,
+        structured_price_locked=True,
+    )
+
+    assert reviewed.price == 9200.0
+    assert reviewed.discounted_price == 8500.0
+    assert reviewed.raw_price == "Rs 9,200.00"
+    assert reviewed.raw_discounted == "Rs 8,500.00"
+    assert reviewed.review_status == "ok"
+    assert reviewed.review_notes == []
+
+
 if __name__ == "__main__":
     tests = [
         test_extreme_divergence_keeps_structured_price,
@@ -242,6 +293,7 @@ if __name__ == "__main__":
         test_user_locked_price_is_authoritative_over_smart_scan,
         test_user_driven_test_does_not_emit_corrected_for_added_dealer,
         test_user_locked_dealer_price_is_authoritative,
+        test_structured_current_price_can_gain_struck_regular_price,
     ]
     for t in tests:
         t()

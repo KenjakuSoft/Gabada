@@ -160,7 +160,6 @@ function ProbeResults({
   const [priceChoice, setPriceChoice] = useState<PriceReviewChoice>('kept')
   const useAlternative = hasAlternative && priceChoice === 'alternative'
   const regularPrice = useAlternative ? e.review_alternative_price : e.price
-  const regularRaw = useAlternative ? e.review_alternative_raw : e.raw_price
   const showDiscount =
     !useAlternative &&
     e.discounted_price != null &&
@@ -205,28 +204,12 @@ function ProbeResults({
                 </Badge>
               ) : null}
             </dd>
-            {regularRaw ? (
-              <>
-                <dt className="text-muted-foreground">
-                  {useAlternative ? 'Raw price' : 'Raw regular'}
-                </dt>
-                <dd className="truncate font-mono text-xs">{regularRaw}</dd>
-              </>
-            ) : null}
             {showDiscount && e.discounted_price != null ? (
               <>
                 <dt className="text-muted-foreground">Discounted</dt>
                 <dd className="font-semibold tabular-nums text-success">
                   {formatMoney(e.discounted_price, symbol)}
                 </dd>
-                {e.raw_discounted ? (
-                  <>
-                    <dt className="text-muted-foreground">Raw discount</dt>
-                    <dd className="truncate font-mono text-xs">
-                      {e.raw_discounted}
-                    </dd>
-                  </>
-                ) : null}
               </>
             ) : null}
             {e.dealer_price != null ? (

@@ -434,7 +434,12 @@ async def quick_add(body: QuickAddRequest) -> QuickAddResponse:
         for url in urls:
             try:
                 results.append(
-                    await quick_add_one(db, url=url, category_id=body.category_id)
+                    await quick_add_one(
+                        db,
+                        url=url,
+                        category_id=body.category_id,
+                        store_id=body.store_id,
+                    )
                 )
             except Exception as exc:
                 logger.exception("quick-add failed for %s", url)

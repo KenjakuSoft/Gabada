@@ -302,6 +302,7 @@ class FileImportCommitResponse(BaseModel):
 class QuickAddRequest(BaseModel):
     urls: list[str]
     category_id: Optional[int] = None
+    store_id: Optional[int] = None
 
 
 class QuickAddResult(BaseModel):

@@ -119,6 +119,7 @@ export const productsApi = {
   quickAdd: async (body: {
     urls: string[]
     category_id?: number | null
+    store_id?: number | null
   }): Promise<QuickAddResponse> => {
     const { data } = await http.post<QuickAddResponse>(
       '/products/quick-add',

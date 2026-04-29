@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.5.0] — 2026-04-30
+
+### Added
+- **Store picker on Add Products.** Quick-add can now pin pasted URLs to an existing website-backed store instead of always deriving the store from the URL hostname.
+- **Per-store product log sections.** Product history now separates logs by linked store when viewing all stores.
+- **Expanded timezone presets.** Settings now includes Sri Lanka time (`Asia/Colombo`) and the browser-supported IANA timezone list.
+
+### Fixed
+- **Bot challenge handling.** Scrapes, Probe, and Selector Lab now stop on unresolved anti-bot challenge pages and direct users to save a visible browser session instead of parsing challenge text as product data.
+- **Cleaner price previews.** Probe and Selector Lab now show parsed regular/discounted prices without duplicating raw scrape text in the main preview.
+- **Scrape logging clarity.** Backend scrape logs now print regular, discounted, and dealer prices explicitly.
+- **Structured sale-pair enrichment.** When JSON-LD only reports the current sale price, a visible struck higher price can now fill the regular price without being rejected as a mismatch.
+- **Timestamp display drift.** Frontend date parsing now treats SQLite API timestamps as UTC and formats scheduled/log/activity times through the configured timezone.
+
 ## [0.4.0] — 2026-04-29
 
 ### Added
@@ -183,7 +197,8 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
-[Unreleased]: https://github.com/Xx-LiDAF-xX/Gabada/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Xx-LiDAF-xX/Gabada/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.4.0
 [0.3.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.3.0

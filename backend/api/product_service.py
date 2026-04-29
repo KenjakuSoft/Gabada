@@ -282,7 +282,7 @@ def title_from_url(url: str) -> str:
 
 async def find_or_create_store_for_url(
     db: aiosqlite.Connection, url: str
-) -> tuple[int, str]:
+) -> tuple[int, str, Optional[str]]:
     """Return the existing store for a URL hostname, creating one when needed."""
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
@@ -291,21 +291,43 @@ async def find_or_create_store_for_url(
 
     base_url = f"{parsed.scheme or 'https'}://{host}"
 
-    rows = await db.execute_fetchall("SELECT id, name, base_url FROM stores")
+    rows = await db.execute_fetchall(
+        "SELECT id, name, base_url, manual_only, storage_state_path FROM stores"
+    )
     for row in rows:
         try:
             row_host = (urlparse(row["base_url"]).hostname or "").lower()
         except Exception:
             row_host = ""
-        if row_host == host:
-            return row["id"], row["name"]
+        if row_host == host and not bool(row["manual_only"]):
+            return row["id"], row["name"], row["storage_state_path"]
 
     cur = await db.execute(
         "INSERT INTO stores (name, base_url) VALUES (?, ?)",
         (host, base_url),
     )
     await db.commit()
-    return cur.lastrowid, host
+    return cur.lastrowid, host, None
+
+
+async def fetch_quick_add_store(
+    db: aiosqlite.Connection,
+    store_id: int,
+) -> tuple[int, str, Optional[str]]:
+    rows = await db.execute_fetchall(
+        """SELECT id, name, manual_only, storage_state_path
+           FROM stores
+           WHERE id = ?
+           LIMIT 1""",
+        (store_id,),
+    )
+    if not rows:
+        raise ValueError("Selected store was not found")
+
+    row = rows[0]
+    if bool(row["manual_only"]):
+        raise ValueError("Selected store is manual-only; choose a website-backed store")
+    return row["id"], row["name"], row["storage_state_path"]
 
 
 async def quick_add_one(
@@ -313,24 +335,38 @@ async def quick_add_one(
     *,
     url: str,
     category_id: Optional[int],
+    store_id: Optional[int] = None,
 ) -> QuickAddResult:
     url = url.strip()
     if not url:
         return QuickAddResult(url=url, status="error", error="Empty URL")
 
     try:
-        store_id, store_name = await find_or_create_store_for_url(db, url)
+        if store_id is not None:
+            resolved_store_id, store_name, storage_state_path = await fetch_quick_add_store(
+                db,
+                store_id,
+            )
+        else:
+            (
+                resolved_store_id,
+                store_name,
+                storage_state_path,
+            ) = await find_or_create_store_for_url(db, url)
     except Exception as exc:
-        return QuickAddResult(url=url, status="error", error=f"Bad URL: {exc}")
+        label = "Store" if store_id is not None else "Bad URL"
+        return QuickAddResult(url=url, status="error", error=f"{label}: {exc}")
+
+    scrape_config = ScrapeConfig(storage_state_path=storage_state_path)
 
     try:
-        report = await probe_url(url, ScrapeConfig())
+        report = await probe_url(url, scrape_config)
     except Exception as exc:
         logger.warning("quick-add probe failed for %s: %s", url, exc)
         return QuickAddResult(
             url=url,
             status="error",
-            store_id=store_id,
+            store_id=resolved_store_id,
             store_name=store_name,
             error=f"Probe failed: {exc}",
         )
@@ -347,9 +383,9 @@ async def quick_add_one(
         canonical_name=name,
         image_url=None,
         category_id=category_id,
-        store_id=store_id,
+        store_id=resolved_store_id,
         product_url=url,
-        scrape_config_json=ScrapeConfig().model_dump_json(),
+        scrape_config_json=scrape_config.model_dump_json(),
     )
 
     if extracted.price is not None or extracted.stock_status != "unknown":
@@ -380,7 +416,7 @@ async def quick_add_one(
         product_id=product_id,
         product_store_id=product_store_id,
         name=name,
-        store_id=store_id,
+        store_id=resolved_store_id,
         store_name=store_name,
         platform=report.platform,
         price=extracted.price,

@@ -10,7 +10,8 @@ import {
   YAxis,
 } from 'recharts'
 import type { PriceLog, ProductStoreSummary } from '@/api'
-import { formatMoney } from '@/lib/utils'
+import { useTimezone } from '@/hooks/useSettings'
+import { formatMoney, parseApiDate } from '@/lib/utils'
 
 interface PriceChartProps {
   logs: PriceLog[]
@@ -36,10 +37,12 @@ interface Point {
 }
 
 export function PriceChart({ logs, stores, symbol }: PriceChartProps) {
+  const timezone = useTimezone()
   const data = useMemo<Point[]>(() => {
     const byTime = new Map<number, Point>()
     for (const log of logs) {
-      const t = new Date(log.scraped_at).getTime()
+      const parsed = parseApiDate(log.scraped_at)
+      const t = parsed?.getTime() ?? Number.NaN
       if (Number.isNaN(t)) continue
       const key = Math.round(t / 60_000)
       const bucket = byTime.get(key) ?? {
@@ -47,6 +50,7 @@ export function PriceChart({ logs, stores, symbol }: PriceChartProps) {
         label: new Date(t).toLocaleDateString(undefined, {
           month: 'short',
           day: 'numeric',
+          timeZone: timezone,
         }),
       }
       const price = log.discounted_price ?? log.price ?? log.dealer_price
@@ -56,7 +60,7 @@ export function PriceChart({ logs, stores, symbol }: PriceChartProps) {
       byTime.set(key, bucket)
     }
     return Array.from(byTime.values()).sort((a, b) => a.t - b.t)
-  }, [logs])
+  }, [logs, timezone])
 
   if (data.length === 0) {
     return (
