@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { formatRelativeTime } from '@/lib/utils'
+import { formatRelativeTime, parseApiDate } from '@/lib/utils'
 
 /**
  * Returns a relative-time string ("3m ago") that re-renders on a cadence
@@ -11,8 +11,8 @@ export function useLiveTime(iso: string | null | undefined): string {
 
   useEffect(() => {
     if (!iso) return
-    const then = new Date(iso).getTime()
-    if (Number.isNaN(then)) return
+    const then = parseApiDate(iso)?.getTime()
+    if (then == null || Number.isNaN(then)) return
 
     let timer: number | undefined
     const schedule = () => {

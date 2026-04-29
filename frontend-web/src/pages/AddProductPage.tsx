@@ -18,8 +18,8 @@ import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { StatTile } from '@/components/ui/stat-tile'
 import { toast } from '@/components/ui/toast-store'
-import { categoriesApi, productsApi } from '@/api'
-import type { Category, QuickAddResult } from '@/api'
+import { categoriesApi, productsApi, storesApi } from '@/api'
+import type { Category, QuickAddResult, Store } from '@/api'
 import { useCurrencySymbol } from '@/hooks/useSettings'
 import { cn, formatMoney } from '@/lib/utils'
 
@@ -39,6 +39,7 @@ export function AddProductPage() {
 
   const [text, setText] = useState('')
   const [categoryId, setCategoryId] = useState<string>('')
+  const [storeId, setStoreId] = useState<string>('')
   const [results, setResults] = useState<QuickAddResult[] | null>(null)
 
   const categories = useQuery<Category[]>({
@@ -46,7 +47,16 @@ export function AddProductPage() {
     queryFn: () => categoriesApi.list(),
   })
 
+  const stores = useQuery<Store[]>({
+    queryKey: ['stores'],
+    queryFn: () => storesApi.list(),
+  })
+
   const urls = useMemo(() => parseUrls(text), [text])
+  const websiteStores = useMemo(
+    () => (stores.data ?? []).filter((store) => !store.manual_only),
+    [stores.data],
+  )
   const validCount = urls.filter((u) => URL_RE.test(u)).length
   const invalidCount = urls.length - validCount
 
@@ -55,6 +65,7 @@ export function AddProductPage() {
       productsApi.quickAdd({
         urls,
         category_id: categoryId ? Number(categoryId) : null,
+        store_id: storeId ? Number(storeId) : null,
       }),
     onSuccess: (data) => {
       setResults(data.results)
@@ -108,7 +119,7 @@ export function AddProductPage() {
             onChange={(e) => setText(e.target.value)}
             disabled={quickAdd.isPending}
           />
-          <div className="mt-3 flex flex-wrap items-end gap-4">
+          <div className="mt-3 grid gap-3 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto] md:items-end">
             <div className="space-y-1.5">
               <Label htmlFor="category">Category (optional)</Label>
               <Select
@@ -125,8 +136,24 @@ export function AddProductPage() {
                 ))}
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="store">Store (optional)</Label>
+              <Select
+                id="store"
+                value={storeId}
+                onChange={(e) => setStoreId(e.target.value)}
+                disabled={quickAdd.isPending || stores.isLoading}
+              >
+                <option value="">Auto-detect from URL</option>
+                {websiteStores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
             <Button
-              className="ml-auto"
+              className="md:ml-auto"
               onClick={() => quickAdd.mutate()}
               disabled={validCount === 0 || quickAdd.isPending}
             >

@@ -32,7 +32,9 @@ import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { toast } from '@/components/ui/toast-store'
 import { useLiveTime } from '@/hooks/useLiveTime'
+import { useTimezone } from '@/hooks/useSettings'
 import { driveApi, scraperApi, settingsApi } from '@/api'
+import { formatApiDateTime } from '@/lib/utils'
 import type {
   DatabaseTransferInfo,
   DriveSnapshot,
@@ -209,8 +211,10 @@ const CURRENCY_PRESETS: Array<{ code: string; symbol: string; label: string }> =
   { code: 'ZWL', symbol: 'Z$', label: 'ZWL — Zimbabwean Dollar' },
 ]
 
-const TIMEZONE_PRESETS = [
+const PREFERRED_TIMEZONES = [
   'UTC',
+  'Asia/Colombo',
+  'Asia/Kolkata',
   'America/New_York',
   'America/Chicago',
   'America/Denver',
@@ -225,16 +229,42 @@ const TIMEZONE_PRESETS = [
   'Europe/Moscow',
   'Europe/Istanbul',
   'Asia/Dubai',
-  'Asia/Kolkata',
+  'Asia/Karachi',
+  'Asia/Kathmandu',
+  'Asia/Dhaka',
+  'Asia/Yangon',
   'Asia/Bangkok',
+  'Asia/Jakarta',
+  'Asia/Manila',
   'Asia/Singapore',
   'Asia/Hong_Kong',
   'Asia/Shanghai',
+  'Asia/Taipei',
   'Asia/Tokyo',
   'Asia/Seoul',
+  'Australia/Perth',
+  'Australia/Adelaide',
   'Australia/Sydney',
   'Pacific/Auckland',
 ]
+
+const TIMEZONE_PRESETS = Array.from(
+  new Set([
+    ...PREFERRED_TIMEZONES,
+    ...((Intl as typeof Intl & {
+      supportedValuesOf?: (key: 'timeZone') => string[]
+    }).supportedValuesOf?.('timeZone') ?? []),
+  ]),
+).sort((a, b) => {
+  const preferredA = PREFERRED_TIMEZONES.indexOf(a)
+  const preferredB = PREFERRED_TIMEZONES.indexOf(b)
+  if (preferredA !== -1 || preferredB !== -1) {
+    if (preferredA === -1) return 1
+    if (preferredB === -1) return -1
+    return preferredA - preferredB
+  }
+  return a.localeCompare(b)
+})
 
 const CRON_PRESETS = [
   { value: '0 * * * *', label: 'Every hour' },
@@ -340,7 +370,7 @@ export function SettingsPage() {
   }
 
   const nextLabel = next.data?.next_run_time
-    ? new Date(next.data.next_run_time).toLocaleString()
+    ? formatApiDateTime(next.data.next_run_time, form.timezone)
     : form.scrape_enabled
       ? '—'
       : 'disabled'
@@ -667,6 +697,7 @@ function SiteProfilesCard() {
 function DataPortabilityCard() {
   const qc = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const timezone = useTimezone()
   const info = useQuery<DatabaseTransferInfo>({
     queryKey: ['settings', 'database-info'],
     queryFn: () => settingsApi.databaseInfo(),
@@ -731,7 +762,7 @@ function DataPortabilityCard() {
 
   const counts = info.data?.counts
   const modifiedLabel = info.data?.database_modified_at
-    ? new Date(info.data.database_modified_at).toLocaleString()
+    ? formatApiDateTime(info.data.database_modified_at, timezone)
     : 'not yet saved'
 
   return (
@@ -992,6 +1023,7 @@ function formatBytes(value: number | null | undefined): string {
 
 function DriveSyncCard() {
   const qc = useQueryClient()
+  const timezone = useTimezone()
   const status = useQuery<DriveStatus>({
     queryKey: ['drive', 'status'],
     queryFn: () => driveApi.status(),
@@ -1178,7 +1210,7 @@ function DriveSyncCard() {
     <CloudOff className="h-4 w-4" />
   )
   const lastPushLabel = status.data?.last_push_at
-    ? new Date(status.data.last_push_at).toLocaleString()
+    ? formatApiDateTime(status.data.last_push_at, timezone)
     : 'never'
 
   return (
@@ -1397,7 +1429,7 @@ function DriveSyncCard() {
                 <ul className="mt-3 divide-y divide-border/60">
                   {snapshots.data.snapshots.map((snap) => {
                     const created = snap.created_time
-                      ? new Date(snap.created_time).toLocaleString()
+                      ? formatApiDateTime(snap.created_time, timezone)
                       : '—'
                     const sizeKb = snap.size != null ? Math.round(snap.size / 1024) : null
                     return (

@@ -22,11 +22,53 @@ export function formatMoney(
   })}`
 }
 
+const TZ_SUFFIX_RE = /(?:z|[+-]\d{2}:?\d{2})$/i
+
+export function normalizeApiTimestamp(iso: string): string {
+  const value = iso.trim()
+  if (!value || TZ_SUFFIX_RE.test(value)) return value
+  return `${value.replace(' ', 'T')}Z`
+}
+
+export function parseApiDate(iso: string | null | undefined): Date | null {
+  if (!iso) return null
+  const date = new Date(normalizeApiTimestamp(iso))
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+export function formatApiDateTime(
+  iso: string | null | undefined,
+  timeZone?: string | null,
+): string {
+  const date = parseApiDate(iso)
+  if (!date) return iso ?? 'n/a'
+  try {
+    return date.toLocaleString(undefined, timeZone ? { timeZone } : undefined)
+  } catch {
+    return date.toLocaleString()
+  }
+}
+
+export function formatApiDate(
+  iso: string | null | undefined,
+  timeZone?: string | null,
+): string {
+  const date = parseApiDate(iso)
+  if (!date) return iso ?? 'n/a'
+  try {
+    return date.toLocaleDateString(undefined, timeZone ? { timeZone } : undefined)
+  } catch {
+    return date.toLocaleDateString()
+  }
+}
+
 export function formatRelativeTime(iso: string | null | undefined): string {
   if (!iso) return 'never'
-  const then = new Date(iso).getTime()
+  const date = parseApiDate(iso)
+  if (!date) return iso
+  const then = date.getTime()
   if (Number.isNaN(then)) return iso
-  const diffMs = Date.now() - then
+  const diffMs = Math.max(0, Date.now() - then)
   const mins = Math.round(diffMs / 60_000)
   if (mins < 1) return 'just now'
   if (mins < 60) return `${mins}m ago`

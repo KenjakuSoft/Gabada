@@ -23,10 +23,16 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StockPill } from '@/components/products/StockPill'
 import { activityApi } from '@/api'
-import { useCurrencySymbol } from '@/hooks/useSettings'
+import { useCurrencySymbol, useTimezone } from '@/hooks/useSettings'
 import { useLiveTime } from '@/hooks/useLiveTime'
 import type { ActivityEntry } from '@/api'
-import { cn, formatDelta, formatMoney } from '@/lib/utils'
+import {
+  cn,
+  formatApiDateTime,
+  formatDelta,
+  formatMoney,
+  parseApiDate,
+} from '@/lib/utils'
 
 const REFRESH_MS = 30_000
 const EMPTY_ENTRIES: ActivityEntry[] = []
@@ -276,6 +282,7 @@ interface ActivityProductRowProps {
 
 function ActivityProductRow({ group, symbol }: ActivityProductRowProps) {
   const live = useLiveTime(group.latestAt)
+  const timezone = useTimezone()
   const primaryChange = normalizeChangeType(group.entries[0]?.change_type ?? 'unknown')
   const changePresentation = CHANGE_PRESENTATION[primaryChange]
   const ChangeIcon = changePresentation.icon
@@ -340,7 +347,12 @@ function ActivityProductRow({ group, symbol }: ActivityProductRowProps) {
 
       <div className="mt-3 divide-y divide-border/70 rounded-md border border-border/70 bg-card/40">
         {group.entries.map((entry) => (
-          <ActivityChangeLine key={entry.id} entry={entry} symbol={symbol} />
+          <ActivityChangeLine
+            key={entry.id}
+            entry={entry}
+            symbol={symbol}
+            timezone={timezone}
+          />
         ))}
       </div>
     </li>
@@ -350,9 +362,14 @@ function ActivityProductRow({ group, symbol }: ActivityProductRowProps) {
 interface ActivityChangeLineProps {
   entry: ActivityEntry
   symbol: string
+  timezone: string
 }
 
-function ActivityChangeLine({ entry, symbol }: ActivityChangeLineProps) {
+function ActivityChangeLine({
+  entry,
+  symbol,
+  timezone,
+}: ActivityChangeLineProps) {
   const normalizedChange = normalizeChangeType(entry.change_type)
   const changePresentation = CHANGE_PRESENTATION[normalizedChange]
   const ChangeIcon = changePresentation.icon
@@ -377,7 +394,7 @@ function ActivityChangeLine({ entry, symbol }: ActivityChangeLineProps) {
       <div className="min-w-0">
         <div className="truncate text-sm font-medium">{entry.store_name}</div>
         <div className="mt-0.5 text-[11px] text-muted-foreground">
-          {new Date(entry.scraped_at).toLocaleString()}
+          {formatApiDateTime(entry.scraped_at, timezone)}
         </div>
       </div>
 
@@ -486,7 +503,9 @@ function groupActivity(entries: ActivityEntry[]): ActivityGroup[] {
     }
 
     current.entries.push(entry)
-    if (new Date(entry.scraped_at).getTime() > new Date(current.latestAt).getTime()) {
+    const entryTime = parseApiDate(entry.scraped_at)?.getTime() ?? 0
+    const currentTime = parseApiDate(current.latestAt)?.getTime() ?? 0
+    if (entryTime > currentTime) {
       current.latestAt = entry.scraped_at
     }
   }
@@ -495,11 +514,15 @@ function groupActivity(entries: ActivityEntry[]): ActivityGroup[] {
     .map((group) => ({
       ...group,
       entries: [...group.entries].sort(
-        (a, b) => new Date(b.scraped_at).getTime() - new Date(a.scraped_at).getTime(),
+        (a, b) =>
+          (parseApiDate(b.scraped_at)?.getTime() ?? 0) -
+          (parseApiDate(a.scraped_at)?.getTime() ?? 0),
       ),
     }))
     .sort(
-      (a, b) => new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime(),
+      (a, b) =>
+        (parseApiDate(b.latestAt)?.getTime() ?? 0) -
+        (parseApiDate(a.latestAt)?.getTime() ?? 0),
     )
 }
 

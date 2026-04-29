@@ -11,7 +11,7 @@ when a site layout changes.
 
 ## Current Release
 
-Latest stable release: `v0.4.0`
+Latest stable release: `v0.5.0`
 
 Recent highlights:
 
@@ -390,7 +390,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./packaging/build_release.sh --app-version 0.4.0
+./packaging/build_release.sh --app-version 0.5.0
 ```
 
 Pushing a `v*` tag or publishing a GitHub Release triggers

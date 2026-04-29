@@ -29,10 +29,10 @@ import { EditProductCard } from '@/components/products/EditProductCard'
 import { PriceChart } from '@/components/products/PriceChart'
 import { LogsTable } from '@/components/products/LogsTable'
 import { logsApi, productsApi, scraperApi } from '@/api'
-import { useCurrencySymbol } from '@/hooks/useSettings'
+import { useCurrencySymbol, useTimezone } from '@/hooks/useSettings'
 import { useLiveTime } from '@/hooks/useLiveTime'
-import type { PriceLog, Product } from '@/api'
-import { cn } from '@/lib/utils'
+import type { PriceLog, Product, ProductStoreSummary } from '@/api'
+import { cn, formatApiDate, parseApiDate } from '@/lib/utils'
 
 type HistoryRange = 'all' | 'today' | '7d' | '30d' | '90d' | 'custom'
 
@@ -51,6 +51,7 @@ export function ProductDetailPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const symbol = useCurrencySymbol()
+  const timezone = useTimezone()
   const [editing, setEditing] = useState(false)
   const [historyStoreId, setHistoryStoreId] = useState('all')
   const [historyRange, setHistoryRange] = useState<HistoryRange>('all')
@@ -89,6 +90,15 @@ export function ProductDetailPage() {
     if (historyStoreId === 'all') return list
     return list.filter((log) => String(log.product_store_id) === historyStoreId)
   }, [historyStoreId, logs.data])
+
+  const historyLogGroups = useMemo(() => {
+    return historyStores
+      .map((store) => ({
+        store,
+        logs: historyLogs.filter((log) => log.product_store_id === store.id),
+      }))
+      .filter((group) => historyStoreId !== 'all' || group.logs.length > 0)
+  }, [historyLogs, historyStoreId, historyStores])
 
   const scrapeAll = useMutation({
     mutationFn: async () => {
@@ -274,7 +284,7 @@ export function ProductDetailPage() {
             title={<LiveTimeLine iso={recent} />}
           />
           <p className="mt-2 text-xs text-muted-foreground">
-            Created {new Date(p.created_at).toLocaleDateString()} · #{p.id}
+            Created {formatApiDate(p.created_at, timezone)} · #{p.id}
           </p>
         </BentoTile>
       </BentoGrid>
@@ -416,16 +426,58 @@ export function ProductDetailPage() {
           <div className="mt-3">
             {logs.isLoading ? (
               <Skeleton className="h-52 w-full" />
+            ) : historyStoreId === 'all' ? (
+              <StoreLogSections
+                groups={historyLogGroups}
+                stores={p.stores}
+                symbol={symbol}
+              />
             ) : (
               <LogsTable
                 logs={historyLogs}
                 stores={p.stores}
                 symbol={symbol}
+                showStoreColumn={false}
               />
             )}
           </div>
         </BentoTile>
       </BentoGrid>
+    </div>
+  )
+}
+
+function StoreLogSections({
+  groups,
+  stores,
+  symbol,
+}: {
+  groups: Array<{ store: ProductStoreSummary; logs: PriceLog[] }>
+  stores: ProductStoreSummary[]
+  symbol: string
+}) {
+  if (groups.length === 0) {
+    return <LogsTable logs={[]} stores={stores} symbol={symbol} />
+  }
+
+  return (
+    <div className="space-y-5">
+      {groups.map(({ store, logs }) => (
+        <section key={store.id} className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold">{store.store_name}</div>
+            <Badge variant="muted" className="text-[10px]">
+              {logs.length} log{logs.length === 1 ? '' : 's'}
+            </Badge>
+          </div>
+          <LogsTable
+            logs={logs}
+            stores={[store]}
+            symbol={symbol}
+            showStoreColumn={false}
+          />
+        </section>
+      ))}
     </div>
   )
 }
@@ -522,9 +574,15 @@ function computeStats(p: Product): DetailStats {
 
 function mostRecentScrape(p: Product): string | null {
   let newest: string | null = null
+  let newestMs = -Infinity
   for (const s of p.stores) {
     if (!s.latest_scraped_at) continue
-    if (!newest || s.latest_scraped_at > newest) newest = s.latest_scraped_at
+    const scrapedAt = parseApiDate(s.latest_scraped_at)?.getTime()
+    if (scrapedAt == null || Number.isNaN(scrapedAt)) continue
+    if (scrapedAt > newestMs) {
+      newest = s.latest_scraped_at
+      newestMs = scrapedAt
+    }
   }
   return newest
 }

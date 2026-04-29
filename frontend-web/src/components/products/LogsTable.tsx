@@ -1,15 +1,23 @@
 import { ArrowRight } from 'lucide-react'
 import type { PriceLog, ProductStoreSummary } from '@/api'
-import { formatDelta, formatMoney } from '@/lib/utils'
+import { useTimezone } from '@/hooks/useSettings'
+import { formatApiDateTime, formatDelta, formatMoney } from '@/lib/utils'
 import { StockPill } from './StockPill'
 
 interface LogsTableProps {
   logs: PriceLog[]
   stores: ProductStoreSummary[]
   symbol: string
+  showStoreColumn?: boolean
 }
 
-export function LogsTable({ logs, stores, symbol }: LogsTableProps) {
+export function LogsTable({
+  logs,
+  stores,
+  symbol,
+  showStoreColumn = true,
+}: LogsTableProps) {
+  const timezone = useTimezone()
   const storeName = new Map(stores.map((s) => [s.id, s.store_name]))
 
   if (logs.length === 0) {
@@ -27,7 +35,9 @@ export function LogsTable({ logs, stores, symbol }: LogsTableProps) {
           <thead className="sticky top-0 z-10 bg-muted/90 text-xs uppercase text-muted-foreground backdrop-blur">
             <tr>
               <th className="px-3 py-2 text-left font-medium">When</th>
-              <th className="px-3 py-2 text-left font-medium">Store</th>
+              {showStoreColumn ? (
+                <th className="px-3 py-2 text-left font-medium">Store</th>
+              ) : null}
               <th className="px-3 py-2 text-right font-medium">Retail</th>
               <th className="px-3 py-2 text-right font-medium">Dealer</th>
               <th className="px-3 py-2 text-right font-medium">Delta</th>
@@ -50,11 +60,13 @@ export function LogsTable({ logs, stores, symbol }: LogsTableProps) {
                   className="border-t border-border transition-colors hover:bg-accent/25"
                 >
                   <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                    {new Date(log.scraped_at).toLocaleString()}
+                    {formatApiDateTime(log.scraped_at, timezone)}
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    {storeName.get(log.product_store_id) ?? `#${log.product_store_id}`}
-                  </td>
+                  {showStoreColumn ? (
+                    <td className="whitespace-nowrap px-3 py-2">
+                      {storeName.get(log.product_store_id) ?? `#${log.product_store_id}`}
+                    </td>
+                  ) : null}
                   <td className="whitespace-nowrap px-3 py-2 text-right">
                     <RetailLogPrice log={log} symbol={symbol} />
                   </td>

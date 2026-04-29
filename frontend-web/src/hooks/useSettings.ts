@@ -14,3 +14,8 @@ export function useCurrencySymbol(): string {
   const { data } = useSettings()
   return data?.currency_symbol ?? '$'
 }
+
+export function useTimezone(): string {
+  const { data } = useSettings()
+  return data?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'
+}
