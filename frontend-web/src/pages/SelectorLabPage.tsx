@@ -139,10 +139,16 @@ function candidateSummary(candidate: SelectorLabCandidate, symbol: string): stri
   return candidate.sample ?? candidate.text ?? 'n/a'
 }
 
-function resultValue(result: ScrapeResult, symbol: string): string {
-  if (result.discounted_price != null) return formatMoney(result.discounted_price, symbol)
+function regularPriceValue(result: ScrapeResult, symbol: string): string {
   if (result.price != null) return formatMoney(result.price, symbol)
   return 'n/a'
+}
+
+function hasDistinctDiscount(result: ScrapeResult | null | undefined): boolean {
+  return (
+    result?.discounted_price != null &&
+    (result.price == null || Math.abs(result.discounted_price - result.price) >= 0.01)
+  )
 }
 
 function candidateBlob(candidate: SelectorLabCandidate): string {
@@ -371,6 +377,7 @@ export function SelectorLabPage() {
 
   const result = analyze.data
   const displayed = test.data ?? result?.extracted ?? null
+  const showDisplayedDiscount = hasDistinctDiscount(displayed)
   const host = result?.hostname ?? hostnameFromUrl(result?.final_url ?? url)
   const noisyHost = isNoisyHost(host)
   const saveTarget = draft?.targetStoreId
@@ -749,22 +756,26 @@ export function SelectorLabPage() {
               <dl className="mt-3 grid grid-cols-[96px_1fr] gap-x-3 gap-y-1.5 text-sm">
                 <dt className="text-muted-foreground">Title</dt>
                 <dd className="line-clamp-2">{displayed?.title ?? 'n/a'}</dd>
-                <dt className="text-muted-foreground">Price</dt>
-                <dd className="font-semibold tabular-nums">
-                  {displayed ? resultValue(displayed, symbol) : 'n/a'}
-                </dd>
                 <dt className="text-muted-foreground">Regular</dt>
                 <dd className="font-semibold tabular-nums">
-                  {displayed?.price != null
-                    ? formatMoney(displayed.price, symbol)
-                    : 'n/a'}
+                  {displayed ? regularPriceValue(displayed, symbol) : 'n/a'}
                 </dd>
-                <dt className="text-muted-foreground">Discounted</dt>
-                <dd className="font-semibold tabular-nums">
-                  {displayed?.discounted_price != null
-                    ? formatMoney(displayed.discounted_price, symbol)
-                    : 'n/a'}
+                <dt className="text-muted-foreground">Raw regular</dt>
+                <dd className="truncate font-mono text-xs">
+                  {displayed?.raw_price ?? 'n/a'}
                 </dd>
+                {showDisplayedDiscount && displayed?.discounted_price != null ? (
+                  <>
+                    <dt className="text-muted-foreground">Discounted</dt>
+                    <dd className="font-semibold tabular-nums text-success">
+                      {formatMoney(displayed.discounted_price, symbol)}
+                    </dd>
+                    <dt className="text-muted-foreground">Raw discount</dt>
+                    <dd className="truncate font-mono text-xs">
+                      {displayed?.raw_discounted ?? 'n/a'}
+                    </dd>
+                  </>
+                ) : null}
                 <dt className="text-muted-foreground">Dealer</dt>
                 <dd className="font-semibold tabular-nums">
                   {displayed?.dealer_price != null
@@ -785,10 +796,6 @@ export function SelectorLabPage() {
                   >
                     {displayed?.stock_status ?? 'unknown'}
                   </Badge>
-                </dd>
-                <dt className="text-muted-foreground">Raw price</dt>
-                <dd className="truncate font-mono text-xs">
-                  {displayed?.raw_price ?? 'n/a'}
                 </dd>
                 <dt className="text-muted-foreground">Raw dealer</dt>
                 <dd className="truncate font-mono text-xs">

@@ -37,6 +37,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for full release notes.
 - Capture per-store login sessions for sites that show prices only after sign-in.
 - Export and import backup bundles containing the database and scraper profiles.
 - Push and restore manual Google Drive snapshots from the Settings page.
+- Check for new GitHub Releases from Settings and open the recommended update asset.
 - Run as a local web app, a desktop-style launcher, or a packaged desktop build.
 
 ## Price Fields
@@ -404,6 +405,15 @@ Expected artifact names:
 | Windows | `Gabada-<tag>-windows-x64.zip` |
 | Linux | `Gabada-<tag>-linux-x64.tar.gz` |
 | macOS | `Gabada-<tag>-macos-arm64.tar.gz` |
+
+Each release job also writes an update manifest:
+
+```text
+gabada-update-<tag>-<platform>-<arch>.json
+```
+
+The Settings page uses GitHub Releases to compare the running app version with
+the newest release and recommend the matching installer or portable bundle.
 
 ## Troubleshooting
 

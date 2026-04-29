@@ -18,6 +18,7 @@ from database.models import (
     DatabaseTransferInfo,
     Settings,
     SettingsUpdate,
+    UpdateCheckResponse,
 )
 from scheduler.jobs import next_run_time, pause_scheduler, reschedule, resume_scheduler
 from services.backup_bundle import (
@@ -30,6 +31,7 @@ from services.backup_bundle import (
     validate_backup_database as _validate_backup_database,
     BACKUP_DB_NAME as _BACKUP_DB_NAME,
 )
+from services.update_checker import check_for_updates, update_check_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -180,6 +182,15 @@ async def schedule_next() -> dict:
 @router.get("/database/info", response_model=DatabaseTransferInfo)
 async def get_database_info() -> DatabaseTransferInfo:
     return await asyncio.to_thread(_database_transfer_info)
+
+
+@router.get("/updates/latest", response_model=UpdateCheckResponse)
+async def get_latest_update() -> UpdateCheckResponse:
+    try:
+        return await check_for_updates()
+    except Exception as exc:
+        logger.warning("Failed to check for updates: %s", exc)
+        return update_check_error(str(exc))
 
 
 @router.post("/shutdown")

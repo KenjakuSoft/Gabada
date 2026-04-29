@@ -17,6 +17,7 @@ interface ScrapeReviewNoticeProps extends HTMLAttributes<HTMLDivElement> {
     | 'price'
     | 'discounted_price'
     | 'raw_price'
+    | 'raw_discounted'
   >
   symbol?: string
   choice?: PriceReviewChoice
@@ -42,6 +43,10 @@ export function ScrapeReviewNotice({
 
   const corrected = result.review_status === 'corrected'
   const keptPrice = result.discounted_price ?? result.price ?? null
+  const keptRaw =
+    result.discounted_price != null
+      ? result.raw_discounted ?? result.raw_price
+      : result.raw_price
   const altPrice = result.review_alternative_price
   const altLabel = result.review_alternative_label ?? 'alternative price'
 
@@ -87,7 +92,7 @@ export function ScrapeReviewNotice({
                   onClick={() => onChoiceChange('kept')}
                   label={corrected ? 'Auto-corrected (in use)' : 'Kept (in use)'}
                   price={keptPrice}
-                  raw={result.raw_price}
+                  raw={keptRaw}
                   symbol={symbol}
                 />
                 <ChoiceButton

@@ -160,6 +160,30 @@ export interface DatabaseImportResponse {
   counts: DatabaseCounts
 }
 
+export interface UpdateAsset {
+  name: string
+  browser_download_url: string
+  size: number | null
+  kind: 'installer' | 'portable' | 'manifest' | 'other'
+  platform: string | null
+  arch: string | null
+}
+
+export interface UpdateCheckResponse {
+  current_version: string
+  latest_version: string | null
+  update_available: boolean
+  release_url: string | null
+  release_name: string | null
+  published_at: string | null
+  install_mode: 'desktop' | 'source'
+  platform: string
+  arch: string
+  recommended_asset: UpdateAsset | null
+  assets: UpdateAsset[]
+  error: string | null
+}
+
 export interface ProbeCandidate {
   text: string
   value: number | null

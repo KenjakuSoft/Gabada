@@ -159,10 +159,12 @@ function ProbeResults({
   const hasAlternative = e.review_alternative_price != null
   const [priceChoice, setPriceChoice] = useState<PriceReviewChoice>('kept')
   const useAlternative = hasAlternative && priceChoice === 'alternative'
-  const displayedPrice = useAlternative
-    ? e.review_alternative_price
-    : (e.discounted_price ?? e.price)
-  const displayedRaw = useAlternative ? e.review_alternative_raw : e.raw_price
+  const regularPrice = useAlternative ? e.review_alternative_price : e.price
+  const regularRaw = useAlternative ? e.review_alternative_raw : e.raw_price
+  const showDiscount =
+    !useAlternative &&
+    e.discounted_price != null &&
+    (e.price == null || Math.abs(e.discounted_price - e.price) >= 0.01)
 
   return (
     <div className="space-y-6">
@@ -190,10 +192,12 @@ function ProbeResults({
             <dd className="truncate font-mono text-xs">
               {result.final_url ?? result.url}
             </dd>
-            <dt className="text-muted-foreground">Price</dt>
+            <dt className="text-muted-foreground">
+              {useAlternative ? 'Price' : 'Regular'}
+            </dt>
             <dd className="font-semibold tabular-nums">
-              {displayedPrice != null
-                ? formatMoney(displayedPrice, symbol)
+              {regularPrice != null
+                ? formatMoney(regularPrice, symbol)
                 : '—'}
               {useAlternative ? (
                 <Badge variant="info" className="ml-2 text-[10px]">
@@ -201,12 +205,28 @@ function ProbeResults({
                 </Badge>
               ) : null}
             </dd>
-            {!useAlternative && e.discounted_price != null ? (
+            {regularRaw ? (
+              <>
+                <dt className="text-muted-foreground">
+                  {useAlternative ? 'Raw price' : 'Raw regular'}
+                </dt>
+                <dd className="truncate font-mono text-xs">{regularRaw}</dd>
+              </>
+            ) : null}
+            {showDiscount && e.discounted_price != null ? (
               <>
                 <dt className="text-muted-foreground">Discounted</dt>
                 <dd className="font-semibold tabular-nums text-success">
                   {formatMoney(e.discounted_price, symbol)}
                 </dd>
+                {e.raw_discounted ? (
+                  <>
+                    <dt className="text-muted-foreground">Raw discount</dt>
+                    <dd className="truncate font-mono text-xs">
+                      {e.raw_discounted}
+                    </dd>
+                  </>
+                ) : null}
               </>
             ) : null}
             {e.dealer_price != null ? (
@@ -221,12 +241,6 @@ function ProbeResults({
             <dd>
               <StockBadge status={e.stock_status} />
             </dd>
-            {displayedRaw ? (
-              <>
-                <dt className="text-muted-foreground">Raw price</dt>
-                <dd className="truncate font-mono text-xs">{displayedRaw}</dd>
-              </>
-            ) : null}
           </dl>
           {e.error ? (
             <div className="mt-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">

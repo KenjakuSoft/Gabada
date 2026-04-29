@@ -35,7 +35,7 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.os }}
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name || inputs.tag || '' }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name || '' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -56,6 +56,28 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Stamp app version
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("backend/app_version.py")
+          version = os.environ["VERSION"]
+          text = path.read_text(encoding="utf-8")
+          text = re.sub(
+              r'^APP_VERSION = ".*"$',
+              f'APP_VERSION = "{version}"',
+              text,
+              flags=re.MULTILINE,
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -150,6 +172,25 @@ jobs:
         if: matrix.platform != 'windows'
         shell: bash
         run: ls -la packaging/output
+
+      - name: Generate update manifest
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          REPO: ${{ github.repository }}
+        run: |
+          tag="${TAG:-manual}"
+          "$VENV_PY" packaging/make_update_manifest.py \
+            --tag "$tag" \
+            --version "$VERSION" \
+            --platform "$PLATFORM" \
+            --arch "$ARCH" \
+            --repo "$REPO" \
+            --output "packaging/output/gabada-update-$tag-$PLATFORM-$ARCH.json" \
+            packaging/output/*
 
       - name: Upload workflow artifacts
         if: always()

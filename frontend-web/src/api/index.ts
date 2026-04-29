@@ -23,6 +23,7 @@ import type {
   Store,
   StoreCatalogClearResult,
   StoreLoginSessionResponse,
+  UpdateCheckResponse,
   WooSyncResult,
   WooCredentials,
   WooProductPreview,
@@ -197,6 +198,12 @@ export const settingsApi = {
       form,
       { headers: { 'Content-Type': 'multipart/form-data' } },
     )
+    return data
+  },
+  checkUpdates: async (): Promise<UpdateCheckResponse> => {
+    const { data } = await http.get<UpdateCheckResponse>('/settings/updates/latest', {
+      timeout: 30_000,
+    })
     return data
   },
 }

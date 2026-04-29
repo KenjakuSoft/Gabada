@@ -5,6 +5,15 @@ All notable changes to Gabada are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **In-app update checks.** Settings now has an Updates card that asks the backend to compare the running app version with the latest GitHub Release and opens the recommended installer or portable asset for the current platform.
+- **Release update manifests.** The release workflow now generates `gabada-update-<tag>-<platform>-<arch>.json` alongside each release artifact, including asset size, SHA-256, platform, arch, and download URL metadata for future updater flows.
+
+### Fixed
+- **Probe and Selector Lab price display clarity.** Regular/raw price now stays under the regular price row, and discounted price/raw discount only renders when a distinct sale price is actually present.
+
 ## [0.3.1] — 2026-04-29
 
 ### Fixed
@@ -170,6 +179,9 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
+[Unreleased]: https://github.com/Xx-LiDAF-xX/Gabada/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.3.1
+[0.3.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.3.0
 [0.2.5]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.5
 [0.2.4]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.4
 [0.2.3]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.3
