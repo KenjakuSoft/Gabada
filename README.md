@@ -11,15 +11,15 @@ when a site layout changes.
 
 ## Current Release
 
-Latest stable release: `v0.3.1`
+Latest stable release: `v0.4.0`
 
 Recent highlights:
 
-- Fixed the Nexxcom-style `Rs 4` false price regression in Probe and Selector Lab.
-- Added manual Google Drive snapshot sync for moving a Gabada library between machines.
-- Made Selector Lab respect user-pinned selectors during scrape review.
-- Hardened suspicious price review so unrelated text and installment/payment values are less likely to replace real product prices.
+- Added in-app update checks with release asset recommendations.
+- Added update manifests to future GitHub Release artifacts.
+- Cleaned up Probe and Selector Lab price displays so discounts only appear when a distinct sale price exists.
 - Tightened local API browser origin checks and made manual scrape actions wait for real completion before refreshing the UI.
+- Fixed the Nexxcom-style `Rs 4` false price regression in Probe and Selector Lab.
 
 See [CHANGELOG.md](./CHANGELOG.md) for full release notes.
 
@@ -390,7 +390,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./packaging/build_release.sh --app-version 0.3.1
+./packaging/build_release.sh --app-version 0.4.0
 ```
 
 Pushing a `v*` tag or publishing a GitHub Release triggers
