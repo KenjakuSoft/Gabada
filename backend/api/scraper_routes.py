@@ -20,6 +20,7 @@ from database.models import (
     SelectorLabSaveResponse,
     SelectorLabTestRequest,
 )
+from api.price_log_utils import get_settings_currency, infer_currency_code
 from scraper import site_profiles
 from scraper.engine import inspect_selectors, probe, save_login_state, scrape
 from scraper.site_profiles import apply_platform_defaults
@@ -46,6 +47,35 @@ def _effective_price(
     return discounted_price if discounted_price is not None else price
 
 
+def _has_any_price(result: ScrapeResult) -> bool:
+    return (
+        result.price is not None
+        or result.discounted_price is not None
+        or result.dealer_price is not None
+    )
+
+
+async def _latest_price_row(db, product_store_id: int):
+    rows = await db.execute_fetchall(
+        """SELECT title, price, discounted_price, dealer_price,
+                  raw_price, raw_discounted, raw_dealer, currency_code
+           FROM price_logs
+           WHERE product_store_id = ?
+             AND (
+                 price IS NOT NULL
+                 OR discounted_price IS NOT NULL
+                 OR dealer_price IS NOT NULL
+                 OR NULLIF(TRIM(raw_price), '') IS NOT NULL
+                 OR NULLIF(TRIM(raw_discounted), '') IS NOT NULL
+                 OR NULLIF(TRIM(raw_dealer), '') IS NOT NULL
+             )
+           ORDER BY scraped_at DESC, id DESC
+           LIMIT 1""",
+        (product_store_id,),
+    )
+    return rows[0] if rows else None
+
+
 async def _compute_change(
     db, product_store_id: int, result: ScrapeResult
 ) -> tuple[str, Optional[float], Optional[float], Optional[str]]:
@@ -54,7 +84,7 @@ async def _compute_change(
         """SELECT price, discounted_price, stock_status
            FROM price_logs
            WHERE product_store_id = ?
-           ORDER BY scraped_at DESC LIMIT 1""",
+           ORDER BY scraped_at DESC, id DESC LIMIT 1""",
         (product_store_id,),
     )
 
@@ -106,7 +136,13 @@ async def _do_scrape(product_store_id: int) -> ScrapeRunSummary:
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
-            """SELECT ps.product_url, ps.scrape_config, s.manual_only, s.storage_state_path
+            """SELECT
+                   ps.product_url,
+                   ps.scrape_config,
+                   s.manual_only,
+                   s.storage_state_path,
+                   s.api_enabled,
+                   s.api_platform
                FROM product_stores ps
                JOIN stores s ON s.id = ps.store_id
                WHERE ps.id = ? AND ps.is_active = 1""",
@@ -128,6 +164,10 @@ async def _do_scrape(product_store_id: int) -> ScrapeRunSummary:
                 "product_store_id": product_store_id,
                 "reason": "manual_only",
             }
+        if bool(row["api_enabled"]) and row["api_platform"]:
+            from api.import_routes import sync_api_product_store
+
+            return await sync_api_product_store(product_store_id)
         config = ScrapeConfig(**json.loads(row["scrape_config"] or "{}"))
         if not config.storage_state_path and row["storage_state_path"]:
             config.storage_state_path = row["storage_state_path"]
@@ -142,6 +182,48 @@ async def _do_scrape(product_store_id: int) -> ScrapeRunSummary:
                 "result": result,
             }
 
+        local_code, local_symbol = await get_settings_currency(db)
+        currency_code = infer_currency_code(
+            result.raw_price,
+            result.raw_discounted,
+            result.raw_dealer,
+            local_code=local_code,
+            local_symbol=local_symbol,
+        )
+
+        if not _has_any_price(result):
+            previous = await _latest_price_row(db, product_store_id)
+            if previous is None:
+                logger.warning(
+                    "Scrape returned no price for ps_id=%d; keeping product unchanged",
+                    product_store_id,
+                )
+                return {
+                    "status": "failed",
+                    "product_store_id": product_store_id,
+                    "error": "Scrape did not find a price",
+                    "result": result,
+                }
+            if result.stock_status == "unknown":
+                logger.warning(
+                    "Scrape returned no price or stock change for ps_id=%d; keeping latest price",
+                    product_store_id,
+                )
+                return {
+                    "status": "skipped",
+                    "product_store_id": product_store_id,
+                    "reason": "no_price",
+                    "result": result,
+                }
+            result.price = previous["price"]
+            result.discounted_price = previous["discounted_price"]
+            result.dealer_price = previous["dealer_price"]
+            result.raw_price = result.raw_price or previous["raw_price"]
+            result.raw_discounted = result.raw_discounted or previous["raw_discounted"]
+            result.raw_dealer = result.raw_dealer or previous["raw_dealer"]
+            result.title = result.title or previous["title"]
+            currency_code = previous["currency_code"] or currency_code
+
         change_type, price_delta, previous_price, previous_stock_status = (
             await _compute_change(db, product_store_id, result)
         )
@@ -149,9 +231,9 @@ async def _do_scrape(product_store_id: int) -> ScrapeRunSummary:
         await db.execute(
             """INSERT INTO price_logs
                (product_store_id, title, price, discounted_price, dealer_price,
-                stock_status, raw_price, raw_discounted, raw_dealer,
+                stock_status, raw_price, raw_discounted, raw_dealer, currency_code,
                 change_type, price_delta, previous_price, previous_stock_status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 product_store_id,
                 result.title,
@@ -162,6 +244,7 @@ async def _do_scrape(product_store_id: int) -> ScrapeRunSummary:
                 result.raw_price,
                 result.raw_discounted,
                 result.raw_dealer,
+                currency_code,
                 change_type,
                 price_delta,
                 previous_price,
@@ -193,6 +276,8 @@ async def _do_scrape(product_store_id: int) -> ScrapeRunSummary:
 async def scrape_all_active() -> ScrapeRunSummary:
     """Called by the scheduler. Scrapes every active product_store."""
     woo_error = None
+    api_error = None
+
     try:
         from api.import_routes import sync_all_enabled_woo_stores
 
@@ -201,10 +286,22 @@ async def scrape_all_active() -> ScrapeRunSummary:
         logger.error("Failed syncing Woo stores before scrape-all: %s", exc)
         woo_error = str(exc)
 
+    try:
+        from api.import_routes import sync_all_enabled_api_stores
+
+        await sync_all_enabled_api_stores()
+    except Exception as exc:
+        logger.error("Failed syncing API stores before scrape-all: %s", exc)
+        api_error = str(exc)
+
     db = await get_db()
     try:
         rows = await db.execute_fetchall(
-            "SELECT id FROM product_stores WHERE is_active = 1"
+            """SELECT ps.id
+               FROM product_stores ps
+               JOIN stores s ON s.id = ps.store_id
+               WHERE ps.is_active = 1
+                 AND NOT (s.api_enabled = 1 AND s.api_platform IS NOT NULL)"""
         )
         ids = [row["id"] for row in rows]
     finally:
@@ -241,6 +338,9 @@ async def scrape_all_active() -> ScrapeRunSummary:
     if woo_error:
         failed += 1
         errors.append({"product_store_id": None, "error": f"Woo sync failed: {woo_error}"})
+    if api_error:
+        failed += 1
+        errors.append({"product_store_id": None, "error": f"API sync failed: {api_error}"})
 
     return {
         "status": "complete" if failed == 0 else "partial_failure",

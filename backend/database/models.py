@@ -27,6 +27,12 @@ class StoreCreate(BaseModel):
     woo_consumer_key: Optional[str] = None
     woo_consumer_secret: Optional[str] = None
     woo_auto_import_new: bool = False
+    api_enabled: bool = False
+    api_platform: Optional[str] = None
+    api_base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    api_config: dict[str, Any] = Field(default_factory=dict)
+    api_auto_import_new: bool = False
 
 
 class StoreUpdate(BaseModel):
@@ -40,6 +46,12 @@ class StoreUpdate(BaseModel):
     woo_consumer_key: Optional[str] = None
     woo_consumer_secret: Optional[str] = None
     woo_auto_import_new: Optional[bool] = None
+    api_enabled: Optional[bool] = None
+    api_platform: Optional[str] = None
+    api_base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    api_config: Optional[dict[str, Any]] = None
+    api_auto_import_new: Optional[bool] = None
 
 class Store(StoreCreate):
     id: int
@@ -47,6 +59,7 @@ class Store(StoreCreate):
     session_updated_at: Optional[datetime] = None
     created_at: datetime
     woo_last_synced_at: Optional[datetime] = None
+    api_last_synced_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 
@@ -67,6 +80,18 @@ class WooSyncResult(BaseModel):
     discovered: int = 0
     created: int = 0
     existing: int = 0
+    auto_import_new: bool = False
+    synced_at: Optional[datetime] = None
+
+
+class ApiSyncResult(BaseModel):
+    store_id: int
+    store_name: str
+    platform: str
+    discovered: int = 0
+    created: int = 0
+    existing: int = 0
+    updated: int = 0
     auto_import_new: bool = False
     synced_at: Optional[datetime] = None
 
@@ -144,6 +169,10 @@ class ProductStoreSummary(BaseModel):
     latest_dealer_price: Optional[float] = None
     latest_warranty: Optional[str] = None
     latest_stock_status: Optional[str] = None
+    latest_raw_price: Optional[str] = None
+    latest_raw_discounted: Optional[str] = None
+    latest_raw_dealer: Optional[str] = None
+    latest_currency_code: Optional[str] = None
     latest_scraped_at: Optional[datetime] = None
     latest_change_type: Optional[str] = None
     latest_price_delta: Optional[float] = None
@@ -179,6 +208,10 @@ class PriceLog(BaseModel):
     dealer_price: Optional[float] = None
     warranty: Optional[str] = None
     stock_status: Optional[str] = None
+    raw_price: Optional[str] = None
+    raw_discounted: Optional[str] = None
+    raw_dealer: Optional[str] = None
+    currency_code: Optional[str] = None
     change_type: Optional[str] = None
     price_delta: Optional[float] = None
     previous_price: Optional[float] = None
@@ -196,6 +229,10 @@ class ActivityEntry(BaseModel):
     price: Optional[float] = None
     discounted_price: Optional[float] = None
     dealer_price: Optional[float] = None
+    raw_price: Optional[str] = None
+    raw_discounted: Optional[str] = None
+    raw_dealer: Optional[str] = None
+    currency_code: Optional[str] = None
     price_delta: Optional[float] = None
     previous_price: Optional[float] = None
     stock_status: Optional[str] = None
@@ -253,6 +290,46 @@ class WooImportRequest(BaseModel):
     credentials: WooCredentials
     store_id: int
     product_ids: list[int]
+
+
+# Generic API catalog import
+
+class ApiProductPreview(BaseModel):
+    platform: str
+    external_id: str
+    name: str
+    permalink: str
+    price: Optional[float] = None
+    discounted_price: Optional[float] = None
+    currency: Optional[str] = None
+    raw_price: Optional[str] = None
+    raw_discounted: Optional[str] = None
+    stock_status: str = "unknown"
+    image_url: Optional[str] = None
+    categories: list[str] = []
+
+
+class ApiPreviewRequest(BaseModel):
+    platform: str = "steam"
+    query: Optional[str] = None
+    external_ids: list[str] = Field(default_factory=list)
+    country_code: Optional[str] = "US"
+    language: Optional[str] = "english"
+    limit: int = 25
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApiImportRequest(BaseModel):
+    platform: str = "steam"
+    store_id: int
+    external_ids: list[str]
+    country_code: Optional[str] = "US"
+    language: Optional[str] = "english"
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── File import ───────────────────────────────────────────────────────────────
@@ -445,6 +522,8 @@ class Settings(BaseModel):
     scrape_cron: str = "0 8 * * *"
     scrape_enabled: bool = True
     locale: str = "en-US"
+    price_display_mode: str = "regional"  # "regional" | "source"
+    exchange_rates: dict[str, float] = Field(default_factory=dict)
     theme: str = "system"  # "light" | "dark" | "system"
     updated_at: Optional[datetime] = None
 
@@ -459,6 +538,8 @@ class SettingsUpdate(BaseModel):
     scrape_cron: Optional[str] = None
     scrape_enabled: Optional[bool] = None
     locale: Optional[str] = None
+    price_display_mode: Optional[str] = None
+    exchange_rates: Optional[dict[str, float]] = None
     theme: Optional[str] = None
 
 

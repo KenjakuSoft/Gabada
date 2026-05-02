@@ -1,6 +1,9 @@
 import { http } from './client'
 import type {
   ActivityEntry,
+  ApiPlatform,
+  ApiProductPreview,
+  ApiSyncResult,
   Category,
   DatabaseImportResponse,
   DatabaseTransferInfo,
@@ -48,6 +51,12 @@ export const storesApi = {
     woo_consumer_key?: string | null
     woo_consumer_secret?: string | null
     woo_auto_import_new?: boolean
+    api_enabled?: boolean
+    api_platform?: ApiPlatform | null
+    api_base_url?: string | null
+    api_key?: string | null
+    api_config?: Record<string, unknown>
+    api_auto_import_new?: boolean
   }): Promise<Store> => {
     const { data } = await http.post<Store>('/stores/', body)
     return data
@@ -65,6 +74,12 @@ export const storesApi = {
       woo_consumer_key?: string | null
       woo_consumer_secret?: string | null
       woo_auto_import_new?: boolean
+      api_enabled?: boolean
+      api_platform?: ApiPlatform | null
+      api_base_url?: string | null
+      api_key?: string | null
+      api_config?: Record<string, unknown>
+      api_auto_import_new?: boolean
     },
   ): Promise<Store> => {
     const { data } = await http.patch<Store>(`/stores/${id}`, body)
@@ -72,6 +87,12 @@ export const storesApi = {
   },
   syncWoo: async (id: number): Promise<WooSyncResult> => {
     const { data } = await http.post<WooSyncResult>(`/stores/${id}/woo-sync`, undefined, {
+      timeout: 300_000,
+    })
+    return data
+  },
+  syncApi: async (id: number): Promise<ApiSyncResult> => {
+    const { data } = await http.post<ApiSyncResult>(`/stores/${id}/api-sync`, undefined, {
       timeout: 300_000,
     })
     return data
@@ -314,6 +335,39 @@ export interface SitesConfigResponse {
 }
 
 export const importApi = {
+  apiPreview: async (body: {
+    platform: ApiPlatform
+    query?: string | null
+    external_ids?: string[]
+    country_code?: string | null
+    language?: string | null
+    limit?: number
+    base_url?: string | null
+    api_key?: string | null
+    config?: Record<string, unknown>
+  }): Promise<ApiProductPreview[]> => {
+    const { data } = await http.post<ApiProductPreview[]>(
+      '/import/api/preview',
+      body,
+      { timeout: 300_000 },
+    )
+    return data
+  },
+  apiImport: async (body: {
+    platform: ApiPlatform
+    store_id: number
+    external_ids: string[]
+    country_code?: string | null
+    language?: string | null
+    base_url?: string | null
+    api_key?: string | null
+    config?: Record<string, unknown>
+  }): Promise<{ imported: number; existing: number; updated: number }> => {
+    const { data } = await http.post('/import/api/import', body, {
+      timeout: 300_000,
+    })
+    return data
+  },
   wooPreview: async (body: {
     credentials: WooCredentials
     per_page?: number

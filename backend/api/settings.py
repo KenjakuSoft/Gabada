@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import json
 import logging
 import shutil
 from datetime import datetime, timezone
@@ -45,6 +46,18 @@ async def _ensure_row(db) -> None:
 
 
 def _row_to_settings(r) -> Settings:
+    exchange_rates = {}
+    try:
+        parsed_rates = json.loads(r["exchange_rates"] or "{}")
+        if isinstance(parsed_rates, dict):
+            exchange_rates = {
+                str(code).upper(): float(rate)
+                for code, rate in parsed_rates.items()
+                if isinstance(code, str) and float(rate) > 0
+            }
+    except Exception:
+        exchange_rates = {}
+
     return Settings(
         currency_code=r["currency_code"],
         currency_symbol=r["currency_symbol"],
@@ -53,6 +66,8 @@ def _row_to_settings(r) -> Settings:
         scrape_cron=r["scrape_cron"],
         scrape_enabled=bool(r["scrape_enabled"]),
         locale=r["locale"],
+        price_display_mode=r["price_display_mode"],
+        exchange_rates=exchange_rates,
         theme=r["theme"],
         updated_at=r["updated_at"],
     )
@@ -145,6 +160,38 @@ async def update_settings(body: SettingsUpdate) -> Settings:
     for field, value in data.items():
         if field == "scrape_enabled":
             value = 1 if value else 0
+        if field == "price_display_mode":
+            value = str(value or "regional").strip().lower()
+            if value not in {"regional", "source"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="price_display_mode must be regional or source",
+                )
+        if field == "exchange_rates":
+            if not isinstance(value, dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail="exchange_rates must be a currency-rate map",
+                )
+            normalized_rates: dict[str, float] = {}
+            for code, rate in value.items():
+                normalized_code = str(code or "").strip().upper()
+                if not normalized_code:
+                    continue
+                try:
+                    numeric_rate = float(rate)
+                except (TypeError, ValueError):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid exchange rate for {normalized_code}",
+                    )
+                if numeric_rate <= 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Exchange rate for {normalized_code} must be greater than 0",
+                    )
+                normalized_rates[normalized_code] = numeric_rate
+            value = json.dumps(normalized_rates, sort_keys=True)
         updates.append((field, value))
 
     db = await get_db()

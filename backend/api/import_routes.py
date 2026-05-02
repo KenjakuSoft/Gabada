@@ -19,6 +19,9 @@ except Exception:  # pragma: no cover - optional dependency during local setup
 from api.product_service import create_product_with_store, create_store_link
 from database.db import get_db
 from database.models import (
+    ApiImportRequest,
+    ApiPreviewRequest,
+    ApiProductPreview,
     FileImportCommitRequest,
     FileImportCommitResponse,
     FileImportPreviewResponse,
@@ -29,6 +32,13 @@ from database.models import (
     WooProductPreview,
     WooPreviewRequest,
     WooSyncResult,
+)
+from services.api_catalog import (
+    fetch_api_preview_products,
+    import_api_products,
+    sync_all_enabled_api_stores,
+    sync_api_product_store,
+    sync_store_api_catalog,
 )
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -903,6 +913,16 @@ async def woo_import(body: WooImportRequest):
         await db.close()
 
     return {"imported": imported}
+
+
+@router.post("/api/preview", response_model=list[ApiProductPreview])
+async def api_preview(body: ApiPreviewRequest):
+    return await fetch_api_preview_products(body)
+
+
+@router.post("/api/import")
+async def api_import(body: ApiImportRequest):
+    return await import_api_products(body)
 
 
 def _to_cell_str(value) -> str:

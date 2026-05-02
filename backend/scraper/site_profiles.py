@@ -227,6 +227,35 @@ def find_profile(url: str) -> Optional[SiteProfile]:
     return None
 
 
+def _selector_should_yield_to_profile(
+    current_value: Optional[str],
+    profile_value: Optional[str],
+    *,
+    config_platform: Optional[str],
+    profile_platform: Optional[str],
+    field: str,
+) -> bool:
+    """Let saved site-profile selectors override stale platform defaults.
+
+    Product links often store platform-default selectors during add-product
+    auto-detect. Later, Selector Lab may save a stronger store-level selector
+    for the same field. Treat the old platform default as replaceable, while
+    still preserving any truly custom per-link selector.
+    """
+    if not profile_value:
+        return False
+    if not current_value:
+        return True
+
+    for platform in (config_platform, profile_platform):
+        if not platform:
+            continue
+        defaults = PLATFORM_SELECTORS.get(platform)
+        if defaults and current_value == defaults.get(field):
+            return True
+    return False
+
+
 def apply_profile(url: str, config: ScrapeConfig) -> ScrapeConfig:
     """Merge a matched site profile (and its platform defaults) into config.
 
@@ -239,12 +268,72 @@ def apply_profile(url: str, config: ScrapeConfig) -> ScrapeConfig:
 
     sel = config.selectors
     merged_selectors = ScrapeSelectors(
-        title=sel.title or prof.selectors.get("title"),
-        price=sel.price or prof.selectors.get("price"),
-        discounted_price=sel.discounted_price or prof.selectors.get("discounted_price"),
-        dealer_price=sel.dealer_price or prof.selectors.get("dealer_price"),
-        stock_status=sel.stock_status or prof.selectors.get("stock_status"),
-        image=sel.image or prof.selectors.get("image"),
+        title=(
+            prof.selectors.get("title")
+            if _selector_should_yield_to_profile(
+                sel.title,
+                prof.selectors.get("title"),
+                config_platform=config.platform,
+                profile_platform=prof.platform,
+                field="title",
+            )
+            else sel.title
+        ),
+        price=(
+            prof.selectors.get("price")
+            if _selector_should_yield_to_profile(
+                sel.price,
+                prof.selectors.get("price"),
+                config_platform=config.platform,
+                profile_platform=prof.platform,
+                field="price",
+            )
+            else sel.price
+        ),
+        discounted_price=(
+            prof.selectors.get("discounted_price")
+            if _selector_should_yield_to_profile(
+                sel.discounted_price,
+                prof.selectors.get("discounted_price"),
+                config_platform=config.platform,
+                profile_platform=prof.platform,
+                field="discounted_price",
+            )
+            else sel.discounted_price
+        ),
+        dealer_price=(
+            prof.selectors.get("dealer_price")
+            if _selector_should_yield_to_profile(
+                sel.dealer_price,
+                prof.selectors.get("dealer_price"),
+                config_platform=config.platform,
+                profile_platform=prof.platform,
+                field="dealer_price",
+            )
+            else sel.dealer_price
+        ),
+        stock_status=(
+            prof.selectors.get("stock_status")
+            if _selector_should_yield_to_profile(
+                sel.stock_status,
+                prof.selectors.get("stock_status"),
+                config_platform=config.platform,
+                profile_platform=prof.platform,
+                field="stock_status",
+            )
+            else sel.stock_status
+        ),
+        image=(
+            prof.selectors.get("image")
+            if _selector_should_yield_to_profile(
+                sel.image,
+                prof.selectors.get("image"),
+                config_platform=config.platform,
+                profile_platform=prof.platform,
+                field="image",
+            )
+            else sel.image
+        ),
     )
     # Profile headers augment, but config-level headers win on conflict.
     merged_headers = {**prof.headers, **config.headers}

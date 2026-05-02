@@ -1,55 +1,67 @@
 import { useState } from 'react'
-import { FileSpreadsheet, Share2, ShoppingBag } from 'lucide-react'
+import { FileSpreadsheet, Gamepad2, Share2, ShoppingBag } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { cn } from '@/lib/utils'
+import { ApiCatalogImport } from '@/components/import/ApiCatalogImport'
 import { WooImport } from '@/components/import/WooImport'
 import { FileImport } from '@/components/import/FileImport'
 import { GabadaShare } from '@/components/import/GabadaShare'
 
-type Tab = 'woo' | 'file' | 'share'
+type Tab = 'api' | 'woo' | 'file' | 'share'
 
 export function ImportPage() {
-  const [tab, setTab] = useState<Tab>('woo')
+  const [tab, setTab] = useState<Tab>('api')
 
   return (
     <div className="max-w-6xl space-y-6">
       <PageHeader
         title="Import"
-        description="Pull products from WooCommerce, use supplier files, or share selected Gabada products between users."
+        description="Pull products from APIs, WooCommerce, supplier files, or Gabada share files."
       />
 
       <BentoGrid cols={6}>
         <SourceTile
+          active={tab === 'api'}
+          onClick={() => setTab('api')}
+          icon={<Gamepad2 className="h-4 w-4" />}
+          eyebrow="Source / API"
+          title="API catalog"
+          description="Select a provider and import products directly."
+          colSpan={3}
+        />
+        <SourceTile
           active={tab === 'woo'}
           onClick={() => setTab('woo')}
           icon={<ShoppingBag className="h-4 w-4" />}
-          eyebrow="Source · API"
+          eyebrow="Source / Woo"
           title="WooCommerce"
           description="Pull live products via REST credentials."
-          colSpan={2}
+          colSpan={3}
         />
         <SourceTile
           active={tab === 'file'}
           onClick={() => setTab('file')}
           icon={<FileSpreadsheet className="h-4 w-4" />}
-          eyebrow="Source · File"
+          eyebrow="Source / File"
           title="CSV / Excel / PDF"
           description="Update existing store prices from dealer sheets or import rows into Gabada."
-          colSpan={2}
+          colSpan={3}
         />
         <SourceTile
           active={tab === 'share'}
           onClick={() => setTab('share')}
           icon={<Share2 className="h-4 w-4" />}
-          eyebrow="Source · Share"
+          eyebrow="Source / Share"
           title="Gabada Share"
           description="Export selected store rows to share, or import a shared Gabada product file."
-          colSpan={2}
+          colSpan={3}
         />
       </BentoGrid>
 
-      {tab === 'woo' ? (
+      {tab === 'api' ? (
+        <ApiCatalogImport />
+      ) : tab === 'woo' ? (
         <WooImport />
       ) : tab === 'file' ? (
         <FileImport />

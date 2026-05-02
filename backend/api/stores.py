@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -5,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from app_paths import resolve_storage_state_path
 from database.db import get_db
 from database.models import (
+    ApiSyncResult,
     Store,
     StoreCreate,
     StoreLoginSessionRequest,
@@ -12,8 +14,9 @@ from database.models import (
     StoreUpdate,
     WooSyncResult,
 )
-from api.import_routes import sync_store_woo_catalog
+from api.import_routes import sync_store_api_catalog, sync_store_woo_catalog
 from scraper.engine import save_login_state
+from services.api_catalog import api_provider_base_url, normalize_api_platform
 
 router = APIRouter(prefix="/stores", tags=["stores"])
 
@@ -32,6 +35,13 @@ _STORE_SELECT = """
         woo_consumer_secret,
         woo_auto_import_new,
         woo_last_synced_at,
+        api_enabled,
+        api_platform,
+        api_base_url,
+        api_key,
+        api_config,
+        api_auto_import_new,
+        api_last_synced_at,
         created_at
     FROM stores
 """
@@ -49,10 +59,30 @@ def _clean_store_fields(
     woo_consumer_key: str | None,
     woo_consumer_secret: str | None,
     woo_auto_import_new: bool,
+    api_enabled: bool,
+    api_platform: str | None,
+    api_base_url: str | None,
+    api_key: str | None,
+    api_config: dict | None,
+    api_auto_import_new: bool,
 ) -> dict:
     cleaned_name = name.strip()
     cleaned_manual_only = bool(manual_only)
     cleaned_base_url = base_url.strip()
+    cleaned_api_enabled = bool(api_enabled)
+    cleaned_api_platform = (api_platform or "").strip().lower() or None
+    if cleaned_api_enabled:
+        if cleaned_manual_only:
+            raise HTTPException(status_code=400, detail="API stores cannot be manual-only")
+        cleaned_api_platform = normalize_api_platform(cleaned_api_platform or "steam")
+        if not cleaned_base_url:
+            cleaned_base_url = api_provider_base_url(cleaned_api_platform) or f"api://{cleaned_api_platform}"
+    elif cleaned_api_platform:
+        cleaned_api_platform = normalize_api_platform(cleaned_api_platform)
+
+    cleaned_api_base_url = (api_base_url or "").strip() or (
+        api_provider_base_url(cleaned_api_platform) if cleaned_api_platform else None
+    )
     if cleaned_manual_only and not cleaned_base_url:
         cleaned_base_url = _manual_store_base_url(cleaned_name)
     cleaned = {
@@ -66,6 +96,12 @@ def _clean_store_fields(
         "woo_consumer_key": (woo_consumer_key or "").strip() or None,
         "woo_consumer_secret": (woo_consumer_secret or "").strip() or None,
         "woo_auto_import_new": bool(woo_auto_import_new),
+        "api_enabled": cleaned_api_enabled,
+        "api_platform": cleaned_api_platform,
+        "api_base_url": cleaned_api_base_url,
+        "api_key": (api_key or "").strip() or None,
+        "api_config": _clean_api_config(api_config),
+        "api_auto_import_new": bool(api_auto_import_new),
     }
     if not cleaned["name"]:
         raise HTTPException(status_code=400, detail="Store name is required")
@@ -77,6 +113,40 @@ def _clean_store_fields(
         if not cleaned["woo_consumer_key"] or not cleaned["woo_consumer_secret"]:
             raise HTTPException(status_code=400, detail="Woo consumer key and secret are required when Woo sync is enabled")
     return cleaned
+
+
+def _clean_api_config(api_config: dict | None) -> dict:
+    if not isinstance(api_config, dict):
+        api_config = {}
+    cleaned = dict(api_config)
+    country_code = str(cleaned.get("country_code") or cleaned.get("cc") or "").strip().upper()
+    if country_code:
+        cleaned["country_code"] = re.sub(r"[^A-Z]", "", country_code)[:2] or "US"
+    language = str(cleaned.get("language") or "").strip().lower()
+    if language:
+        cleaned["language"] = language
+    external_ids = cleaned.get("external_ids")
+    if isinstance(external_ids, list):
+        cleaned["external_ids"] = [
+            str(value).strip()
+            for value in external_ids
+            if str(value).strip()
+        ]
+    elif external_ids is not None:
+        cleaned["external_ids"] = []
+    return cleaned
+
+
+def _loads_api_config(value) -> dict:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _manual_store_base_url(name: str) -> str:
@@ -111,6 +181,13 @@ def _row_to_store(row) -> Store:
         woo_consumer_secret=row["woo_consumer_secret"],
         woo_auto_import_new=bool(row["woo_auto_import_new"]),
         woo_last_synced_at=row["woo_last_synced_at"],
+        api_enabled=bool(row["api_enabled"]),
+        api_platform=row["api_platform"],
+        api_base_url=row["api_base_url"],
+        api_key=row["api_key"],
+        api_config=_loads_api_config(row["api_config"]),
+        api_auto_import_new=bool(row["api_auto_import_new"]),
+        api_last_synced_at=row["api_last_synced_at"],
         created_at=row["created_at"],
     )
 
@@ -193,6 +270,12 @@ async def create_store(body: StoreCreate):
         woo_consumer_key=body.woo_consumer_key,
         woo_consumer_secret=body.woo_consumer_secret,
         woo_auto_import_new=body.woo_auto_import_new,
+        api_enabled=body.api_enabled,
+        api_platform=body.api_platform,
+        api_base_url=body.api_base_url,
+        api_key=body.api_key,
+        api_config=body.api_config,
+        api_auto_import_new=body.api_auto_import_new,
     )
     db = await get_db()
     try:
@@ -200,8 +283,9 @@ async def create_store(body: StoreCreate):
             """INSERT INTO stores
                (name, base_url, manual_only, login_url, storage_state_path,
                 woo_enabled, woo_site_url, woo_consumer_key, woo_consumer_secret,
-                woo_auto_import_new)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                woo_auto_import_new, api_enabled, api_platform, api_base_url,
+                api_key, api_config, api_auto_import_new)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 cleaned["name"],
                 cleaned["base_url"],
@@ -213,6 +297,12 @@ async def create_store(body: StoreCreate):
                 cleaned["woo_consumer_key"],
                 cleaned["woo_consumer_secret"],
                 int(cleaned["woo_auto_import_new"]),
+                int(cleaned["api_enabled"]),
+                cleaned["api_platform"],
+                cleaned["api_base_url"],
+                cleaned["api_key"],
+                json.dumps(cleaned["api_config"], sort_keys=True),
+                int(cleaned["api_auto_import_new"]),
             ),
         )
         await db.commit()
@@ -248,13 +338,21 @@ async def update_store(store_id: int, body: StoreUpdate):
             woo_consumer_key=body.woo_consumer_key if body.woo_consumer_key is not None else current["woo_consumer_key"],
             woo_consumer_secret=body.woo_consumer_secret if body.woo_consumer_secret is not None else current["woo_consumer_secret"],
             woo_auto_import_new=body.woo_auto_import_new if body.woo_auto_import_new is not None else bool(current["woo_auto_import_new"]),
+            api_enabled=body.api_enabled if body.api_enabled is not None else bool(current["api_enabled"]),
+            api_platform=body.api_platform if body.api_platform is not None else current["api_platform"],
+            api_base_url=body.api_base_url if body.api_base_url is not None else current["api_base_url"],
+            api_key=body.api_key if body.api_key is not None else current["api_key"],
+            api_config=body.api_config if body.api_config is not None else _loads_api_config(current["api_config"]),
+            api_auto_import_new=body.api_auto_import_new if body.api_auto_import_new is not None else bool(current["api_auto_import_new"]),
         )
         await db.execute(
             """UPDATE stores
                SET name = ?, base_url = ?, manual_only = ?, login_url = ?,
                    storage_state_path = ?, woo_enabled = ?, woo_site_url = ?,
                    woo_consumer_key = ?, woo_consumer_secret = ?,
-                   woo_auto_import_new = ?
+                   woo_auto_import_new = ?, api_enabled = ?, api_platform = ?,
+                   api_base_url = ?, api_key = ?, api_config = ?,
+                   api_auto_import_new = ?
                WHERE id = ?""",
             (
                 cleaned["name"],
@@ -267,6 +365,12 @@ async def update_store(store_id: int, body: StoreUpdate):
                 cleaned["woo_consumer_key"],
                 cleaned["woo_consumer_secret"],
                 int(cleaned["woo_auto_import_new"]),
+                int(cleaned["api_enabled"]),
+                cleaned["api_platform"],
+                cleaned["api_base_url"],
+                cleaned["api_key"],
+                json.dumps(cleaned["api_config"], sort_keys=True),
+                int(cleaned["api_auto_import_new"]),
                 store_id,
             ),
         )
@@ -286,6 +390,11 @@ async def update_store(store_id: int, body: StoreUpdate):
 @router.post("/{store_id}/woo-sync", response_model=WooSyncResult)
 async def manual_woo_sync(store_id: int):
     return await sync_store_woo_catalog(store_id)
+
+
+@router.post("/{store_id}/api-sync", response_model=ApiSyncResult)
+async def manual_api_sync(store_id: int):
+    return await sync_store_api_catalog(store_id)
 
 
 @router.post("/{store_id}/login-session", response_model=StoreLoginSessionResponse)

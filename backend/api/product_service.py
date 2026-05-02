@@ -13,8 +13,12 @@ from database.models import (
     ScrapeConfig,
     ScrapeSelectors,
 )
+from api.price_log_utils import get_settings_currency, infer_currency_code
 from scraper.engine import probe as probe_url
-from scraper.site_profiles import apply_platform_defaults
+from scraper.site_profiles import (
+    apply_platform_defaults,
+    apply_profile as apply_site_profile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,10 @@ _STORE_SUMMARIES_SELECT = """
             NULLIF(TRIM(pso.imported_warranty), '')
         ) AS latest_warranty,
         pl.stock_status AS latest_stock_status,
+        pl.raw_price AS latest_raw_price,
+        pl.raw_discounted AS latest_raw_discounted,
+        pl.raw_dealer AS latest_raw_dealer,
+        pl.currency_code AS latest_currency_code,
         pl.scraped_at AS latest_scraped_at,
         pl.change_type AS latest_change_type,
         pl.price_delta AS latest_price_delta,
@@ -58,7 +66,15 @@ _STORE_SUMMARIES_SELECT = """
     LEFT JOIN price_logs pl ON pl.id = (
         SELECT id FROM price_logs
         WHERE product_store_id = ps.id
-        ORDER BY scraped_at DESC LIMIT 1
+          AND (
+              price IS NOT NULL
+              OR discounted_price IS NOT NULL
+              OR dealer_price IS NOT NULL
+              OR NULLIF(TRIM(raw_price), '') IS NOT NULL
+              OR NULLIF(TRIM(raw_discounted), '') IS NOT NULL
+              OR NULLIF(TRIM(raw_dealer), '') IS NOT NULL
+          )
+        ORDER BY scraped_at DESC, id DESC LIMIT 1
     )
     LEFT JOIN product_store_overrides pso ON pso.product_store_id = ps.id
 """
@@ -83,9 +99,10 @@ async def auto_detect_config(url: str, config: ScrapeConfig) -> ScrapeConfig:
     """Probe a URL and backfill missing scrape defaults without overriding custom values."""
     try:
         report = await probe_url(url, config)
-        platform = report.platform or "generic"
+        profiled = apply_site_profile(url, config)
+        platform = profiled.platform or report.platform or "generic"
         logger.info("Auto-detected platform %s for %s", platform, url)
-        return apply_platform_defaults(config, platform)
+        return apply_platform_defaults(profiled, platform)
     except Exception as exc:
         logger.warning("Auto-detect probe failed for %s: %s", url, exc)
         return config
@@ -173,6 +190,10 @@ def _row_to_product_store_summary(row: aiosqlite.Row) -> ProductStoreSummary:
         latest_dealer_price=row["latest_dealer_price"],
         latest_warranty=row["latest_warranty"],
         latest_stock_status=row["latest_stock_status"],
+        latest_raw_price=row["latest_raw_price"],
+        latest_raw_discounted=row["latest_raw_discounted"],
+        latest_raw_dealer=row["latest_raw_dealer"],
+        latest_currency_code=row["latest_currency_code"],
         latest_scraped_at=row["latest_scraped_at"],
         latest_change_type=row["latest_change_type"],
         latest_price_delta=row["latest_price_delta"],
@@ -389,12 +410,20 @@ async def quick_add_one(
     )
 
     if extracted.price is not None or extracted.stock_status != "unknown":
+        local_code, local_symbol = await get_settings_currency(db)
+        currency_code = infer_currency_code(
+            extracted.raw_price,
+            extracted.raw_discounted,
+            extracted.raw_dealer,
+            local_code=local_code,
+            local_symbol=local_symbol,
+        )
         await db.execute(
             """INSERT INTO price_logs
                (product_store_id, title, price, discounted_price, dealer_price,
-                stock_status, raw_price, raw_discounted, raw_dealer,
+                stock_status, raw_price, raw_discounted, raw_dealer, currency_code,
                 change_type, price_delta, previous_price, previous_stock_status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', NULL, NULL, NULL)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', NULL, NULL, NULL)""",
             (
                 product_store_id,
                 extracted.title,
@@ -405,6 +434,7 @@ async def quick_add_one(
                 extracted.raw_price,
                 extracted.raw_discounted,
                 extracted.raw_dealer,
+                currency_code,
             ),
         )
 

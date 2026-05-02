@@ -42,6 +42,13 @@ async def init_db():
                 woo_consumer_secret TEXT,
                 woo_auto_import_new INTEGER NOT NULL DEFAULT 0,
                 woo_last_synced_at DATETIME,
+                api_enabled INTEGER NOT NULL DEFAULT 0,
+                api_platform TEXT,
+                api_base_url TEXT,
+                api_key TEXT,
+                api_config TEXT NOT NULL DEFAULT '{}',
+                api_auto_import_new INTEGER NOT NULL DEFAULT 0,
+                api_last_synced_at DATETIME,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -68,7 +75,8 @@ async def init_db():
                 stock_status TEXT DEFAULT 'unknown',
                 raw_price TEXT,
                 raw_discounted TEXT,
-                raw_dealer TEXT
+                raw_dealer TEXT,
+                currency_code TEXT
             );
 
             CREATE TABLE IF NOT EXISTS product_store_overrides (
@@ -95,6 +103,8 @@ async def init_db():
                 scrape_cron TEXT NOT NULL DEFAULT '0 8 * * *',
                 scrape_enabled INTEGER NOT NULL DEFAULT 1,
                 locale TEXT NOT NULL DEFAULT 'en-US',
+                price_display_mode TEXT NOT NULL DEFAULT 'regional',
+                exchange_rates TEXT NOT NULL DEFAULT '{}',
                 theme TEXT NOT NULL DEFAULT 'system',
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
@@ -133,6 +143,13 @@ async def init_db():
             "ALTER TABLE stores ADD COLUMN woo_consumer_secret TEXT",
             "ALTER TABLE stores ADD COLUMN woo_auto_import_new INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE stores ADD COLUMN woo_last_synced_at DATETIME",
+            "ALTER TABLE stores ADD COLUMN api_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE stores ADD COLUMN api_platform TEXT",
+            "ALTER TABLE stores ADD COLUMN api_base_url TEXT",
+            "ALTER TABLE stores ADD COLUMN api_key TEXT",
+            "ALTER TABLE stores ADD COLUMN api_config TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE stores ADD COLUMN api_auto_import_new INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE stores ADD COLUMN api_last_synced_at DATETIME",
         ]:
             try:
                 await db.execute(col_sql)
@@ -148,6 +165,7 @@ async def init_db():
             "ALTER TABLE price_logs ADD COLUMN dealer_price REAL",
             "ALTER TABLE price_logs ADD COLUMN raw_dealer TEXT",
             "ALTER TABLE price_logs ADD COLUMN warranty TEXT",
+            "ALTER TABLE price_logs ADD COLUMN currency_code TEXT",
         ]:
             try:
                 await db.execute(col_sql)
@@ -173,6 +191,16 @@ async def init_db():
             await db.commit()
         except Exception:
             pass
+
+        for col_sql in [
+            "ALTER TABLE settings ADD COLUMN price_display_mode TEXT NOT NULL DEFAULT 'regional'",
+            "ALTER TABLE settings ADD COLUMN exchange_rates TEXT NOT NULL DEFAULT '{}'",
+        ]:
+            try:
+                await db.execute(col_sql)
+                await db.commit()
+            except Exception:
+                pass
 
         try:
             await db.execute(
