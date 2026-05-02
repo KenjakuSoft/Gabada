@@ -1,13 +1,24 @@
 import { ArrowRight } from 'lucide-react'
 import type { PriceLog, ProductStoreSummary } from '@/api'
 import { useTimezone } from '@/hooks/useSettings'
-import { formatApiDateTime, formatDelta, formatMoney } from '@/lib/utils'
+import {
+  cn,
+  formatApiDateTime,
+  formatDelta,
+  formatDisplayMoney,
+  formatLocalEquivalent,
+} from '@/lib/utils'
+import type { PriceDisplayMode } from '@/lib/utils'
 import { StockPill } from './StockPill'
 
 interface LogsTableProps {
   logs: PriceLog[]
   stores: ProductStoreSummary[]
   symbol: string
+  displayMode?: PriceDisplayMode
+  locale?: string
+  localCurrency?: string
+  exchangeRates?: Record<string, number>
   showStoreColumn?: boolean
 }
 
@@ -15,6 +26,10 @@ export function LogsTable({
   logs,
   stores,
   symbol,
+  displayMode = 'regional',
+  locale,
+  localCurrency = 'USD',
+  exchangeRates = {},
   showStoreColumn = true,
 }: LogsTableProps) {
   const timezone = useTimezone()
@@ -68,12 +83,27 @@ export function LogsTable({
                     </td>
                   ) : null}
                   <td className="whitespace-nowrap px-3 py-2 text-right">
-                    <RetailLogPrice log={log} symbol={symbol} />
+                    <RetailLogPrice
+                      log={log}
+                      symbol={symbol}
+                      displayMode={displayMode}
+                      locale={locale}
+                      localCurrency={localCurrency}
+                      exchangeRates={exchangeRates}
+                    />
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-success">
-                    {log.dealer_price != null
-                      ? formatMoney(log.dealer_price, symbol)
-                      : '-'}
+                  <td className="whitespace-nowrap px-3 py-2 text-right">
+                    <LogPriceStack
+                      value={log.dealer_price}
+                      raw={log.raw_dealer}
+                      currencyCode={log.currency_code}
+                      symbol={symbol}
+                      displayMode={displayMode}
+                      locale={locale}
+                      localCurrency={localCurrency}
+                      exchangeRates={exchangeRates}
+                      tone="dealer"
+                    />
                   </td>
                   <td
                     className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${deltaColor}`}
@@ -96,8 +126,32 @@ export function LogsTable({
   )
 }
 
-function RetailLogPrice({ log, symbol }: { log: PriceLog; symbol: string }) {
+function RetailLogPrice({
+  log,
+  symbol,
+  displayMode,
+  locale,
+  localCurrency,
+  exchangeRates,
+}: {
+  log: PriceLog
+  symbol: string
+  displayMode: PriceDisplayMode
+  locale?: string
+  localCurrency: string
+  exchangeRates: Record<string, number>
+}) {
   const current = log.discounted_price ?? log.price
+  const currentRaw = log.discounted_price != null ? log.raw_discounted : log.raw_price
+  const localEquivalent =
+    current != null
+      ? formatLocalEquivalent(current, {
+          sourceCurrency: log.currency_code,
+          localCurrency,
+          exchangeRates,
+          symbol,
+        })
+      : null
 
   if (
     log.previous_price != null &&
@@ -105,32 +159,150 @@ function RetailLogPrice({ log, symbol }: { log: PriceLog; symbol: string }) {
     log.previous_price !== current
   ) {
     return (
-      <span className="inline-flex items-center justify-end gap-1.5 tabular-nums">
-        <span className="text-muted-foreground line-through">
-          {formatMoney(log.previous_price, symbol)}
+      <div className="flex flex-col items-end gap-1">
+        <span className="inline-flex items-center justify-end gap-1.5 tabular-nums">
+          <span className="text-muted-foreground line-through">
+            {formatDisplayMoney(log.previous_price, {
+              symbol,
+              mode: displayMode,
+              currencyCode: log.currency_code,
+              locale,
+            })}
+          </span>
+          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+          <span className="font-semibold">
+            {formatDisplayMoney(current, {
+              symbol,
+              mode: displayMode,
+              currencyCode: log.currency_code,
+              raw: currentRaw,
+              locale,
+            })}
+          </span>
         </span>
-        <ArrowRight className="h-3 w-3 text-muted-foreground" />
-        <span className="font-semibold">{formatMoney(current, symbol)}</span>
-      </span>
+        {localEquivalent ? <LocalLogPrice value={localEquivalent} /> : null}
+      </div>
     )
   }
 
   if (log.discounted_price != null && log.price != null && log.discounted_price < log.price) {
     return (
-      <span className="inline-flex items-center justify-end gap-1.5 tabular-nums">
-        <span className="font-semibold text-success">
-          {formatMoney(log.discounted_price, symbol)}
+      <div className="flex flex-col items-end gap-1">
+        <span className="inline-flex items-center justify-end gap-1.5 tabular-nums">
+          <span className="font-semibold text-success">
+            {formatDisplayMoney(log.discounted_price, {
+              symbol,
+              mode: displayMode,
+              currencyCode: log.currency_code,
+              raw: log.raw_discounted,
+              locale,
+            })}
+          </span>
+          <span className="text-xs text-muted-foreground line-through">
+            {formatDisplayMoney(log.price, {
+              symbol,
+              mode: displayMode,
+              currencyCode: log.currency_code,
+              raw: log.raw_price,
+              locale,
+            })}
+          </span>
         </span>
-        <span className="text-xs text-muted-foreground line-through">
-          {formatMoney(log.price, symbol)}
-        </span>
-      </span>
+        {localEquivalent ? <LocalLogPrice value={localEquivalent} tone="sale" /> : null}
+      </div>
     )
   }
 
   return (
-    <span className="font-semibold tabular-nums">
-      {current != null ? formatMoney(current, symbol) : '-'}
+    <LogPriceStack
+      value={current}
+      raw={currentRaw}
+      currencyCode={log.currency_code}
+      symbol={symbol}
+      displayMode={displayMode}
+      locale={locale}
+      localCurrency={localCurrency}
+      exchangeRates={exchangeRates}
+    />
+  )
+}
+
+function LogPriceStack({
+  value,
+  raw,
+  currencyCode,
+  symbol,
+  displayMode,
+  locale,
+  localCurrency,
+  exchangeRates,
+  tone = 'default',
+}: {
+  value: number | null | undefined
+  raw?: string | null
+  currencyCode?: string | null
+  symbol: string
+  displayMode: PriceDisplayMode
+  locale?: string
+  localCurrency: string
+  exchangeRates: Record<string, number>
+  tone?: 'default' | 'dealer' | 'sale'
+}) {
+  if (value == null) {
+    return <span className="text-muted-foreground">-</span>
+  }
+  const localEquivalent = formatLocalEquivalent(value, {
+    sourceCurrency: currencyCode,
+    localCurrency,
+    exchangeRates,
+    symbol,
+  })
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <span
+        className={cn(
+          'font-semibold tabular-nums',
+          tone === 'dealer' && 'text-success',
+          tone === 'sale' && 'text-success',
+        )}
+      >
+        {formatDisplayMoney(value, {
+          symbol,
+          mode: displayMode,
+          currencyCode,
+          raw,
+          locale,
+        })}
+      </span>
+      {localEquivalent ? (
+        <LocalLogPrice value={localEquivalent} tone={tone} />
+      ) : null}
+    </div>
+  )
+}
+
+function LocalLogPrice({
+  value,
+  tone = 'default',
+}: {
+  value: string
+  tone?: 'default' | 'dealer' | 'sale'
+}) {
+  return (
+    <span className="grid grid-cols-[3.25rem_minmax(0,max-content)] items-baseline justify-end gap-x-1.5">
+      <span className="text-right text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Local
+      </span>
+      <span
+        className={cn(
+          'text-xs font-semibold tabular-nums text-foreground',
+          tone === 'dealer' && 'text-success',
+          tone === 'sale' && 'text-success',
+        )}
+      >
+        {value}
+      </span>
     </span>
   )
 }

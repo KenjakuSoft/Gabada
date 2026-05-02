@@ -20,13 +20,23 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toast-store'
 import { ProductTile } from '@/components/products/ProductTile'
 import { categoriesApi, productsApi, scraperApi } from '@/api'
-import { useCurrencySymbol } from '@/hooks/useSettings'
+import {
+  useCurrencySymbol,
+  useCurrencyCode,
+  useExchangeRates,
+  useLocale,
+  usePriceDisplayMode,
+} from '@/hooks/useSettings'
 import type { Category, Product } from '@/api'
 
 export function HomePage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const symbol = useCurrencySymbol()
+  const localCurrency = useCurrencyCode()
+  const exchangeRates = useExchangeRates()
+  const priceDisplayMode = usePriceDisplayMode()
+  const locale = useLocale()
   const [searchParams, setSearchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const initialCategoryId = (() => {
@@ -220,7 +230,15 @@ export function HomePage() {
       ) : (
         <div className="space-y-2">
           {filtered.map((p) => (
-            <ProductTile key={p.id} product={p} symbol={symbol} />
+            <ProductTile
+              key={p.id}
+              product={p}
+              symbol={symbol}
+              displayMode={priceDisplayMode}
+              locale={locale}
+              localCurrency={localCurrency}
+              exchangeRates={exchangeRates}
+            />
           ))}
         </div>
       )}

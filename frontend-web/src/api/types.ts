@@ -30,8 +30,29 @@ export interface Store {
   woo_consumer_secret: string | null
   woo_auto_import_new: boolean
   woo_last_synced_at: string | null
+  api_enabled: boolean
+  api_platform: ApiPlatform | null
+  api_base_url: string | null
+  api_key: string | null
+  api_config: Record<string, unknown>
+  api_auto_import_new: boolean
+  api_last_synced_at: string | null
   created_at: string
 }
+
+export type ApiPlatform =
+  | 'steam'
+  | 'apple_app_store'
+  | 'apple_store'
+  | 'playstation_store'
+  | 'xbox_store'
+  | 'ea_play'
+  | 'epic_games_store'
+  | 'gog'
+  | 'ubisoft_store'
+  | 'nintendo_store'
+  | 'google_play'
+  | 'custom_json'
 
 export interface WooSyncResult {
   store_id: number
@@ -39,6 +60,18 @@ export interface WooSyncResult {
   discovered: number
   created: number
   existing: number
+  auto_import_new: boolean
+  synced_at: string | null
+}
+
+export interface ApiSyncResult {
+  store_id: number
+  store_name: string
+  platform: ApiPlatform
+  discovered: number
+  created: number
+  existing: number
+  updated: number
   auto_import_new: boolean
   synced_at: string | null
 }
@@ -70,6 +103,10 @@ export interface ProductStoreSummary {
   latest_dealer_price: number | null
   latest_warranty: string | null
   latest_stock_status: StockStatus | null
+  latest_raw_price: string | null
+  latest_raw_discounted: string | null
+  latest_raw_dealer: string | null
+  latest_currency_code: string | null
   latest_scraped_at: string | null
   latest_change_type: string | null
   latest_price_delta: number | null
@@ -100,6 +137,10 @@ export interface PriceLog {
   dealer_price: number | null
   warranty: string | null
   stock_status: StockStatus | null
+  raw_price: string | null
+  raw_discounted: string | null
+  raw_dealer: string | null
+  currency_code: string | null
   change_type: string | null
   price_delta: number | null
   previous_price: number | null
@@ -115,6 +156,10 @@ export interface ActivityEntry {
   price: number | null
   discounted_price: number | null
   dealer_price: number | null
+  raw_price: string | null
+  raw_discounted: string | null
+  raw_dealer: string | null
+  currency_code: string | null
   price_delta: number | null
   previous_price: number | null
   stock_status: StockStatus | null
@@ -130,9 +175,13 @@ export interface Settings {
   scrape_cron: string
   scrape_enabled: boolean
   locale: string
+  price_display_mode: PriceDisplayMode
+  exchange_rates: Record<string, number>
   theme: 'light' | 'dark' | 'system'
   updated_at: string | null
 }
+
+export type PriceDisplayMode = 'regional' | 'source'
 
 export interface DatabaseCounts {
   products: number
@@ -311,6 +360,21 @@ export interface WooProductPreview {
   permalink: string
   regular_price: string | null
   sale_price: string | null
+  stock_status: string
+  image_url: string | null
+  categories: string[]
+}
+
+export interface ApiProductPreview {
+  platform: ApiPlatform
+  external_id: string
+  name: string
+  permalink: string
+  price: number | null
+  discounted_price: number | null
+  currency: string | null
+  raw_price: string | null
+  raw_discounted: string | null
   stock_status: string
   image_url: string | null
   categories: string[]

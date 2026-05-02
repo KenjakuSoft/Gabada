@@ -22,6 +22,99 @@ export function formatMoney(
   })}`
 }
 
+export type PriceDisplayMode = 'regional' | 'source'
+
+const RAW_CURRENCY_RE = /[^\d\s.,+-]/
+
+export function formatCurrencyCodeMoney(
+  value: number | null | undefined,
+  currencyCode: string | null | undefined,
+  locale?: string | null,
+): string | null {
+  if (value == null || !currencyCode) return null
+  const code = currencyCode.trim().toUpperCase()
+  if (!/^[A-Z]{3}$/.test(code)) return null
+  try {
+    return new Intl.NumberFormat(locale || undefined, {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)
+  } catch {
+    return `${code} ${value.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`
+  }
+}
+
+export function formatDisplayMoney(
+  value: number | null | undefined,
+  options: {
+    symbol: string
+    mode?: PriceDisplayMode
+    currencyCode?: string | null
+    raw?: string | null
+    locale?: string | null
+  },
+): string {
+  if (value == null) return 'â€”'
+  if (options.mode === 'source') {
+    const sourceCurrency = formatCurrencyCodeMoney(
+      value,
+      options.currencyCode,
+      options.locale,
+    )
+    if (sourceCurrency) return sourceCurrency
+    const raw = options.raw?.trim()
+    if (raw && RAW_CURRENCY_RE.test(raw)) return raw
+  }
+  return formatMoney(value, options.symbol)
+}
+
+export function sourceCurrencyCode(
+  currencyCode: string | null | undefined,
+): string | null {
+  const code = currencyCode?.trim().toUpperCase()
+  return code && /^[A-Z]{3}$/.test(code) ? code : null
+}
+
+export function convertToLocalCurrency(
+  value: number | null | undefined,
+  options: {
+    sourceCurrency?: string | null
+    localCurrency: string
+    exchangeRates: Record<string, number>
+  },
+): number | null {
+  if (value == null) return null
+  const source = sourceCurrencyCode(options.sourceCurrency)
+  const local = sourceCurrencyCode(options.localCurrency)
+  if (!source || !local || source === local) return value
+  const rate = options.exchangeRates[source]
+  if (!Number.isFinite(rate) || rate <= 0) return null
+  return value * rate
+}
+
+export function formatLocalEquivalent(
+  value: number | null | undefined,
+  options: {
+    sourceCurrency?: string | null
+    localCurrency: string
+    exchangeRates: Record<string, number>
+    symbol: string
+  },
+): string | null {
+  const converted = convertToLocalCurrency(value, options)
+  if (converted == null) return null
+  const source = sourceCurrencyCode(options.sourceCurrency)
+  const local = sourceCurrencyCode(options.localCurrency)
+  if (!source || !local || source === local) return null
+  return formatMoney(converted, options.symbol)
+}
+
 const TZ_SUFFIX_RE = /(?:z|[+-]\d{2}:?\d{2})$/i
 
 export function normalizeApiTimestamp(iso: string): string {

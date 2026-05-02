@@ -1,32 +1,51 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
+  Activity as ActivityIcon,
+  CircleDot,
   ExternalLink,
   FileText,
   Flame,
   Pencil,
+  Radio,
   ShieldCheck,
   Store as StoreIcon,
+  TrendingDown,
+  TrendingUp,
   Trash2,
+  type LucideIcon,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast-store'
 import { EditProductCard } from './EditProductCard'
 import { StockPill } from './StockPill'
-import { cn, formatMoney, formatRelativeTime } from '@/lib/utils'
+import {
+  cn,
+  convertToLocalCurrency,
+  formatDisplayMoney,
+  formatLocalEquivalent,
+  formatRelativeTime,
+} from '@/lib/utils'
+import type { PriceDisplayMode } from '@/lib/utils'
 import { productsApi } from '@/api'
 import type { Product, ProductStoreSummary, StockStatus } from '@/api'
 
 interface ProductTileProps {
   product: Product
   symbol: string
+  displayMode?: PriceDisplayMode
+  locale?: string
+  localCurrency: string
+  exchangeRates: Record<string, number>
 }
 
 interface PriceSummary {
   value: number
-  storeName: string
+  localValue: number | null
+  store: ProductStoreSummary
 }
 
 function effectiveRetailPrice(store: ProductStoreSummary): number | null {
@@ -46,28 +65,77 @@ function effectiveWarranty(store: ProductStoreSummary): string | null {
   return store.manual_warranty ?? store.latest_warranty ?? null
 }
 
-function lowestRetailPrice(product: Product): PriceSummary | null {
+function sourceCurrencyForRetail(store: ProductStoreSummary, value: number): string | null {
+  if (store.manual_price != null && value === store.manual_price) return null
+  return store.latest_currency_code
+}
+
+function localComparablePrice(
+  value: number,
+  sourceCurrency: string | null,
+  localCurrency: string,
+  exchangeRates: Record<string, number>,
+): number | null {
+  return convertToLocalCurrency(value, {
+    sourceCurrency,
+    localCurrency,
+    exchangeRates,
+  })
+}
+
+function lowestRetailPrice(
+  product: Product,
+  localCurrency: string,
+  exchangeRates: Record<string, number>,
+): PriceSummary | null {
   let low: PriceSummary | null = null
+  let fallback: PriceSummary | null = null
   for (const store of product.stores) {
     if (!store.is_active) continue
     const value = effectiveRetailPrice(store)
     if (value == null) continue
-    if (low == null || value < low.value) {
-      low = { value, storeName: store.store_name }
+    const sourceCurrency = sourceCurrencyForRetail(store, value)
+    const localValue = localComparablePrice(
+      value,
+      sourceCurrency,
+      localCurrency,
+      exchangeRates,
+    )
+    if (fallback == null || value < fallback.value) {
+      fallback = { value, localValue, store }
+    }
+    if (localValue == null) continue
+    if (low == null || localValue < (low.localValue ?? low.value)) {
+      low = { value, localValue, store }
     }
   }
-  return low
+  return low ?? fallback
 }
 
-function lowestDealerPrice(product: Product): PriceSummary | null {
+function lowestDealerPrice(
+  product: Product,
+  localCurrency: string,
+  exchangeRates: Record<string, number>,
+): PriceSummary | null {
   let low: PriceSummary | null = null
+  let fallback: PriceSummary | null = null
   for (const store of product.stores) {
     if (!store.is_active || store.latest_dealer_price == null) continue
-    if (low == null || store.latest_dealer_price < low.value) {
-      low = { value: store.latest_dealer_price, storeName: store.store_name }
+    const localValue = localComparablePrice(
+      store.latest_dealer_price,
+      store.latest_currency_code,
+      localCurrency,
+      exchangeRates,
+    )
+    if (fallback == null || store.latest_dealer_price < fallback.value) {
+      fallback = { value: store.latest_dealer_price, localValue, store }
+    }
+    if (localValue == null) continue
+    if (low == null || localValue < (low.localValue ?? low.value)) {
+      low = { value: store.latest_dealer_price, localValue, store }
     }
   }
-  return low
+  return low ?? fallback
 }
 
 function summaryStockStatus(product: Product): StockStatus {
@@ -88,17 +156,41 @@ function firstWarranty(product: Product): string | null {
   return match ? effectiveWarranty(match) : null
 }
 
-export function ProductTile({ product, symbol }: ProductTileProps) {
+export function ProductTile({
+  product,
+  symbol,
+  displayMode = 'regional',
+  locale,
+  localCurrency,
+  exchangeRates,
+}: ProductTileProps) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [editing, setEditing] = useState(false)
 
-  const retail = lowestRetailPrice(product)
-  const dealer = lowestDealerPrice(product)
+  const retail = lowestRetailPrice(product, localCurrency, exchangeRates)
+  const dealer = lowestDealerPrice(product, localCurrency, exchangeRates)
+  const retailLocal =
+    retail != null
+      ? formatRetailLocalEquivalent(retail.value, retail.store, {
+          symbol,
+          localCurrency,
+          exchangeRates,
+        })
+      : null
+  const dealerLocal =
+    dealer != null
+      ? formatDealerLocalEquivalent(dealer.value, dealer.store, {
+          symbol,
+          localCurrency,
+          exchangeRates,
+        })
+      : null
   const warranty = firstWarranty(product)
   const stock = summaryStockStatus(product)
   const supplierCount = product.stores.length
+  const changes = productChangeSummary(product)
 
   const remove = useMutation({
     mutationFn: () => productsApi.remove(product.id),
@@ -152,32 +244,65 @@ export function ProductTile({ product, symbol }: ProductTileProps) {
               </Badge>
             ) : null}
 
-            {retail ? (
-              <Badge
-                variant="secondary"
-                className="bg-violet-500/15 font-semibold text-violet-800 dark:text-violet-200"
-                title={`Lowest retail at ${retail.storeName}`}
-              >
-                Retail: {formatMoney(retail.value, symbol)}
-              </Badge>
-            ) : null}
-
-            {dealer ? (
-              <Badge
-                variant="success"
-                className="gap-1 font-semibold"
-                title={`Lowest dealer at ${dealer.storeName}`}
-              >
-                Dealer: {formatMoney(dealer.value, symbol)}
-                <Flame className="h-3 w-3 text-amber-500" />
-              </Badge>
-            ) : null}
-
             <Badge variant="muted" className="gap-1 font-semibold">
               <StoreIcon className="h-3 w-3" />
               {supplierCount} {supplierCount === 1 ? 'Supplier' : 'Suppliers'}
             </Badge>
           </div>
+
+          {retail || dealer ? (
+            <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+              {retail ? (
+                <SummaryPriceBlock
+                  label="Retail"
+                  value={formatRetailPrice(retail.value, retail.store, {
+                    symbol,
+                    displayMode,
+                    locale,
+                    localCurrency,
+                    exchangeRates,
+                  })}
+                  localValue={retailLocal}
+                  title={`Lowest retail at ${retail.store.store_name}`}
+                />
+              ) : null}
+              {dealer ? (
+                <SummaryPriceBlock
+                  label="Dealer"
+                  value={formatDealerPrice(dealer.value, dealer.store, {
+                    symbol,
+                    displayMode,
+                    locale,
+                    localCurrency,
+                    exchangeRates,
+                  })}
+                  localValue={dealerLocal}
+                  tone="dealer"
+                  icon={<Flame className="h-3 w-3 text-amber-500" />}
+                  title={`Lowest dealer at ${dealer.store.store_name}`}
+                />
+              ) : null}
+            </div>
+          ) : null}
+
+          {changes.length ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {changes.map((change) => {
+                const Icon = change.icon
+                return (
+                  <Badge
+                    key={change.key}
+                    variant={change.variant}
+                    className="gap-1.5 text-[10px]"
+                    title={change.title}
+                  >
+                    <Icon className="h-3 w-3" />
+                    {change.label}
+                  </Badge>
+                )
+              })}
+            </div>
+          ) : null}
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
@@ -241,6 +366,10 @@ export function ProductTile({ product, symbol }: ProductTileProps) {
                   key={store.id}
                   store={store}
                   symbol={symbol}
+                  displayMode={displayMode}
+                  locale={locale}
+                  localCurrency={localCurrency}
+                  exchangeRates={exchangeRates}
                 />
               ))}
             </div>
@@ -260,9 +389,17 @@ export function ProductTile({ product, symbol }: ProductTileProps) {
 function SupplierCard({
   store,
   symbol,
+  displayMode = 'regional',
+  locale,
+  localCurrency,
+  exchangeRates,
 }: {
   store: ProductStoreSummary
   symbol: string
+  displayMode?: PriceDisplayMode
+  locale?: string
+  localCurrency: string
+  exchangeRates: Record<string, number>
 }) {
   const retail = effectiveRetailPrice(store)
   const dealer = store.latest_dealer_price
@@ -299,20 +436,54 @@ function SupplierCard({
         <StockPill status={stock} />
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 tabular-nums">
-        <span>
-          R:{' '}
-          <strong className={cn(retail == null && 'text-muted-foreground')}>
-            {retail != null ? formatMoney(retail, symbol) : '-'}
-          </strong>
-        </span>
-        <span className="text-muted-foreground">|</span>
-        <span>
-          D:{' '}
-          <strong className={cn(dealer == null && 'text-muted-foreground')}>
-            {dealer != null ? formatMoney(dealer, symbol) : '-'}
-          </strong>
-        </span>
+      <div className="mt-2 space-y-1 tabular-nums">
+        <SupplierPriceBlock
+          label="Retail"
+          value={
+            retail != null
+              ? formatRetailPrice(retail, store, {
+                  symbol,
+                  displayMode,
+                  locale,
+                  localCurrency,
+                  exchangeRates,
+                })
+              : null
+          }
+          localValue={
+            retail != null
+              ? formatRetailLocalEquivalent(retail, store, {
+                  symbol,
+                  localCurrency,
+                  exchangeRates,
+                })
+              : null
+          }
+        />
+        <SupplierPriceBlock
+          label="Dealer"
+          value={
+            dealer != null
+              ? formatDealerPrice(dealer, store, {
+                  symbol,
+                  displayMode,
+                  locale,
+                  localCurrency,
+                  exchangeRates,
+                })
+              : null
+          }
+          localValue={
+            dealer != null
+              ? formatDealerLocalEquivalent(dealer, store, {
+                  symbol,
+                  localCurrency,
+                  exchangeRates,
+                })
+              : null
+          }
+          tone="dealer"
+        />
       </div>
 
       {effectiveWarranty(store) ? (
@@ -338,4 +509,274 @@ function safeHost(url: string): string {
 
 function isInternalProductUrl(url: string): boolean {
   return /^(?:import|manual):\/\//i.test(url)
+}
+
+interface ProductChangeIndicator {
+  key: string
+  label: string
+  title: string
+  icon: LucideIcon
+  variant: 'success' | 'warning' | 'info' | 'destructive' | 'outline' | 'muted'
+}
+
+function productChangeSummary(product: Product): ProductChangeIndicator[] {
+  let drops = 0
+  let rises = 0
+  let stock = 0
+  let firstScrapes = 0
+  let other = 0
+  let latestAt: string | null = null
+
+  for (const store of product.stores) {
+    const change = store.latest_change_type
+    if (!change || change === 'no_change') continue
+    if (
+      !latestAt ||
+      (store.latest_scraped_at &&
+        new Date(store.latest_scraped_at).getTime() > new Date(latestAt).getTime())
+    ) {
+      latestAt = store.latest_scraped_at
+    }
+    if (change === 'price_down' || (change === 'price_and_stock' && (store.latest_price_delta ?? 0) < 0)) {
+      drops += 1
+    } else if (change === 'price_up' || (change === 'price_and_stock' && (store.latest_price_delta ?? 0) > 0)) {
+      rises += 1
+    }
+    if (
+      change === 'stock_in' ||
+      change === 'stock_out' ||
+      change === 'stock_change' ||
+      change === 'price_and_stock'
+    ) {
+      stock += 1
+    } else if (change === 'new') {
+      firstScrapes += 1
+    } else if (change !== 'price_down' && change !== 'price_up') {
+      other += 1
+    }
+  }
+
+  const suffix = latestAt ? `; latest ${formatRelativeTime(latestAt)}` : ''
+  const indicators: ProductChangeIndicator[] = []
+  if (drops > 0) {
+    indicators.push({
+      key: 'drops',
+      label: `${drops} price ${drops === 1 ? 'drop' : 'drops'}`,
+      title: `Latest scrape found ${drops} price ${drops === 1 ? 'drop' : 'drops'}${suffix}`,
+      icon: TrendingDown,
+      variant: 'success',
+    })
+  }
+  if (rises > 0) {
+    indicators.push({
+      key: 'rises',
+      label: `${rises} price ${rises === 1 ? 'rise' : 'rises'}`,
+      title: `Latest scrape found ${rises} price ${rises === 1 ? 'rise' : 'rises'}${suffix}`,
+      icon: TrendingUp,
+      variant: 'destructive',
+    })
+  }
+  if (stock > 0) {
+    indicators.push({
+      key: 'stock',
+      label: `${stock} stock ${stock === 1 ? 'change' : 'changes'}`,
+      title: `Latest scrape found ${stock} stock ${stock === 1 ? 'change' : 'changes'}${suffix}`,
+      icon: Radio,
+      variant: 'warning',
+    })
+  }
+  if (firstScrapes > 0) {
+    indicators.push({
+      key: 'new',
+      label: `${firstScrapes} first ${firstScrapes === 1 ? 'scrape' : 'scrapes'}`,
+      title: `${firstScrapes} store ${firstScrapes === 1 ? 'has' : 'have'} first scrape data${suffix}`,
+      icon: CircleDot,
+      variant: 'info',
+    })
+  }
+  if (other > 0) {
+    indicators.push({
+      key: 'other',
+      label: `${other} ${other === 1 ? 'update' : 'updates'}`,
+      title: `${other} other ${other === 1 ? 'update' : 'updates'}${suffix}`,
+      icon: ActivityIcon,
+      variant: 'outline',
+    })
+  }
+  return indicators.slice(0, 4)
+}
+
+function formatRetailPrice(
+  value: number,
+  store: ProductStoreSummary,
+  options: {
+    symbol: string
+    displayMode: PriceDisplayMode
+    locale?: string
+    localCurrency: string
+    exchangeRates: Record<string, number>
+  },
+): string {
+  const raw =
+    store.manual_price != null && value === store.manual_price
+      ? null
+      : store.latest_discounted_price != null && value === store.latest_discounted_price
+        ? store.latest_raw_discounted
+        : store.latest_raw_price
+  return formatDisplayMoney(value, {
+    symbol: options.symbol,
+    mode: options.displayMode,
+    currencyCode: store.latest_currency_code,
+    raw,
+    locale: options.locale,
+  })
+}
+
+function formatDealerPrice(
+  value: number,
+  store: ProductStoreSummary,
+  options: {
+    symbol: string
+    displayMode: PriceDisplayMode
+    locale?: string
+    localCurrency: string
+    exchangeRates: Record<string, number>
+  },
+): string {
+  return formatDisplayMoney(value, {
+    symbol: options.symbol,
+    mode: options.displayMode,
+    currencyCode: store.latest_currency_code,
+    raw: store.latest_raw_dealer,
+    locale: options.locale,
+  })
+}
+
+function formatRetailLocalEquivalent(
+  value: number,
+  store: ProductStoreSummary,
+  options: {
+    symbol: string
+    localCurrency: string
+    exchangeRates: Record<string, number>
+  },
+): string | null {
+  return formatLocalEquivalent(value, {
+    sourceCurrency: sourceCurrencyForRetail(store, value),
+    localCurrency: options.localCurrency,
+    exchangeRates: options.exchangeRates,
+    symbol: options.symbol,
+  })
+}
+
+function formatDealerLocalEquivalent(
+  value: number,
+  store: ProductStoreSummary,
+  options: {
+    symbol: string
+    localCurrency: string
+    exchangeRates: Record<string, number>
+  },
+): string | null {
+  return formatLocalEquivalent(value, {
+    sourceCurrency: store.latest_currency_code,
+    localCurrency: options.localCurrency,
+    exchangeRates: options.exchangeRates,
+    symbol: options.symbol,
+  })
+}
+
+function SummaryPriceBlock({
+  label,
+  value,
+  localValue,
+  tone = 'retail',
+  icon,
+  title,
+}: {
+  label: string
+  value: string
+  localValue: string | null
+  tone?: 'retail' | 'dealer'
+  icon?: ReactNode
+  title?: string
+}) {
+  return (
+    <div
+      className="grid grid-cols-[3.75rem_minmax(0,max-content)] items-baseline gap-x-2 gap-y-0.5 text-xs tabular-nums"
+      title={title}
+    >
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={cn(
+          'inline-flex items-center gap-1 font-bold text-foreground',
+          tone === 'dealer' && 'text-success',
+        )}
+      >
+        {value}
+        {icon}
+      </span>
+      {localValue ? (
+        <>
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Local
+          </span>
+          <span
+            className={cn(
+              'font-bold text-foreground',
+              tone === 'dealer' && 'text-success',
+            )}
+          >
+            {localValue}
+          </span>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function SupplierPriceBlock({
+  label,
+  value,
+  localValue,
+  tone = 'retail',
+}: {
+  label: string
+  value: string | null
+  localValue: string | null
+  tone?: 'retail' | 'dealer'
+}) {
+  return (
+    <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={cn(
+          'font-semibold tabular-nums text-foreground',
+          tone === 'dealer' && 'text-success',
+          value == null && 'text-muted-foreground',
+        )}
+      >
+        {value ?? '-'}
+      </span>
+      {localValue ? (
+        <>
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Local
+          </span>
+          <span
+            className={cn(
+              'font-semibold tabular-nums text-foreground',
+              tone === 'dealer' && 'text-success',
+            )}
+          >
+            {localValue}
+          </span>
+        </>
+      ) : null}
+    </div>
+  )
 }

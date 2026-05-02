@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock,
   ExternalLink,
+  Gamepad2,
   Globe,
   KeyRound,
   LogOut,
@@ -18,15 +19,27 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { StatTile } from '@/components/ui/stat-tile'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toast-store'
 import { storesApi, productsApi } from '@/api'
+import { CustomJsonConfigFields } from '@/components/import/ApiCatalogImport'
+import {
+  API_PLATFORM_OPTIONS,
+  apiPlatformBaseUrl,
+  apiPlatformLabel,
+  apiPlatformNeedsJsonConfig,
+  readCustomJsonConfig,
+  trimCustomJsonConfig,
+  type CustomJsonApiConfig,
+} from '@/components/import/apiCatalogProviders'
+import { useCountryCode } from '@/hooks/useSettings'
 import { useLiveTime } from '@/hooks/useLiveTime'
 import { useNow } from '@/hooks/useNow'
-import type { Product, Store } from '@/api'
+import type { ApiPlatform, Product, Store } from '@/api'
 
 interface StoreAggregate {
   store: Store
@@ -85,11 +98,24 @@ function computeAggregates(
 
 export function StoresPage() {
   const qc = useQueryClient()
+  const regionalCountryCode = useCountryCode()
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [manualOnly, setManualOnly] = useState(false)
   const [loginUrl, setLoginUrl] = useState('')
+  const [apiEnabled, setApiEnabled] = useState(false)
+  const [apiPlatform, setApiPlatform] = useState<ApiPlatform>('steam')
+  const [apiCountryCode, setApiCountryCode] = useState('US')
+  const [apiCountryTouched, setApiCountryTouched] = useState(false)
+  const [apiLanguage, setApiLanguage] = useState('english')
+  const [apiCustomConfig, setApiCustomConfig] = useState<CustomJsonApiConfig>(() =>
+    readCustomJsonConfig({}),
+  )
+  const effectiveApiCountryCode = apiCountryTouched
+    ? apiCountryCode
+    : regionalCountryCode
+  const apiNeedsJsonConfig = apiPlatformNeedsJsonConfig(apiPlatform)
 
   const stores = useQuery<Store[]>({
     queryKey: ['stores'],
@@ -127,8 +153,22 @@ export function StoresPage() {
       storesApi.create({
         name: name.trim(),
         base_url: baseUrl.trim(),
-        manual_only: manualOnly,
-        login_url: loginUrl.trim() || null,
+        manual_only: apiEnabled ? false : manualOnly,
+        login_url: apiEnabled ? null : loginUrl.trim() || null,
+        api_enabled: apiEnabled,
+        api_platform: apiEnabled ? apiPlatform : null,
+        api_base_url: apiEnabled ? apiPlatformBaseUrl(apiPlatform) || null : null,
+        api_config: apiEnabled
+          ? {
+              country_code: effectiveApiCountryCode.trim().toUpperCase() || 'US',
+              language: apiLanguage.trim().toLowerCase() || 'english',
+              external_ids: [],
+              ...(apiNeedsJsonConfig
+                ? { custom_json: trimCustomJsonConfig(apiCustomConfig) }
+                : {}),
+            }
+          : {},
+        api_auto_import_new: false,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['stores'] })
@@ -136,6 +176,12 @@ export function StoresPage() {
       setBaseUrl('')
       setManualOnly(false)
       setLoginUrl('')
+      setApiEnabled(false)
+      setApiPlatform('steam')
+      setApiCountryCode(regionalCountryCode)
+      setApiCountryTouched(false)
+      setApiLanguage('english')
+      setApiCustomConfig(readCustomJsonConfig({}))
       setAdding(false)
       toast.success('Store added')
     },
@@ -168,6 +214,25 @@ export function StoresPage() {
       const detail =
         error instanceof Error ? error.message : 'Could not sync Woo catalog'
       toast.error('Woo sync failed', detail)
+    },
+  })
+
+  const syncApi = useMutation({
+    mutationFn: (id: number) => storesApi.syncApi(id),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['stores'] })
+      qc.invalidateQueries({ queryKey: ['products'] })
+      toast.success(
+        `${result.store_name} synced`,
+        result.auto_import_new
+          ? `Updated ${result.updated} API products and created ${result.created}.`
+          : `Updated ${result.updated} API products.`,
+      )
+    },
+    onError: (error) => {
+      const detail =
+        error instanceof Error ? error.message : 'Could not sync API catalog'
+      toast.error('API sync failed', detail)
     },
   })
 
@@ -287,7 +352,9 @@ export function StoresPage() {
                   size="sm"
                   onClick={() => create.mutate()}
                   disabled={
-                    create.isPending || !name.trim() || (!manualOnly && !baseUrl.trim())
+                    create.isPending ||
+                    !name.trim() ||
+                    (!manualOnly && !apiEnabled && !baseUrl.trim())
                   }
                 >
                   Save
@@ -301,6 +368,12 @@ export function StoresPage() {
                     setBaseUrl('')
                     setManualOnly(false)
                     setLoginUrl('')
+                    setApiEnabled(false)
+                    setApiPlatform('steam')
+                    setApiCountryCode(regionalCountryCode)
+                    setApiCountryTouched(false)
+                    setApiLanguage('english')
+                    setApiCustomConfig(readCustomJsonConfig({}))
                   }}
                 >
                   Cancel
@@ -313,6 +386,7 @@ export function StoresPage() {
                   type="checkbox"
                   checked={manualOnly}
                   onChange={(e) => setManualOnly(e.target.checked)}
+                  disabled={apiEnabled}
                   className="h-4 w-4 accent-primary"
                 />
                 No website / manual-only supplier
@@ -324,10 +398,80 @@ export function StoresPage() {
                   value={loginUrl}
                   onChange={(e) => setLoginUrl(e.target.value)}
                   placeholder="https://shop.example.com/login"
-                  disabled={create.isPending || manualOnly}
+                  disabled={create.isPending || manualOnly || apiEnabled}
                 />
               </div>
             </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-[auto_1fr_100px_1fr]">
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={apiEnabled}
+                  onChange={(e) => {
+                    const checked = e.target.checked
+                    setApiEnabled(checked)
+                    if (checked) {
+                      setManualOnly(false)
+                      if (!baseUrl.trim()) setBaseUrl(apiPlatformBaseUrl(apiPlatform))
+                    }
+                  }}
+                  className="h-4 w-4 accent-primary"
+                />
+                API source
+              </label>
+              <div className="space-y-1.5">
+                <Label htmlFor="api-platform">Platform</Label>
+                <Select
+                  id="api-platform"
+                  value={apiPlatform}
+                  onChange={(e) => {
+                    const nextPlatform = e.target.value as ApiPlatform
+                    setApiPlatform(nextPlatform)
+                    if (apiEnabled && !baseUrl.trim()) {
+                      setBaseUrl(apiPlatformBaseUrl(nextPlatform))
+                    }
+                  }}
+                  disabled={create.isPending || !apiEnabled}
+                >
+                  {API_PLATFORM_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="api-country">Country</Label>
+                <Input
+                  id="api-country"
+                  value={effectiveApiCountryCode}
+                  onChange={(e) => {
+                    setApiCountryTouched(true)
+                    setApiCountryCode(e.target.value.toUpperCase())
+                  }}
+                  maxLength={2}
+                  disabled={create.isPending || !apiEnabled}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="api-language">Language</Label>
+                <Input
+                  id="api-language"
+                  value={apiLanguage}
+                  onChange={(e) => setApiLanguage(e.target.value)}
+                  disabled={create.isPending || !apiEnabled}
+                />
+              </div>
+            </div>
+            {apiEnabled && apiNeedsJsonConfig ? (
+              <div className="mt-3">
+                <CustomJsonConfigFields
+                  config={apiCustomConfig}
+                  disabled={create.isPending}
+                  onChange={setApiCustomConfig}
+                />
+              </div>
+            ) : null}
           </BentoTile>
         ) : null}
       </BentoGrid>
@@ -357,12 +501,18 @@ export function StoresPage() {
                   ? () => syncWoo.mutate(agg.store.id)
                   : undefined
               }
+              onSyncApi={
+                agg.store.api_enabled
+                  ? () => syncApi.mutate(agg.store.id)
+                  : undefined
+              }
               onCaptureLoginSession={
-                agg.store.manual_only
+                agg.store.manual_only || agg.store.api_enabled
                   ? undefined
                   : () => captureLoginSession.mutate(agg.store.id)
               }
               syncingWoo={syncWoo.isPending}
+              syncingApi={syncApi.isPending}
               capturingLoginSession={
                 captureLoginSession.isPending &&
                 captureLoginSession.variables === agg.store.id
@@ -397,9 +547,11 @@ export function StoresPage() {
 interface StoreTileProps {
   agg: StoreAggregate
   onSyncWoo?: () => void
+  onSyncApi?: () => void
   onCaptureLoginSession?: () => void
   onClearLoginSession?: () => void
   syncingWoo: boolean
+  syncingApi: boolean
   capturingLoginSession: boolean
   clearingLoginSession: boolean
   onDelete: () => void
@@ -409,9 +561,11 @@ interface StoreTileProps {
 function StoreTile({
   agg,
   onSyncWoo,
+  onSyncApi,
   onCaptureLoginSession,
   onClearLoginSession,
   syncingWoo,
+  syncingApi,
   capturingLoginSession,
   clearingLoginSession,
   onDelete,
@@ -419,6 +573,7 @@ function StoreTile({
 }: StoreTileProps) {
   const live = useLiveTime(agg.lastScrapedAt)
   const wooLive = useLiveTime(agg.store.woo_last_synced_at)
+  const apiLive = useLiveTime(agg.store.api_last_synced_at)
   const sessionLive = useLiveTime(agg.store.session_updated_at)
   const { store, productCount, inStockCount, dropsCount } = agg
   const coverage =
@@ -488,6 +643,31 @@ function StoreTile({
         </div>
       ) : null}
 
+      {store.api_enabled ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="text-[10px]">
+            API: {apiPlatformLabel(store.api_platform)}
+          </Badge>
+          <Badge variant="muted" className="text-[10px]">
+            {store.api_auto_import_new ? 'auto-add saved IDs' : 'refresh linked items'}
+          </Badge>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onSyncApi}
+            disabled={syncingApi || !onSyncApi}
+            className="h-7 px-2 text-[11px]"
+          >
+            {syncingApi ? (
+              <LoaderIcon />
+            ) : (
+              <Gamepad2 className="h-3.5 w-3.5" />
+            )}
+            Sync API
+          </Button>
+        </div>
+      ) : null}
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {store.manual_only ? (
           <Badge variant="muted" className="text-[10px]">
@@ -499,7 +679,7 @@ function StoreTile({
             session saved
           </Badge>
         ) : null}
-        {!store.manual_only ? (
+        {!store.manual_only && !store.api_enabled ? (
           <>
             <Button
               size="sm"
@@ -583,6 +763,12 @@ function StoreTile({
             <div className="inline-flex items-center gap-1">
               <RefreshCw className="h-3 w-3" />
               {store.woo_last_synced_at ? wooLive : 'never synced'}
+            </div>
+          ) : null}
+          {store.api_enabled ? (
+            <div className="inline-flex items-center gap-1">
+              <Gamepad2 className="h-3 w-3" />
+              {store.api_last_synced_at ? apiLive : 'never API synced'}
             </div>
           ) : null}
           {!store.manual_only && store.session_updated_at ? (

@@ -29,10 +29,24 @@ import { EditProductCard } from '@/components/products/EditProductCard'
 import { PriceChart } from '@/components/products/PriceChart'
 import { LogsTable } from '@/components/products/LogsTable'
 import { logsApi, productsApi, scraperApi } from '@/api'
-import { useCurrencySymbol, useTimezone } from '@/hooks/useSettings'
+import {
+  useCurrencySymbol,
+  useCurrencyCode,
+  useExchangeRates,
+  useLocale,
+  usePriceDisplayMode,
+  useTimezone,
+} from '@/hooks/useSettings'
 import { useLiveTime } from '@/hooks/useLiveTime'
 import type { PriceLog, Product, ProductStoreSummary } from '@/api'
-import { cn, formatApiDate, parseApiDate } from '@/lib/utils'
+import {
+  cn,
+  convertToLocalCurrency,
+  formatApiDate,
+  formatDisplayMoney,
+  formatLocalEquivalent,
+  parseApiDate,
+} from '@/lib/utils'
 
 type HistoryRange = 'all' | 'today' | '7d' | '30d' | '90d' | 'custom'
 
@@ -51,6 +65,10 @@ export function ProductDetailPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const symbol = useCurrencySymbol()
+  const localCurrency = useCurrencyCode()
+  const exchangeRates = useExchangeRates()
+  const priceDisplayMode = usePriceDisplayMode()
+  const locale = useLocale()
   const timezone = useTimezone()
   const [editing, setEditing] = useState(false)
   const [historyStoreId, setHistoryStoreId] = useState('all')
@@ -139,7 +157,26 @@ export function ProductDetailPage() {
   }
 
   const p = product.data
-  const stats = computeStats(p)
+  const stats = computeStats(p, localCurrency, exchangeRates)
+  const lowestPriceText =
+    stats.low != null && stats.lowStore
+      ? formatStorePrice(stats.low, stats.lowStore, {
+          symbol,
+          mode: priceDisplayMode,
+          locale,
+          localCurrency,
+          exchangeRates,
+        })
+      : null
+  const latestDropText =
+    stats.bestDrop != null && stats.bestDropStore
+      ? formatDisplayMoney(stats.bestDrop, {
+          symbol,
+          mode: priceDisplayMode,
+          currencyCode: stats.bestDropStore.latest_currency_code,
+          locale,
+        })
+      : null
   const recent = mostRecentScrape(p)
   const selectedHistoryStore =
     historyStoreId === 'all'
@@ -247,11 +284,9 @@ export function ProductDetailPage() {
 
         <StatTile
           label="Lowest price"
-          value={stats.low}
-          decimals={2}
-          prefix={stats.low != null ? symbol : undefined}
+          value={lowestPriceText}
           icon={<Tag className="h-4 w-4" />}
-          hint={stats.lowStore ? `at ${stats.lowStore}` : undefined}
+          hint={stats.lowStore ? `at ${stats.lowStore.store_name}` : undefined}
           tone="primary"
         />
         <StatTile
@@ -269,9 +304,7 @@ export function ProductDetailPage() {
         />
         <StatTile
           label="Latest drop"
-          value={stats.bestDrop}
-          decimals={2}
-          prefix={stats.bestDrop != null ? symbol : undefined}
+          value={latestDropText}
           icon={<TrendingDown className="h-4 w-4" />}
           tone="success"
           hint={stats.bestDrop != null ? 'vs previous' : 'no drops'}
@@ -306,6 +339,10 @@ export function ProductDetailPage() {
                   key={s.id}
                   store={s}
                   symbol={symbol}
+                  displayMode={priceDisplayMode}
+                  locale={locale}
+                  localCurrency={localCurrency}
+                  exchangeRates={exchangeRates}
                   productId={p.id}
                 />
               ))
@@ -410,6 +447,8 @@ export function ProductDetailPage() {
                 logs={historyLogs}
                 stores={historyStores}
                 symbol={symbol}
+                displayMode={priceDisplayMode}
+                locale={locale}
               />
             )}
           </div>
@@ -431,12 +470,20 @@ export function ProductDetailPage() {
                 groups={historyLogGroups}
                 stores={p.stores}
                 symbol={symbol}
+                displayMode={priceDisplayMode}
+                locale={locale}
+                localCurrency={localCurrency}
+                exchangeRates={exchangeRates}
               />
             ) : (
               <LogsTable
                 logs={historyLogs}
                 stores={p.stores}
                 symbol={symbol}
+                displayMode={priceDisplayMode}
+                locale={locale}
+                localCurrency={localCurrency}
+                exchangeRates={exchangeRates}
                 showStoreColumn={false}
               />
             )}
@@ -451,13 +498,31 @@ function StoreLogSections({
   groups,
   stores,
   symbol,
+  displayMode,
+  locale,
+  localCurrency,
+  exchangeRates,
 }: {
   groups: Array<{ store: ProductStoreSummary; logs: PriceLog[] }>
   stores: ProductStoreSummary[]
   symbol: string
+  displayMode: 'regional' | 'source'
+  locale: string
+  localCurrency: string
+  exchangeRates: Record<string, number>
 }) {
   if (groups.length === 0) {
-    return <LogsTable logs={[]} stores={stores} symbol={symbol} />
+    return (
+      <LogsTable
+        logs={[]}
+        stores={stores}
+        symbol={symbol}
+        displayMode={displayMode}
+        locale={locale}
+        localCurrency={localCurrency}
+        exchangeRates={exchangeRates}
+      />
+    )
   }
 
   return (
@@ -474,6 +539,10 @@ function StoreLogSections({
             logs={logs}
             stores={[store]}
             symbol={symbol}
+            displayMode={displayMode}
+            locale={locale}
+            localCurrency={localCurrency}
+            exchangeRates={exchangeRates}
             showStoreColumn={false}
           />
         </section>
@@ -542,34 +611,104 @@ function LiveTimeLine({ iso }: { iso: string | null }) {
 
 interface DetailStats {
   low: number | null
-  lowStore: string | null
+  lowStore: ProductStoreSummary | null
   inStockStores: number
   bestDrop: number | null
+  bestDropStore: ProductStoreSummary | null
 }
 
-function computeStats(p: Product): DetailStats {
+function computeStats(
+  p: Product,
+  localCurrency: string,
+  exchangeRates: Record<string, number>,
+): DetailStats {
   let low: number | null = null
-  let lowStore: string | null = null
+  let lowLocal: number | null = null
+  let lowFallback: { value: number; store: ProductStoreSummary } | null = null
+  let lowStore: ProductStoreSummary | null = null
   let inStockStores = 0
   let bestDrop: number | null = null
+  let bestDropLocal: number | null = null
+  let bestDropStore: ProductStoreSummary | null = null
   for (const s of p.stores) {
     const effective =
       s.manual_price ?? s.latest_discounted_price ?? s.latest_price
-    if (effective != null && (low == null || effective < low)) {
-      low = effective
-      lowStore = s.store_name
+    if (effective != null) {
+      if (lowFallback == null || effective < lowFallback.value) {
+        lowFallback = { value: effective, store: s }
+      }
+      const localEffective = convertToLocalCurrency(effective, {
+        sourceCurrency:
+          s.manual_price != null && effective === s.manual_price
+            ? null
+            : s.latest_currency_code,
+        localCurrency,
+        exchangeRates,
+      })
+      if (localEffective != null && (lowLocal == null || localEffective < lowLocal)) {
+        low = effective
+        lowLocal = localEffective
+        lowStore = s
+      }
     }
     const stock = s.manual_stock_status ?? s.latest_stock_status
     if (stock === 'in_stock' || stock === 'limited') inStockStores += 1
     if (
       s.latest_price_delta != null &&
       s.latest_price_delta < 0 &&
-      (bestDrop == null || s.latest_price_delta < bestDrop)
+      (bestDrop == null ||
+        (convertToLocalCurrency(s.latest_price_delta, {
+          sourceCurrency: s.latest_currency_code,
+          localCurrency,
+          exchangeRates,
+        }) ?? s.latest_price_delta) < (bestDropLocal ?? bestDrop))
     ) {
       bestDrop = s.latest_price_delta
+      bestDropLocal =
+        convertToLocalCurrency(s.latest_price_delta, {
+          sourceCurrency: s.latest_currency_code,
+          localCurrency,
+          exchangeRates,
+        }) ?? s.latest_price_delta
+      bestDropStore = s
     }
   }
-  return { low, lowStore, inStockStores, bestDrop }
+  if (low == null && lowFallback != null) {
+    low = lowFallback.value
+    lowStore = lowFallback.store
+  }
+  return { low, lowStore, inStockStores, bestDrop, bestDropStore }
+}
+
+function formatStorePrice(
+  value: number,
+  store: ProductStoreSummary,
+  options: {
+    symbol: string
+    mode: 'regional' | 'source'
+    locale: string
+    localCurrency: string
+    exchangeRates: Record<string, number>
+  },
+): string {
+  const raw =
+    store.latest_discounted_price != null && value === store.latest_discounted_price
+      ? store.latest_raw_discounted
+      : store.latest_raw_price
+  const source = formatDisplayMoney(value, {
+    symbol: options.symbol,
+    mode: options.mode,
+    currencyCode: store.latest_currency_code,
+    raw,
+    locale: options.locale,
+  })
+  const local = formatLocalEquivalent(value, {
+    sourceCurrency: store.latest_currency_code,
+    localCurrency: options.localCurrency,
+    exchangeRates: options.exchangeRates,
+    symbol: options.symbol,
+  })
+  return local ?? source
 }
 
 function mostRecentScrape(p: Product): string | null {

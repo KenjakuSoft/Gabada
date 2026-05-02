@@ -23,16 +23,25 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StockPill } from '@/components/products/StockPill'
 import { activityApi } from '@/api'
-import { useCurrencySymbol, useTimezone } from '@/hooks/useSettings'
+import {
+  useCurrencyCode,
+  useCurrencySymbol,
+  useExchangeRates,
+  useLocale,
+  usePriceDisplayMode,
+  useTimezone,
+} from '@/hooks/useSettings'
 import { useLiveTime } from '@/hooks/useLiveTime'
 import type { ActivityEntry } from '@/api'
 import {
   cn,
   formatApiDateTime,
   formatDelta,
-  formatMoney,
+  formatDisplayMoney,
+  formatLocalEquivalent,
   parseApiDate,
 } from '@/lib/utils'
+import type { PriceDisplayMode } from '@/lib/utils'
 
 const REFRESH_MS = 30_000
 const EMPTY_ENTRIES: ActivityEntry[] = []
@@ -131,6 +140,10 @@ function normalizeChangeType(changeType: string): NormalizedChangeType {
 
 export function ActivityPage() {
   const symbol = useCurrencySymbol()
+  const localCurrency = useCurrencyCode()
+  const exchangeRates = useExchangeRates()
+  const priceDisplayMode = usePriceDisplayMode()
+  const locale = useLocale()
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search.trim())
   const activity = useQuery<ActivityEntry[]>({
@@ -264,6 +277,10 @@ export function ActivityPage() {
                     key={group.productId}
                     group={group}
                     symbol={symbol}
+                    displayMode={priceDisplayMode}
+                    locale={locale}
+                    localCurrency={localCurrency}
+                    exchangeRates={exchangeRates}
                   />
                 ))}
               </ul>
@@ -278,9 +295,20 @@ export function ActivityPage() {
 interface ActivityProductRowProps {
   group: ActivityGroup
   symbol: string
+  displayMode: PriceDisplayMode
+  locale: string
+  localCurrency: string
+  exchangeRates: Record<string, number>
 }
 
-function ActivityProductRow({ group, symbol }: ActivityProductRowProps) {
+function ActivityProductRow({
+  group,
+  symbol,
+  displayMode,
+  locale,
+  localCurrency,
+  exchangeRates,
+}: ActivityProductRowProps) {
   const live = useLiveTime(group.latestAt)
   const timezone = useTimezone()
   const primaryChange = normalizeChangeType(group.entries[0]?.change_type ?? 'unknown')
@@ -352,6 +380,10 @@ function ActivityProductRow({ group, symbol }: ActivityProductRowProps) {
             entry={entry}
             symbol={symbol}
             timezone={timezone}
+            displayMode={displayMode}
+            locale={locale}
+            localCurrency={localCurrency}
+            exchangeRates={exchangeRates}
           />
         ))}
       </div>
@@ -363,17 +395,26 @@ interface ActivityChangeLineProps {
   entry: ActivityEntry
   symbol: string
   timezone: string
+  displayMode: PriceDisplayMode
+  locale: string
+  localCurrency: string
+  exchangeRates: Record<string, number>
 }
 
 function ActivityChangeLine({
   entry,
   symbol,
   timezone,
+  displayMode,
+  locale,
+  localCurrency,
+  exchangeRates,
 }: ActivityChangeLineProps) {
   const normalizedChange = normalizeChangeType(entry.change_type)
   const changePresentation = CHANGE_PRESENTATION[normalizedChange]
   const ChangeIcon = changePresentation.icon
   const priceNow = entry.discounted_price ?? entry.price
+  const priceRaw = entry.discounted_price != null ? entry.raw_discounted : entry.raw_price
   const hasPriceMovement =
     normalizedChange === 'price_down' ||
     normalizedChange === 'price_up' ||
@@ -388,6 +429,24 @@ function ActivityChangeLine({
       : delta < 0
         ? 'text-success'
         : 'text-destructive'
+  const localPrice =
+    priceNow != null
+      ? formatLocalEquivalent(priceNow, {
+          sourceCurrency: entry.currency_code,
+          localCurrency,
+          exchangeRates,
+          symbol,
+        })
+      : null
+  const dealerLocal =
+    entry.dealer_price != null
+      ? formatLocalEquivalent(entry.dealer_price, {
+          sourceCurrency: entry.currency_code,
+          localCurrency,
+          exchangeRates,
+          symbol,
+        })
+      : null
 
   return (
     <div className="grid gap-3 px-3 py-2 md:grid-cols-[minmax(150px,1fr)_auto_minmax(210px,auto)_minmax(160px,auto)] md:items-center">
@@ -398,42 +457,91 @@ function ActivityChangeLine({
         </div>
       </div>
 
-      <Badge
-        variant={changePresentation.variant}
-        className="w-fit items-center gap-1.5 whitespace-nowrap text-[10px]"
-      >
-        <ChangeIcon className="h-3 w-3" />
-        {changePresentation.label}
-      </Badge>
-
-      <div className="flex flex-wrap items-center gap-2 md:justify-end">
-        {hasPriceMovement && entry.previous_price != null && priceNow != null ? (
-          <>
-            <span className="text-xs tabular-nums text-muted-foreground line-through">
-              {formatMoney(entry.previous_price, symbol)}
-            </span>
-            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-sm font-semibold tabular-nums">
-              {formatMoney(priceNow, symbol)}
-            </span>
-          </>
-        ) : priceNow != null ? (
-          <span className="text-sm font-semibold tabular-nums">
-            {formatMoney(priceNow, symbol)}
-          </span>
-        ) : (
-          <span className="text-sm text-muted-foreground">-</span>
-        )}
-        {delta != null ? (
-          <span className={`text-xs tabular-nums ${deltaColor}`}>
-            {formatDelta(delta)}
-          </span>
-        ) : null}
-        {entry.dealer_price != null ? (
-          <Badge variant="outline" className="gap-1.5 whitespace-nowrap text-[10px]">
-            <Tag className="h-3 w-3" />
-            Dealer {formatMoney(entry.dealer_price, symbol)}
+      <div className="flex flex-wrap gap-1.5 md:max-w-[12rem]">
+        <Badge
+          variant={changePresentation.variant}
+          className="w-fit items-center gap-1.5 whitespace-nowrap text-[10px]"
+        >
+          <ChangeIcon className="h-3 w-3" />
+          {changePresentation.label}
+        </Badge>
+        {delta != null && delta !== 0 ? (
+          <Badge
+            variant={delta < 0 ? 'success' : 'destructive'}
+            className="whitespace-nowrap text-[10px]"
+          >
+            Price {formatDelta(delta)}
           </Badge>
+        ) : null}
+        {entry.previous_stock_status &&
+        entry.stock_status &&
+        entry.previous_stock_status !== entry.stock_status ? (
+          <Badge variant="warning" className="whitespace-nowrap text-[10px]">
+            Stock changed
+          </Badge>
+        ) : null}
+      </div>
+
+      <div className="flex flex-col items-start gap-1 md:items-end">
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+          {hasPriceMovement && entry.previous_price != null && priceNow != null ? (
+            <>
+              <span className="text-xs tabular-nums text-muted-foreground line-through">
+                {formatDisplayMoney(entry.previous_price, {
+                  symbol,
+                  mode: displayMode,
+                  currencyCode: entry.currency_code,
+                  locale,
+                })}
+              </span>
+              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-sm font-semibold tabular-nums">
+                {formatDisplayMoney(priceNow, {
+                  symbol,
+                  mode: displayMode,
+                  currencyCode: entry.currency_code,
+                  raw: priceRaw,
+                  locale,
+                })}
+              </span>
+            </>
+          ) : priceNow != null ? (
+            <span className="text-sm font-semibold tabular-nums">
+              {formatDisplayMoney(priceNow, {
+                symbol,
+                mode: displayMode,
+                currencyCode: entry.currency_code,
+                raw: priceRaw,
+                locale,
+              })}
+            </span>
+          ) : (
+            <span className="text-sm text-muted-foreground">-</span>
+          )}
+          {delta != null ? (
+            <span className={`text-xs tabular-nums ${deltaColor}`}>
+              {formatDelta(delta)}
+            </span>
+          ) : null}
+          {entry.dealer_price != null ? (
+            <Badge variant="outline" className="gap-1.5 whitespace-nowrap text-[10px]">
+              <Tag className="h-3 w-3" />
+              Dealer{' '}
+              {formatDisplayMoney(entry.dealer_price, {
+                symbol,
+                mode: displayMode,
+                currencyCode: entry.currency_code,
+                raw: entry.raw_dealer,
+                locale,
+              })}
+            </Badge>
+          ) : null}
+        </div>
+        {localPrice || dealerLocal ? (
+          <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold tabular-nums text-muted-foreground md:justify-end">
+            {localPrice ? <span>Local {localPrice}</span> : null}
+            {dealerLocal ? <span>Dealer local {dealerLocal}</span> : null}
+          </div>
         ) : null}
       </div>
 

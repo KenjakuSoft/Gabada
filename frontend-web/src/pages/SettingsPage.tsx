@@ -275,6 +275,43 @@ const CRON_PRESETS = [
   { value: '0 8 * * 1', label: 'Weekly on Monday at 08:00' },
 ]
 
+function formatExchangeRates(rates: Record<string, number> | null | undefined): string {
+  return Object.entries(rates ?? {})
+    .filter(([, rate]) => Number.isFinite(rate) && rate > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([code, rate]) => `${code.toUpperCase()}=${rate}`)
+    .join('\n')
+}
+
+function parseExchangeRates(text: string): Record<string, number> {
+  const parsed: Record<string, number> = {}
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const [rawCode, rawRate] = trimmed.split(/[=:]/, 2)
+    const code = (rawCode || '').trim().toUpperCase()
+    const rate = Number((rawRate || '').trim())
+    if (!/^[A-Z]{3}$/.test(code) || !Number.isFinite(rate) || rate <= 0) {
+      continue
+    }
+    parsed[code] = rate
+  }
+  return parsed
+}
+
+function settingsValueEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (
+    typeof a === 'object' &&
+    a !== null &&
+    typeof b === 'object' &&
+    b !== null
+  ) {
+    return JSON.stringify(a) === JSON.stringify(b)
+  }
+  return false
+}
+
 export function SettingsPage() {
   const qc = useQueryClient()
   const settings = useQuery<Settings>({
@@ -283,6 +320,7 @@ export function SettingsPage() {
   })
 
   const [draft, setDraft] = useState<Settings | null>(null)
+  const [exchangeRatesTextDraft, setExchangeRatesTextDraft] = useState<string | null>(null)
   const form = draft ?? settings.data ?? null
 
   const next = useQuery<{ next_run_time: string | null }>({
@@ -297,6 +335,7 @@ export function SettingsPage() {
       qc.setQueryData(['settings'], updated)
       qc.invalidateQueries({ queryKey: ['settings', 'next-run'] })
       setDraft(null)
+      setExchangeRatesTextDraft(null)
       toast.success('Settings saved')
     },
     onError: () =>
@@ -336,8 +375,10 @@ export function SettingsPage() {
       'scrape_cron',
       'scrape_enabled',
       'locale',
+      'price_display_mode',
+      'exchange_rates',
     ]
-    return keys.some((k) => draft[k] !== settings.data[k])
+    return keys.some((k) => !settingsValueEqual(draft[k], settings.data[k]))
   }, [draft, settings.data])
 
   if (!form) {
@@ -398,6 +439,10 @@ export function SettingsPage() {
                   scrape_cron: form.scrape_cron,
                   scrape_enabled: form.scrape_enabled,
                   locale: form.locale,
+                  price_display_mode: form.price_display_mode,
+                  exchange_rates: parseExchangeRates(
+                    exchangeRatesTextDraft ?? formatExchangeRates(form.exchange_rates),
+                  ),
                 })
               }
               disabled={save.isPending || !dirty}
@@ -496,6 +541,42 @@ export function SettingsPage() {
                   <option key={tz} value={tz} />
                 ))}
               </datalist>
+            </div>
+            <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-border/70 bg-background/60 p-3 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={form.price_display_mode === 'source'}
+                onChange={(e) =>
+                  update(
+                    'price_display_mode',
+                    e.target.checked ? 'source' : 'regional',
+                  )
+                }
+                className="mt-0.5 h-4 w-4 accent-primary"
+              />
+              <span>
+                Use source currency when available
+                <span className="block text-xs text-muted-foreground">
+                  API/imported prices can keep their original currency instead of using the regional symbol.
+                </span>
+              </span>
+            </label>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="exchange-rates">Foreign rates to {form.currency_code}</Label>
+              <textarea
+                id="exchange-rates"
+                value={exchangeRatesTextDraft ?? formatExchangeRates(form.exchange_rates)}
+                onChange={(e) => {
+                  const nextText = e.target.value
+                  setExchangeRatesTextDraft(nextText)
+                  update('exchange_rates', parseExchangeRates(nextText))
+                }}
+                placeholder={`USD=300\nEUR=325`}
+                className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+              />
+              <p className="text-xs text-muted-foreground">
+                Enter one rate per line, for example USD=300 means 1 USD equals 300 {form.currency_code}.
+              </p>
             </div>
           </div>
         </BentoTile>

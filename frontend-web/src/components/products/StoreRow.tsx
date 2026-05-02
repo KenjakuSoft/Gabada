@@ -9,12 +9,17 @@ import { toast } from '@/components/ui/toast-store'
 import { productsApi, scraperApi } from '@/api'
 import type { ProductStoreSummary, StockStatus } from '@/api'
 import { formatDelta, formatRelativeTime } from '@/lib/utils'
+import type { PriceDisplayMode } from '@/lib/utils'
 import { PriceCell } from './PriceCell'
 import { StockPill } from './StockPill'
 
 interface StoreRowProps {
   store: ProductStoreSummary
   symbol: string
+  displayMode?: PriceDisplayMode
+  locale?: string
+  localCurrency?: string
+  exchangeRates?: Record<string, number>
   productId: number
 }
 
@@ -30,7 +35,15 @@ const STOCK_OPTIONS: Array<{ value: StockStatus; label: string }> = [
   { value: 'unknown', label: 'Unknown' },
 ]
 
-export function StoreRow({ store, symbol, productId }: StoreRowProps) {
+export function StoreRow({
+  store,
+  symbol,
+  displayMode = 'regional',
+  locale,
+  localCurrency,
+  exchangeRates,
+  productId,
+}: StoreRowProps) {
   const qc = useQueryClient()
   const canOpenUrl = isWebUrl(store.product_url)
   const canScrape = store.is_active && canOpenUrl && !store.store_manual_only
@@ -153,7 +166,14 @@ export function StoreRow({ store, symbol, productId }: StoreRowProps) {
           ) : null}
         </div>
 
-        <PriceCell store={store} symbol={symbol} />
+        <PriceCell
+          store={store}
+          symbol={symbol}
+          displayMode={displayMode}
+          locale={locale}
+          localCurrency={localCurrency}
+          exchangeRates={exchangeRates}
+        />
 
         <div className={`w-16 text-right text-xs tabular-nums ${deltaColor}`}>
           {formatDelta(delta)}

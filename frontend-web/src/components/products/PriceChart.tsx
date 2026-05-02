@@ -11,12 +11,20 @@ import {
 } from 'recharts'
 import type { PriceLog, ProductStoreSummary } from '@/api'
 import { useTimezone } from '@/hooks/useSettings'
-import { formatMoney, parseApiDate } from '@/lib/utils'
+import {
+  formatCurrencyCodeMoney,
+  formatDisplayMoney,
+  formatMoney,
+  parseApiDate,
+} from '@/lib/utils'
+import type { PriceDisplayMode } from '@/lib/utils'
 
 interface PriceChartProps {
   logs: PriceLog[]
   stores: ProductStoreSummary[]
   symbol: string
+  displayMode?: PriceDisplayMode
+  locale?: string
 }
 
 const COLORS = [
@@ -36,8 +44,18 @@ interface Point {
   [seriesId: string]: number | string
 }
 
-export function PriceChart({ logs, stores, symbol }: PriceChartProps) {
+export function PriceChart({
+  logs,
+  stores,
+  symbol,
+  displayMode = 'regional',
+  locale,
+}: PriceChartProps) {
   const timezone = useTimezone()
+  const singleStoreCurrency =
+    displayMode === 'source' && stores.length === 1
+      ? stores[0]?.latest_currency_code
+      : null
   const data = useMemo<Point[]>(() => {
     const byTime = new Map<number, Point>()
     for (const log of logs) {
@@ -83,7 +101,11 @@ export function PriceChart({ logs, stores, symbol }: PriceChartProps) {
           <YAxis
             stroke="var(--muted-foreground)"
             tick={{ fontSize: 12 }}
-            tickFormatter={(v) => `${symbol}${v}`}
+            tickFormatter={(v) =>
+              typeof v === 'number' && singleStoreCurrency
+                ? formatCurrencyCodeMoney(v, singleStoreCurrency, locale) ?? String(v)
+                : `${symbol}${v}`
+            }
           />
           <Tooltip
             contentStyle={{
@@ -93,7 +115,16 @@ export function PriceChart({ logs, stores, symbol }: PriceChartProps) {
               fontSize: 12,
             }}
             formatter={(value) =>
-              typeof value === 'number' ? formatMoney(value, symbol) : String(value)
+              typeof value === 'number'
+                ? singleStoreCurrency
+                  ? formatDisplayMoney(value, {
+                      symbol,
+                      mode: displayMode,
+                      currencyCode: singleStoreCurrency,
+                      locale,
+                    })
+                  : formatMoney(value, symbol)
+                : String(value)
             }
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
