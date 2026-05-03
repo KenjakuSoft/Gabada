@@ -78,8 +78,24 @@ PLATFORM_SELECTORS: dict[str, dict[str, Optional[str]]] = {
     },
     "woocommerce": {
         "title": ".product_title",
-        "price": "div.summary.entry-summary del .amount, .summary.entry-summary del .amount",
-        "discounted_price": "div.summary.entry-summary ins .amount, div.summary.entry-summary .price .amount, .summary.entry-summary ins .amount, .summary.entry-summary .price .amount",
+        # Woo's sale-block markup is `<span class="price"><del>.amount</del>
+        # <ins>.amount</ins></span>`. Selector lists return the first DOM-order
+        # match, so any selector that matches both <del>.amount AND <ins>.amount
+        # (e.g. ".price .amount") returns the strikethrough. Keep `price`
+        # discriminating: match strikethrough (sale items) OR the direct-child
+        # .amount under .price (non-sale items, no del/ins wrapper). Keep
+        # `discounted_price` strictly inside <ins> so it never falls back to
+        # the strikethrough value.
+        "price": (
+            ".summary.entry-summary del .woocommerce-Price-amount, "
+            ".summary.entry-summary del .amount, "
+            ".summary.entry-summary .price > .woocommerce-Price-amount, "
+            ".summary.entry-summary .price > .amount"
+        ),
+        "discounted_price": (
+            ".summary.entry-summary ins .woocommerce-Price-amount, "
+            ".summary.entry-summary ins .amount"
+        ),
         "dealer_price": None,
         "stock_status": ".stock",
     },
