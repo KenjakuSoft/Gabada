@@ -11,15 +11,15 @@ when a site layout changes.
 
 ## Current Release
 
-Latest stable release: `v0.5.0`
+Latest stable release: `v0.6.0`
 
 Recent highlights:
 
-- Added in-app update checks with release asset recommendations.
-- Added update manifests to future GitHub Release artifacts.
-- Cleaned up Probe and Selector Lab price displays so discounts only appear when a distinct sale price exists.
-- Tightened local API browser origin checks and made manual scrape actions wait for real completion before refreshing the UI.
-- Fixed the redacted-store-style `Rs 4` false price regression in Probe and Selector Lab.
+- Added a stealth Chrome fallback that auto-clicks Cloudflare Turnstile checkboxes via SeleniumBase + pyautogui when the headless Chromium scrape hits a bot challenge. Probe, Selector Lab, manual scrapes, and the daily scheduled scrape all use it.
+- Added an API catalog import flow with built-in Steam, Apple App Store, and GOG providers, plus a Custom JSON template for PlayStation, Xbox, Epic, and other storefronts. API-enabled stores skip Playwright and sync via HTTP.
+- Added currency tagging (`Rs/LKR`, `USD`, `EUR`, `GBP`, `INR`, `JPY`, ISO codes) on every price log row, with new Settings for `price_display_mode` (regional / source) and `exchange_rates`.
+- Saved Selector Lab profiles in `sites.toml` now win over stale platform defaults that got baked in at add-time.
+- Failed scrapes that find no price no longer overwrite the last good price log; they skip and keep the previous values instead.
 
 See [CHANGELOG.md](./CHANGELOG.md) for full release notes.
 
@@ -27,13 +27,16 @@ See [CHANGELOG.md](./CHANGELOG.md) for full release notes.
 
 - Track one product across many stores.
 - Save price, discounted price, dealer price, stock status, warranty text, and scrape history.
+- Tag every price log row with the source currency parsed from the page (`Rs/LKR`, `USD`, `EUR`, `GBP`, `INR`, `JPY`, ISO codes), with optional exchange-rate conversion in the UI.
 - Compare current store prices from the Home and Product Detail pages.
 - Organize products by category.
 - Import products from WooCommerce, CSV, XLSX, XLS, and PDF.
+- Import from store APIs (built-in Steam, Apple App Store, GOG; Custom JSON template for PlayStation, Xbox, Epic, EA Play, Ubisoft, Nintendo, Apple Store, Google Play). API-enabled stores sync via HTTP and skip Playwright entirely.
 - Preview imports, map columns, target existing products, and commit selected rows.
 - Sync WooCommerce catalogs before scheduled scrapes and optionally auto-add new catalog products.
 - Use Probe to inspect what the scraper sees before saving a profile.
 - Use Selector Lab to assign selectors, test them, and save reusable domain profiles.
+- Auto-bypass Cloudflare / DataDome / Turnstile bot challenges via a SeleniumBase stealth Chrome fallback (no per-site config required).
 - Capture per-store login sessions for sites that show prices only after sign-in.
 - Export and import backup bundles containing the database and scraper profiles.
 - Push and restore manual Google Drive snapshots from the Settings page.
@@ -61,8 +64,13 @@ do not have a wholesale/dealer concept.
 | Python | 3.11 or newer |
 | Node.js | 20 or newer |
 | Git | Any recent version |
+| Google Chrome | Latest (only required for the bot-challenge stealth fallback) |
 
-Playwright downloads its own Chromium browser during setup.
+Playwright downloads its own Chromium browser during setup. The
+SeleniumBase stealth fallback uses your installed system Chrome — on
+Windows desktops Chrome is usually already present. If it is missing,
+the scraper still boots and bot-challenge sites simply fall back to the
+existing `needs_review` result.
 
 ## Quick Start
 
@@ -196,6 +204,28 @@ Manual scrape endpoints wait until the scrape finishes and then return the real
 status. The UI refreshes product data after completion instead of immediately
 after queueing.
 
+### Bot Challenge Fallback
+
+When the shared headless Chromium hits a Cloudflare interstitial,
+DataDome challenge, or Turnstile checkbox that does not auto-clear,
+Gabada retries the same scrape once through a SeleniumBase-launched
+stealth Chrome via Playwright's `connect_over_cdp()`. SeleniumBase
+navigates first so its anti-bot warmup runs, then `uc_gui_click_captcha()`
+clicks the Turnstile checkbox at the OS mouse level via pyautogui.
+Playwright then attaches and reads the already-cleared page.
+
+A visible Chrome window flashes for ~10 seconds during the bypass —
+required, because UC mode's stealth degrades in headless. The fallback
+runs from Probe, Selector Lab, manual scrapes, and the daily scheduled
+scrape — no per-site configuration is needed. If the system has no
+installed Chrome or the stealth retry also gets blocked, the scrape
+returns the existing `needs_review` result instead of crashing.
+
+Bot-challenge sites pay roughly 30 seconds on every scrape waiting for
+the headless Chromium to give up before the stealth retry kicks in.
+Avoid moving the mouse during the auto-click window or pyautogui can
+miss the checkbox.
+
 ## Probe And Selector Lab
 
 Use Probe when a page is extracting the wrong title, price, sale price, dealer
@@ -226,7 +256,7 @@ selectors = { title = "h1", price = ".regular-price", discounted_price = ".sale-
 
 ## Import Workflow
 
-Gabada supports two import families.
+Gabada supports three import families.
 
 ### WooCommerce
 
@@ -235,6 +265,24 @@ Gabada supports two import families.
 - Select only the products to import.
 - Save Woo credentials on a store.
 - Optionally auto-add newly discovered Woo products during future syncs.
+
+### Store APIs
+
+Gabada ships with built-in support for game-storefront APIs and a Custom
+JSON template for any other JSON catalog feed:
+
+| Provider | Auth | Notes |
+| --- | --- | --- |
+| Steam | none | Public storefront API |
+| Apple App Store | none | iTunes lookup API |
+| GOG | none | Public catalog API |
+| Custom JSON | configurable | Template engine for PlayStation, Xbox, Epic, EA Play, Ubisoft, Nintendo, Apple Store, Google Play, and any other JSON feed |
+
+API-enabled product_stores skip Playwright entirely on the daily
+scheduled scrape and pull prices via HTTP, which is faster, more
+reliable, and avoids triggering bot protection. Per-store API config
+is exposed in the Stores page (`api_enabled`, `api_platform`,
+`api_base_url`, `api_key`, `api_config`, `api_auto_import_new`).
 
 ### Documents
 
@@ -325,8 +373,8 @@ Gabada/
     api/                 FastAPI routers mounted under /api
     database/            SQLite setup and Pydantic models
     scheduler/           APScheduler daily scrape job
-    scraper/             Playwright scraper engine and sites.toml profiles
-    services/            Backup bundle and Google Drive sync helpers
+    scraper/             Playwright scraper engine, sites.toml profiles, and SeleniumBase stealth fallback
+    services/            Backup bundle, Google Drive sync, and API catalog import providers
     app_paths.py         Dev vs frozen path resolution
     desktop_launcher.py  Local desktop-style launcher
     main.py              FastAPI entry point
@@ -345,7 +393,7 @@ Core stack:
 
 | Layer | Technology |
 | --- | --- |
-| Backend | FastAPI, Uvicorn, Playwright, APScheduler, aiosqlite, Pydantic v2 |
+| Backend | FastAPI, Uvicorn, Playwright, SeleniumBase (optional, stealth fallback), APScheduler, aiosqlite, Pydantic v2 |
 | Frontend | React 19, Vite 8, TypeScript, Tailwind v4, TanStack Query, Zustand, Recharts |
 | Database | SQLite in WAL mode |
 | Packaging | PyInstaller and Inno Setup |
@@ -369,6 +417,8 @@ Common endpoints:
 | `PUT` | `/api/scraper/selector-lab/profile` | Save a domain profile |
 | `POST` | `/api/scraper/scrape/{product_store_id}` | Scrape one active store link |
 | `POST` | `/api/scraper/scrape-all` | Scrape every active store link |
+| `POST` | `/api/import/api/preview` | Preview API catalog products before import |
+| `POST` | `/api/import/api/import` | Import selected API catalog products |
 | `GET` | `/api/settings/database/export` | Download backup archive |
 | `POST` | `/api/settings/database/import` | Restore backup archive or database |
 | `POST` | `/api/drive/snapshots/push` | Upload Drive snapshot |
@@ -390,7 +440,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./packaging/build_release.sh --app-version 0.5.0
+./packaging/build_release.sh --app-version 0.6.0
 ```
 
 Pushing a `v*` tag or publishing a GitHub Release triggers
@@ -448,6 +498,21 @@ price when it exists.
 - Verify the Google Cloud OAuth client is a Desktop client.
 - Confirm the Drive API is enabled.
 - Start sign-in again and complete the new browser tab.
+
+### A scrape opens a Chrome window and the cursor moves on its own
+
+That is the SeleniumBase stealth fallback clicking through a Cloudflare /
+Turnstile bot challenge via pyautogui. It runs only when the headless
+Chromium scrape fails. Don't move the mouse during the click window or
+the Turnstile checkbox can be missed. If the challenge is consistently
+not bypassed, install or update the seleniumbase dependency:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pip install --upgrade seleniumbase
+```
+
+The app boots without seleniumbase — bot-challenge sites simply return
+the existing `needs_review` result instead of being bypassed.
 
 ### The app opens but the frontend is missing
 
