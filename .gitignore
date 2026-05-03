@@ -51,3 +51,6 @@ packaging/output/
 packaging/windows/build/
 packaging/windows/dist/
 packaging/windows/output/
+
+# Local scratch scripts (one-off smoke tests, not part of the app)
+backend/scratch_*.py
