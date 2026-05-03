@@ -46,6 +46,7 @@ from scraper.site_profiles import (
     find_profile as _find_site_profile,
     normalize_hostname as _normalize_hostname,
 )
+from scraper import stealth as _stealth
 
 logger = logging.getLogger(__name__)
 
@@ -3473,28 +3474,127 @@ async def _navigate(page: Page, url: str, config: ScrapeConfig) -> bool:
 async def _scrape_url_once(url: str, config: ScrapeConfig) -> ScrapeResult:
     context = await _open_context(config)
     page = await context.new_page()
+    challenge_blocked = False
 
     try:
         ready = await _navigate(page, url, config)
         if not ready:
-            return _bot_challenge_result()
-        result = await scrape_with_open_page(page, config)
-
-        logger.info(
-            "Scrape done: %s -> regular=%s discounted=%s dealer=%s stock=%s",
-            url,
-            result.price,
-            result.discounted_price,
-            result.dealer_price,
-            result.stock_status,
-        )
-        return result
-
+            challenge_blocked = True
+        else:
+            result = await scrape_with_open_page(page, config)
+            logger.info(
+                "Scrape done: %s -> regular=%s discounted=%s dealer=%s stock=%s",
+                url,
+                result.price,
+                result.discounted_price,
+                result.dealer_price,
+                result.stock_status,
+            )
+            return result
     except Exception as e:
         logger.error("Scrape failed for %s: %s", url, e)
         return ScrapeResult(error=str(e))
     finally:
         await context.close()
+
+    # The shared headless Chromium hit a bot-check that did not auto-clear.
+    # Retry once via SeleniumBase-launched stealth Chrome before giving up,
+    # so Cloudflare / DataDome stores still produce a price log entry.
+    if challenge_blocked:
+        return await _scrape_via_stealth(url, config)
+    return _bot_challenge_result()
+
+
+async def _settle_after_stealth_navigation(page: Page, config: ScrapeConfig) -> None:
+    """Wait for the wait_for selector / network idle on a pre-navigated stealth page.
+
+    The page is already at the target URL because SeleniumBase navigated
+    before Playwright attached. We only need to wait for the product
+    content selector (or network idle) to confirm extraction can run.
+    """
+    if config.wait_for:
+        try:
+            await page.wait_for_selector(config.wait_for, timeout=config.wait_timeout)
+        except Exception:
+            logger.warning(
+                "Stealth: wait_for '%s' timed out on %s", config.wait_for, page.url
+            )
+    else:
+        try:
+            await page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+
+
+async def _scrape_via_stealth(url: str, config: ScrapeConfig) -> ScrapeResult:
+    """Retry a blocked scrape through a SeleniumBase stealth Chrome.
+
+    Returns the standard ``_bot_challenge_result()`` if seleniumbase is
+    not installed, the stealth browser failed to start, or the stealth
+    page also tripped a challenge.
+    """
+    if _playwright is None:
+        return _bot_challenge_result()
+    logger.info("Bot challenge on %s — retrying via SeleniumBase stealth", url)
+    async with _stealth.stealth_navigate(_playwright, url, config) as page:
+        if page is None:
+            return _bot_challenge_result()
+        try:
+            await _settle_after_stealth_navigation(page, config)
+            if await _detected_challenge(page):
+                logger.warning("Stealth Chrome also blocked on %s", url)
+                return _bot_challenge_result()
+            result = await scrape_with_open_page(page, config)
+            logger.info(
+                "Stealth scrape done: %s -> regular=%s discounted=%s dealer=%s stock=%s",
+                url,
+                result.price,
+                result.discounted_price,
+                result.dealer_price,
+                result.stock_status,
+            )
+            return result
+        except Exception as e:
+            logger.error("Stealth scrape failed for %s: %s", url, e)
+            return ScrapeResult(error=str(e))
+
+
+async def _probe_via_stealth(
+    url: str, config: ScrapeConfig, response: ProbeResponse
+) -> Optional[ScrapeResult]:
+    """Retry probe extraction through stealth Chrome.
+
+    Returns the extracted ``ScrapeResult`` on success so the caller can
+    populate ``response.extracted``. Mutates ``response`` to record the
+    final URL and a note describing how the page was reached. Returns
+    ``None`` if seleniumbase is unavailable or the stealth attempt also
+    detected a challenge.
+    """
+    if _playwright is None:
+        return None
+    logger.info("Probe bot challenge on %s — retrying via SeleniumBase stealth", url)
+    async with _stealth.stealth_navigate(_playwright, url, config) as page:
+        if page is None:
+            return None
+        try:
+            await _settle_after_stealth_navigation(page, config)
+            response.final_url = page.url
+            if await _detected_challenge(page):
+                response.notes.append(
+                    "Stealth retry also tripped the bot-check; this site needs a "
+                    "saved session before Gabada can scrape it."
+                )
+                return None
+            extracted = await scrape_with_open_page(page, config)
+            response.notes.append(
+                "Bot challenge bypassed via SeleniumBase stealth Chrome; "
+                "candidate enumeration was skipped for this probe."
+            )
+            return extracted
+        except Exception as e:
+            logger.error("Stealth probe failed for %s: %s", url, e)
+            response.notes.append(f"Stealth probe error: {e}")
+            return None
 
 
 # ── Probe (diagnostics) ──────────────────────────────────────────────────────
@@ -3546,6 +3646,13 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
         ready = await _navigate(page, url, config)
         response.final_url = page.url
         if not ready:
+            # Bot-check on the shared Chromium. Try stealth before reporting
+            # the page as blocked so probe diagnostics match what scrape()
+            # will actually see on this URL.
+            stealth_extracted = await _probe_via_stealth(url, config, response)
+            if stealth_extracted is not None:
+                response.extracted = stealth_extracted
+                return response
             response.extracted = _bot_challenge_result()
             response.notes.extend([
                 _BOT_CHALLENGE_NOTE,

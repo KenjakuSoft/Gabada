@@ -11,3 +11,7 @@ pillow>=10.3.0
 openpyxl>=3.1.0
 pdfplumber>=0.11.0
 xlrd>=2.0.1
+# Stealth-Chrome fallback for Cloudflare / DataDome bot challenges.
+# The scraper boots without it (the import is gated in scraper/stealth.py),
+# but protected stores will fail without it installed.
+seleniumbase>=4.30.0
