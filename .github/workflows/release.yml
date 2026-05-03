@@ -192,13 +192,18 @@ jobs:
             --output "packaging/output/gabada-update-$tag-$PLATFORM-$ARCH.json" \
             packaging/output/*
 
+      # Skip the workflow-artifact upload on tagged releases — those write
+      # straight to the GitHub Release in the next step, which has separate
+      # storage. Keep the artifact upload only for manual dispatch / debug
+      # runs (no RELEASE_TAG), with a 1-day retention so quota stays clean.
       - name: Upload workflow artifacts
-        if: always()
+        if: ${{ always() && env.RELEASE_TAG == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: gabada-${{ matrix.platform }}-${{ matrix.arch }}
           path: packaging/output/*
           if-no-files-found: warn
+          retention-days: 1
 
       - name: Attach assets to GitHub release
         if: ${{ env.RELEASE_TAG != '' }}
