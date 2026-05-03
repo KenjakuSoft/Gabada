@@ -2958,9 +2958,101 @@ def _suggest_selector_assignments(
     return suggested
 
 
+async def _populate_selector_lab(
+    page: Page,
+    url: str,
+    config: ScrapeConfig,
+    nav_config: ScrapeConfig,
+    response: SelectorLabResponse,
+) -> None:
+    """Run lab + smart-scan on an already-navigated page and fill response."""
+    response.final_url = page.url
+    response.hostname = _normalize_hostname(page.url or url)
+
+    is_facebook_marketplace = (
+        _is_facebook_marketplace_url(url)
+        or _is_facebook_marketplace_url(page.url)
+        or nav_config.platform == "facebook-marketplace"
+    )
+
+    lab = await _run_selector_lab(page)
+    smart = await _run_smart_scan(page)
+    response.platform = (
+        "facebook-marketplace"
+        if is_facebook_marketplace
+        else (lab.get("platform") or smart.get("platform") or "generic")
+    )
+    response.root_selector = lab.get("root_selector")
+    lab_candidates = [
+        candidate
+        for item in (lab.get("candidates") or [])
+        if (candidate := _selector_lab_candidate_from_item(item))
+    ]
+    probe_candidates = [
+        candidate
+        for item in (smart.get("candidates") or [])
+        if (
+            candidate := _smart_scan_candidate_to_selector_candidate(
+                item,
+                main=smart.get("main"),
+                original=smart.get("original"),
+                dealer=smart.get("dealer"),
+            )
+        )
+    ]
+    response.candidates = _merge_selector_lab_candidates(
+        probe_candidates,
+        lab_candidates,
+    )
+
+    effective = _apply_site_profile(url, config)
+    if effective.storage_state_path:
+        response.extracted = await scrape(url, effective)
+    else:
+        response.extracted = await scrape_with_open_page(
+            page,
+            effective,
+            platform_hint=response.platform,
+        )
+    if is_facebook_marketplace:
+        response.candidates = (
+            _facebook_selector_candidates_from_result(response.extracted)
+            + response.candidates
+        )
+    response.suggested_assignments = _suggest_selector_assignments(
+        response.candidates,
+        response.current_profile,
+    )
+
+    if response.current_profile:
+        note = f"Matched saved profile: {response.current_profile.matched_hostname}"
+        if response.current_profile.matched_hostname != response.current_profile.hostname:
+            note += f" for {response.current_profile.hostname}"
+        response.notes.append(note)
+    if response.hostname and response.hostname.endswith("redacted-store.example"):
+        response.notes.append(
+            "redacted-store product pages include KOKO/installment and related-product prices. "
+            "Prefer the main LKR amount in the top product block, then test on a few products before saving."
+        )
+    if response.root_selector:
+        response.notes.append(f"Detected product root: {response.root_selector}")
+    if probe_candidates:
+        response.notes.append(
+            f"Merged {len(probe_candidates)} probe smart-scan candidate"
+            f"{'' if len(probe_candidates) == 1 else 's'} into Selector Lab."
+        )
+    response.notes.append(
+        f"Collected {len(response.candidates)} selector candidate"
+        f"{'' if len(response.candidates) == 1 else 's'}."
+    )
+    if not response.candidates:
+        response.notes.append("No useful candidates were found on the page.")
+
+
 async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabResponse:
     response = SelectorLabResponse(url=url)
     current_profile = _lab_profile(url)
+    response.current_profile = current_profile
     headers = dict(config.headers)
     matched = _find_site_profile(url)
     if matched:
@@ -2976,101 +3068,53 @@ async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabRespon
         platform=config.platform,
     )
 
+    # First attempt: shared headless Chromium.
+    challenge_blocked = False
     context = await _open_context(nav_config)
     page = await context.new_page()
     try:
         ready = await _navigate(page, url, nav_config)
-        response.final_url = page.url
-        response.hostname = _normalize_hostname(page.url or url)
-        response.current_profile = current_profile
         if not ready:
-            response.extracted = _bot_challenge_result()
-            response.notes.extend([
-                _BOT_CHALLENGE_NOTE,
-                _BOT_CHALLENGE_SESSION_NOTE,
-            ])
-            return response
-        is_facebook_marketplace = (
-            _is_facebook_marketplace_url(url)
-            or _is_facebook_marketplace_url(page.url)
-            or nav_config.platform == "facebook-marketplace"
-        )
-
-        lab = await _run_selector_lab(page)
-        smart = await _run_smart_scan(page)
-        response.platform = (
-            "facebook-marketplace"
-            if is_facebook_marketplace
-            else (lab.get("platform") or smart.get("platform") or "generic")
-        )
-        response.root_selector = lab.get("root_selector")
-        lab_candidates = [
-            candidate
-            for item in (lab.get("candidates") or [])
-            if (candidate := _selector_lab_candidate_from_item(item))
-        ]
-        probe_candidates = [
-            candidate
-            for item in (smart.get("candidates") or [])
-            if (
-                candidate := _smart_scan_candidate_to_selector_candidate(
-                    item,
-                    main=smart.get("main"),
-                    original=smart.get("original"),
-                    dealer=smart.get("dealer"),
-                )
-            )
-        ]
-        response.candidates = _merge_selector_lab_candidates(
-            probe_candidates,
-            lab_candidates,
-        )
-
-        effective = _apply_site_profile(url, config)
-        if effective.storage_state_path:
-            response.extracted = await scrape(url, effective)
+            challenge_blocked = True
         else:
-            response.extracted = await scrape_with_open_page(
-                page,
-                effective,
-                platform_hint=response.platform,
-            )
-        if is_facebook_marketplace:
-            response.candidates = (
-                _facebook_selector_candidates_from_result(response.extracted)
-                + response.candidates
-            )
-        response.suggested_assignments = _suggest_selector_assignments(
-            response.candidates,
-            response.current_profile,
-        )
-
-        if response.current_profile:
-            note = f"Matched saved profile: {response.current_profile.matched_hostname}"
-            if response.current_profile.matched_hostname != response.current_profile.hostname:
-                note += f" for {response.current_profile.hostname}"
-            response.notes.append(note)
-        if response.hostname and response.hostname.endswith("redacted-store.example"):
-            response.notes.append(
-                "redacted-store product pages include KOKO/installment and related-product prices. "
-                "Prefer the main LKR amount in the top product block, then test on a few products before saving."
-            )
-        if response.root_selector:
-            response.notes.append(f"Detected product root: {response.root_selector}")
-        if probe_candidates:
-            response.notes.append(
-                f"Merged {len(probe_candidates)} probe smart-scan candidate"
-                f"{'' if len(probe_candidates) == 1 else 's'} into Selector Lab."
-            )
-        response.notes.append(
-            f"Collected {len(response.candidates)} selector candidate"
-            f"{'' if len(response.candidates) == 1 else 's'}."
-        )
-        if not response.candidates:
-            response.notes.append("No useful candidates were found on the page.")
-        return response
+            await _populate_selector_lab(page, url, config, nav_config, response)
+            return response
     finally:
         await context.close()
+
+    # Bot challenge — retry the inspection through SeleniumBase stealth Chrome
+    # so the Selector Lab also works on Cloudflare-protected stores.
+    if challenge_blocked and _playwright is not None:
+        logger.info(
+            "Selector-lab bot challenge on %s — retrying via SeleniumBase stealth", url
+        )
+        async with _stealth.stealth_navigate(_playwright, url, nav_config) as page:
+            if page is not None:
+                try:
+                    await _settle_after_stealth_navigation(page, nav_config)
+                    if not await _detected_challenge(page):
+                        await _populate_selector_lab(
+                            page, url, config, nav_config, response
+                        )
+                        response.notes.insert(
+                            0,
+                            "Bot challenge bypassed via SeleniumBase stealth Chrome.",
+                        )
+                        return response
+                    logger.warning(
+                        "Stealth selector-lab also detected challenge on %s", url
+                    )
+                except Exception as exc:
+                    logger.error("Stealth selector-lab failed for %s: %s", url, exc)
+
+    response.final_url = url
+    response.hostname = response.hostname or _normalize_hostname(url)
+    response.extracted = _bot_challenge_result()
+    response.notes.extend([
+        _BOT_CHALLENGE_NOTE,
+        _BOT_CHALLENGE_SESSION_NOTE,
+    ])
+    return response
 
 
 def _smart_scan_result_from_data(data: dict[str, Any]) -> ScrapeResult:

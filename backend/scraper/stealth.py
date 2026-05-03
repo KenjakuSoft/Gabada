@@ -60,6 +60,43 @@ async def _stop_driver(driver: Any) -> None:
     )
 
 
+async def _try_solve_captcha(driver: Any) -> bool:
+    """Best-effort: click the Cloudflare Turnstile checkbox via SeleniumBase.
+
+    redacted-store and similar stores serve interactive Turnstile, not just the
+    auto-clearing JS challenge. SeleniumBase exposes an OS-level mouse
+    helper (pyautogui under the hood) that finds and clicks the checkbox.
+
+    Different SeleniumBase releases name this differently — try each in
+    turn and stop at the first one that runs without raising. Returns
+    True if a method ran, False if nothing usable was found.
+    """
+    for method_name in (
+        "uc_gui_click_captcha",
+        "uc_gui_handle_captcha",
+        "uc_gui_handle_cf",
+        "gui_click_captcha",
+    ):
+        method = getattr(driver, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            result = method()
+            if asyncio.iscoroutine(result):
+                await result
+            logger.info("Stealth: %s() invoked", method_name)
+            return True
+        except Exception as exc:
+            logger.warning("Stealth: %s() failed: %s", method_name, exc)
+            continue
+    logger.info(
+        "Stealth: no captcha-clicker method found on driver %s; user may need "
+        "to click the checkbox manually before settle expires.",
+        type(driver).__name__,
+    )
+    return False
+
+
 def _storage_state_cookies(config: ScrapeConfig) -> list:
     """Pull the cookies array out of a saved storage_state JSON file.
 
@@ -142,7 +179,12 @@ async def stealth_navigate(
         except Exception as exc:
             logger.warning("Stealth: driver.get(%s) failed: %s", url, exc)
 
-        # Brief settle so any JS challenge / redirect can resolve.
+        # Give the Cloudflare Turnstile iframe a moment to render before
+        # we try to click its checkbox.
+        await asyncio.sleep(3.0)
+        await _try_solve_captcha(driver)
+
+        # Settle so verification (auto-click or manual fallback) can finish.
         await asyncio.sleep(max(0.0, settle_seconds))
 
         endpoint_url = driver.get_endpoint_url()
