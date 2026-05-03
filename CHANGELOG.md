@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.6.0] — 2026-05-03
+
+### Added
+- **Stealth Chrome fallback for Cloudflare-protected sites.** When the shared headless Chromium hits a bot-check that does not auto-clear (Cloudflare interstitial, DataDome, Turnstile), the engine now retries the same scrape once through a SeleniumBase-launched stealth Chrome via Playwright's `connect_over_cdp()`. SeleniumBase navigates first so its anti-bot warmup runs, then Playwright attaches and reads the already-cleared page. `uc_gui_click_captcha()` clicks interactive Turnstile checkboxes via pyautogui at the OS mouse layer. The fallback also runs from Probe and Selector Lab so diagnostics match scrape behaviour. The `seleniumbase` dependency is gated — the app still boots without it and falls back to the existing challenge result.
+- **API catalog import for game stores.** New Import flow with built-in Steam, Apple App Store, and GOG providers, plus a Custom JSON template engine for PlayStation, Xbox, Epic, EA Play, Ubisoft, Nintendo, Apple Store, and Google Play. API-enabled product_stores skip Playwright and sync via HTTP from the daily scheduler. Per-store API config exposed in the Stores page.
+- **Currency tagging across the price pipeline.** `price_logs` rows now carry a `currency_code` parsed from raw price text (Rs/LKR, USD, EUR, GBP, INR, JPY, ISO codes), falling back to a Settings-configured local currency. New Settings: `price_display_mode` (regional / source) and `exchange_rates`. Surfaced through `ProductStoreSummary`, `PriceLog`, `ActivityEntry`, and the matching frontend tiles, charts, and tables.
+- **Five new site profiles** in `sites.toml`: redacted-store, redacted-store, store.epicgames.com, store.playstation.com, xbox.com.
+
+### Fixed
+- **Saved sites.toml selectors win over stale platform defaults** that got baked into `product_stores.scrape_config` at add-time, while still preserving truly custom per-link selectors. The Selector Lab's saved profile now applies as expected on subsequent scrapes.
+- **"No price found" runs no longer overwrite the last good price log.** Previously, a transient render failure could blank a product's price. Scrapes that find no price and no stock change now skip the insert and keep the previous values; runs that find no price but a real stock change fail with a clear error instead of overwriting. Latest-row queries break ties by `id DESC` and ignore empty rows.
+- **Auto-detect now applies the matched site profile** before falling back to platform defaults, so add-product probes use the saved store config instead of overwriting it.
+- **Probe / Selector Lab timeouts** bumped from the 30-second axios default to 5 minutes so stealth retries on Cloudflare-protected sites complete instead of surfacing as "Probe failed - Check URL and backend".
+
+### Changed
+- **App version** bumped to **0.6.0** to reflect the new stealth fallback, API catalog, and currency-tagged price pipeline.
+- **`backend/services/`** is a new package; `services/api_catalog.py` owns the API import provider layer and `scraper/stealth.py` owns the SeleniumBase integration. Both are kept out of the 4000-line `engine.py`.
+
 ## [0.5.0] — 2026-04-30
 
 ### Added
