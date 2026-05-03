@@ -252,7 +252,11 @@ export const scraperApi = {
     wait_for?: string | null
     wait_timeout?: number
   }): Promise<ProbeResponse> => {
-    const { data } = await http.post<ProbeResponse>('/scraper/probe', body)
+    // 5 min: a probe may fall through to the SeleniumBase stealth retry on
+    // Cloudflare-protected sites, which pushes the call past the 30s default.
+    const { data } = await http.post<ProbeResponse>('/scraper/probe', body, {
+      timeout: 300_000,
+    })
     return data
   },
   selectorLab: async (body: {
@@ -264,6 +268,7 @@ export const scraperApi = {
     const { data } = await http.post<SelectorLabResponse>(
       '/scraper/selector-lab',
       body,
+      { timeout: 300_000 },
     )
     return data
   },
@@ -278,6 +283,7 @@ export const scraperApi = {
     const { data } = await http.post<ScrapeResult>(
       '/scraper/selector-lab/test',
       body,
+      { timeout: 300_000 },
     )
     return data
   },
@@ -304,7 +310,11 @@ export const scraperApi = {
     selectors: Record<string, string | null>
     notes: string[]
   }> => {
-    const { data } = await http.post(`/scraper/reprobe/${productStoreId}`)
+    const { data } = await http.post(
+      `/scraper/reprobe/${productStoreId}`,
+      undefined,
+      { timeout: 300_000 },
+    )
     return data
   },
   loginSession: async (body: {
