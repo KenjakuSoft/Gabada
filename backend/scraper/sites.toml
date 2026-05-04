@@ -21,7 +21,6 @@ selectors = { image = "div.product_block.item:nth-of-type(1) > div.product_img:n
 
 ["genarc.lk"]
 platform = "woocommerce"
-wait_for = ".summary.entry-summary .price ins .woocommerce-Price-amount, .summary.entry-summary .price > .woocommerce-Price-amount"
 
 ["nanotek.lk"]
 platform = "cs-cart"

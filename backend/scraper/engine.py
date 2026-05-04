@@ -3165,38 +3165,54 @@ async def _apply_custom(
     override them with smart-scan picks."""
     sel = config.selectors
     product_root = await _get_product_root(page)
-    price_scope_only = product_root is not None
 
     async def get_text(
         selector: Optional[str],
         *,
         root=None,
-        allow_page_fallback: bool = True,
     ) -> Optional[str]:
-        el = await _query_selector_scoped(
-            page,
-            selector,
-            root=root,
-            allow_page_fallback=allow_page_fallback,
-        )
-        return await _read_element_text(el)
+        # Iterate over every match and return the first one with non-empty
+        # inner_text.
+        #
+        # Two reasons we need iteration + page fallback:
+        #
+        # 1. Variant-aware Woo themes (Woody, WoodMart) ship multiple
+        #    .price blocks, only the currently-selected variant block has
+        #    visible text. query_selector returns the first DOM-order
+        #    match, which can be a hidden placeholder.
+        #
+        # 2. Some Woo themes (nexxcom) place the .price block OUTSIDE the
+        #    `.summary.entry-summary` element that _get_product_root picks
+        #    as the product root. Scoped queries return nothing in that
+        #    case, but a page-wide query finds the main product's price
+        #    first (the related-product blocks come later in DOM order),
+        #    so iterating the page fallback gives the right answer
+        #    without breaking sites where scoping works correctly.
+        if not selector:
+            return None
+        if root is not None:
+            try:
+                els = await root.query_selector_all(selector)
+            except Exception:
+                els = []
+            for el in els:
+                text = await _read_element_text(el)
+                if text:
+                    return text
+        try:
+            els = await page.query_selector_all(selector)
+        except Exception:
+            return None
+        for el in els:
+            text = await _read_element_text(el)
+            if text:
+                return text
+        return None
 
     title = await get_text(sel.title, root=product_root)
-    raw_price = await get_text(
-        sel.price,
-        root=product_root,
-        allow_page_fallback=not price_scope_only,
-    )
-    raw_disc = await get_text(
-        sel.discounted_price,
-        root=product_root,
-        allow_page_fallback=not price_scope_only,
-    )
-    raw_dealer = await get_text(
-        sel.dealer_price,
-        root=product_root,
-        allow_page_fallback=not price_scope_only,
-    )
+    raw_price = await get_text(sel.price, root=product_root)
+    raw_disc = await get_text(sel.discounted_price, root=product_root)
+    raw_dealer = await get_text(sel.dealer_price, root=product_root)
     stock_raw = await get_text(sel.stock_status, root=product_root)
 
     if _is_installment_price(raw_price):
@@ -3478,6 +3494,48 @@ async def _wait_for_rendered_product_content(
     return await _page_has_meaningful_product_content(page)
 
 
+async def _wait_for_price_text(page: Page, *, timeout_ms: int = 4000) -> bool:
+    """Poll until at least one price-bearing element has visible text.
+
+    Some Woo / Woody / WoodMart themes render hidden placeholder .price
+    blocks at SSR time and only fill in the visible block after a JS
+    swap. _page_has_meaningful_product_content returns True as soon as
+    body text exists, so without this extra poll the engine extracts
+    before any .price .amount has text and returns null for both price
+    fields.
+
+    Returns True as soon as a candidate is found, so well-behaved sites
+    pay roughly one JS round-trip (~50-150 ms). Stays out of the way of
+    sites that have no .price markup at all (returns False after the
+    timeout — extraction proceeds anyway via JSON-LD / smart scan).
+    """
+    import time as _time
+
+    deadline = _time.monotonic() + (timeout_ms / 1000.0)
+    while _time.monotonic() < deadline:
+        try:
+            has_text = await page.evaluate(
+                """() => {
+                    const els = document.querySelectorAll(
+                        '.price .amount, .price .woocommerce-Price-amount, '
+                        + '[itemprop="price"], [data-qa$="#price"]'
+                    );
+                    for (const el of els) {
+                        if (((el.innerText || el.getAttribute('content') || '').trim()).length > 0) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }"""
+            )
+            if has_text:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(0.4)
+    return False
+
+
 async def _navigate(page: Page, url: str, config: ScrapeConfig) -> bool:
     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
@@ -3507,6 +3565,12 @@ async def _navigate(page: Page, url: str, config: ScrapeConfig) -> bool:
         settled = await _wait_for_rendered_product_content(page)
         if settled:
             logger.debug("Waited for delayed product content on %s", url)
+    # Body text can land before any .price element has visible text on
+    # JS-swapped storefronts (Woody / WoodMart / variant Woo themes).
+    # Poll a short extra window so extraction sees a populated price block
+    # instead of returning null when the swap is in flight.
+    if not await _wait_for_price_text(page):
+        logger.debug("No price-text element settled within poll window on %s", url)
     if await _detected_challenge(page):
         logger.warning("Bot-check challenge detected after render wait on %s", url)
         return False
