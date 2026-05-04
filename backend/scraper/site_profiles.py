@@ -86,15 +86,29 @@ PLATFORM_SELECTORS: dict[str, dict[str, Optional[str]]] = {
         # .amount under .price (non-sale items, no del/ins wrapper). Keep
         # `discounted_price` strictly inside <ins> so it never falls back to
         # the strikethrough value.
+        #
+        # No `.summary.entry-summary` prefix here — `_get_product_root` is
+        # what scopes the query to the summary block, and Playwright's
+        # `ElementHandle.query_selector_all` returns nothing when the
+        # leftmost compound matches the scoping element itself (it expects
+        # a strict descendant). The trailing `.woocommerce-Price-amount`
+        # is specific enough to avoid matching cart/mini-cart subtotals on
+        # Woo themes that lack a recognised product root.
+        #
+        # Variant-aware Woo themes (Woody, WoodMart, etc.) ship multiple
+        # .price blocks — only the currently-selected variant block has
+        # visible text. `_apply_custom` iterates over all selector matches
+        # and returns the first one with non-empty inner_text, so hidden
+        # placeholder blocks are skipped automatically.
         "price": (
-            ".summary.entry-summary del .woocommerce-Price-amount, "
-            ".summary.entry-summary del .amount, "
-            ".summary.entry-summary .price > .woocommerce-Price-amount, "
-            ".summary.entry-summary .price > .amount"
+            "del .woocommerce-Price-amount, "
+            "del .amount, "
+            ".price > .woocommerce-Price-amount, "
+            ".price > .amount"
         ),
         "discounted_price": (
-            ".summary.entry-summary ins .woocommerce-Price-amount, "
-            ".summary.entry-summary ins .amount"
+            "ins .woocommerce-Price-amount, "
+            "ins .amount"
         ),
         "dealer_price": None,
         "stock_status": ".stock",
