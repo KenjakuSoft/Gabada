@@ -88,10 +88,27 @@ _INSTALLMENT_RE = re.compile(
     r"|/\s*(?:month|week|mo|yr)\b",
     re.IGNORECASE,
 )
+_FREE_PRICE_RE = re.compile(
+    r"\b(free|gratis|complimentary|no\s+charge)\b",
+    re.IGNORECASE,
+)
+_FREE_PRICE_EXCLUSION_RE = re.compile(
+    r"\btrial\b|\bfree\s+(?:demo|version|shipping|delivery|download|"
+    r"software|utility|tool|support|updates?|upgrades?)\b",
+    re.IGNORECASE,
+)
 
 
 def _is_installment_price(raw: Optional[str]) -> bool:
     return bool(raw and _INSTALLMENT_RE.search(raw))
+
+
+def _is_free_price(raw: Optional[str]) -> bool:
+    if not raw:
+        return False
+    return bool(_FREE_PRICE_RE.search(raw)) and not bool(
+        _FREE_PRICE_EXCLUSION_RE.search(raw)
+    )
 
 
 # ── Price & stock parsers ─────────────────────────────────────────────────────
@@ -101,6 +118,10 @@ def _parse_price(raw: Optional[str]) -> Optional[float]:
         return None
     if _is_installment_price(raw):
         return None
+    if _FREE_PRICE_EXCLUSION_RE.search(raw):
+        return None
+    if _is_free_price(raw):
+        return 0.0
     cleaned = re.sub(r"[^\d.,]", "", raw.strip())
     cleaned = cleaned.strip(".,")
     if not cleaned:
@@ -126,7 +147,7 @@ def _parse_price(raw: Optional[str]) -> Optional[float]:
             cleaned = cleaned.replace(",", "")
     try:
         v = float(cleaned)
-        return v if v > 0 else None
+        return v if v >= 0 else None
     except ValueError:
         return None
 
@@ -173,15 +194,50 @@ _STOCK_IN_RE = re.compile(
     r"add\s+to\s+cart|buy\s+now)\b",
     re.IGNORECASE,
 )
+_STOCK_STATUS_PRIORITY = {
+    "unknown": 0,
+    "in_stock": 1,
+    "limited": 2,
+    "preorder": 3,
+    "backorder": 3,
+    "contact_store": 4,
+    "call_for_price": 4,
+    "discontinued": 5,
+    "out_of_stock": 5,
+}
+
+
+def _should_replace_stock_status(
+    current: Optional[str],
+    candidate: Optional[str],
+) -> bool:
+    candidate = candidate or "unknown"
+    current = current or "unknown"
+    if candidate == "unknown" or candidate == current:
+        return False
+    if current == "unknown":
+        return True
+    return _STOCK_STATUS_PRIORITY.get(candidate, 1) > _STOCK_STATUS_PRIORITY.get(
+        current,
+        1,
+    )
 
 
 def _parse_stock(raw: Optional[str]) -> str:
     if not raw:
         return "unknown"
     t = raw.strip()
-    if re.search(r"\b(?:availability|stock)\s*:\s*no\b", t, re.IGNORECASE):
+    if re.search(
+        r"\b(?:availability|stock)\s*:?\s*(?:no|false|0)\b",
+        t,
+        re.IGNORECASE,
+    ):
         return "out_of_stock"
-    if re.search(r"\b(?:availability|stock)\s*:\s*yes\b", t, re.IGNORECASE):
+    if re.search(
+        r"\b(?:availability|stock)\s*:?\s*(?:yes|true|1)\b",
+        t,
+        re.IGNORECASE,
+    ):
         return "in_stock"
     # Order matters: preorder / backorder BEFORE in-stock, because those pages
     # often also show "available" / "add to cart" copy.
@@ -278,8 +334,78 @@ _BUY_BOX_DETECTOR_JS = r"""() => {
         // "Coming Soon" listings fail buy-box detection because the
         // visible buy area has no currency-prefixed digits to anchor on.
         return /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/.test(text)
-            || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d{2,}/i.test(text)
+            || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d+(?:\.\d{1,2})?/i.test(text)
             || /\b(?:free|included(?:\s+with)?|coming\s+soon|pre[\s-]?order|game\s+trial|trial\s+available)\b/i.test(text);
+    }
+
+    function isEpicStoreHost() {
+        return /(?:^|\.)epicgames\.com$/i.test(window.location.hostname || '');
+    }
+
+    const ADD_TO_CART_SELECTOR = [
+        'button[type="submit"]',
+        '.add-to-cart',
+        '.single_add_to_cart_button',
+        '.buy-now',
+        '#add-to-cart-button',
+        '[data-action*="cart"]',
+        '[class*="add-to-cart"]',
+        '[class*="addtocart"]',
+        '[class*="AddToCart"]',
+        '[class*="buy-now"]',
+        '[class*="buynow"]',
+        'button[name*="cart"]',
+        'button[name*="add-to-cart"]',
+        'form.cart button',
+        'form[action*="cart"] button',
+        'a[href*="add-to-cart"]',
+        '[data-qa*="cart" i]',
+        '[data-qa*="buy" i]',
+        '[data-qa*="purchase" i]',
+        '[data-qa*="add-to-library" i]',
+        '[data-qa*="add-to-bag" i]',
+        '[data-testid*="cart" i]',
+        '[data-testid*="buy" i]',
+        '[data-testid*="purchase" i]',
+        '[data-testid*="add-to-library" i]',
+        '[aria-label*="add to cart" i]',
+        '[aria-label*="buy now" i]',
+        '[aria-label*="add to library" i]',
+        '[aria-label*="add to bag" i]',
+        '[aria-label*="purchase" i]',
+    ].join(', ');
+    const PURCHASE_TEXT = /\b(add[\s-]?to[\s-]?cart|buy[\s-]?now|purchase|checkout|pre[\s-]?(?:purchase|order)|order[\s-]?now)\b/i;
+
+    function focusedPurchaseRoot() {
+        const candidates = [];
+        for (const control of document.querySelectorAll(ADD_TO_CART_SELECTOR)) {
+            if (!visible(control)) continue;
+            const controlText = normalizeText(
+                (control.innerText || control.textContent || '') + ' ' +
+                (control.getAttribute('aria-label') || '') + ' ' +
+                (control.getAttribute('data-testid') || '') + ' ' +
+                (control.getAttribute('data-qa') || '')
+            );
+            if (!PURCHASE_TEXT.test(controlText)) continue;
+            const priority = /\b(buy[\s-]?now|purchase|checkout|pre[\s-]?(?:purchase|order)|order[\s-]?now)\b/i.test(controlText)
+                ? 0
+                : 1;
+            let cur = control.parentElement;
+            for (let depth = 0; depth < 8 && cur; depth += 1, cur = cur.parentElement) {
+                if (!cur.querySelectorAll) continue;
+                const innerText = normalizeText(cur.innerText || cur.textContent || '');
+                if (!innerText || innerText.length < 20 || innerText.length > 8000) continue;
+                if (!hasPriceText(innerText)) continue;
+                candidates.push({ el: cur, priority, depth, len: innerText.length });
+            }
+        }
+        candidates.sort((a, b) => a.priority - b.priority || a.len - b.len || a.depth - b.depth);
+        return candidates[0]?.el || null;
+    }
+
+    if (isEpicStoreHost()) {
+        const focused = focusedPurchaseRoot();
+        if (focused) return focused;
     }
 
     const PRODUCT_ROOT_SELECTORS = [
@@ -343,26 +469,7 @@ _BUY_BOX_DETECTOR_JS = r"""() => {
         if (!cur.querySelectorAll) continue;
         const innerText = normalizeText(cur.innerText || '');
         if (!innerText || innerText.length < 60 || innerText.length > 18000) continue;
-        const hasAddToCart = !!cur.querySelector(
-            'button[type="submit"], '
-            + '.add-to-cart, .single_add_to_cart_button, .buy-now, '
-            + '#add-to-cart-button, [data-action*="cart"], '
-            + '[class*="add-to-cart"], [class*="addtocart"], [class*="AddToCart"], '
-            + '[class*="buy-now"], [class*="buynow"], '
-            + 'button[name*="cart"], button[name*="add-to-cart"], '
-            + 'form.cart button, form[action*="cart"] button, '
-            + 'a[href*="add-to-cart"], '
-            // Modern data-attribute hooks (PS Store, Xbox, Epic, Shopify
-            // Hydrogen, Steam). Case-insensitive `i` flag in attribute
-            // selectors is widely supported in evergreen browsers.
-            + '[data-qa*="cart" i], [data-qa*="buy" i], [data-qa*="purchase" i], '
-            + '[data-qa*="add-to-library" i], [data-qa*="add-to-bag" i], '
-            + '[data-testid*="cart" i], [data-testid*="buy" i], '
-            + '[data-testid*="purchase" i], [data-testid*="add-to-library" i], '
-            + '[aria-label*="add to cart" i], [aria-label*="buy now" i], '
-            + '[aria-label*="add to library" i], [aria-label*="add to bag" i], '
-            + '[aria-label*="purchase" i]'
-        );
+        const hasAddToCart = !!cur.querySelector(ADD_TO_CART_SELECTOR);
         if (!hasAddToCart) continue;
         if (!hasPriceText(innerText)) continue;
         return cur;
@@ -459,8 +566,85 @@ _BUY_AREA_DUMP_JS = r"""() => {
         'article.product',
         '[itemtype*="Product"]',
     ];
+
+    function hasPriceText(value) {
+        const text = normalizeText(value);
+        return /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/.test(text)
+            || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d+(?:\.\d{1,2})?/i.test(text)
+            || /\b(?:free|included(?:\s+with)?|coming\s+soon|pre[\s-]?order|game\s+trial|trial\s+available)\b/i.test(text);
+    }
+
+    function isEpicStoreHost() {
+        return /(?:^|\.)epicgames\.com$/i.test(window.location.hostname || '');
+    }
+
+    const ADD_TO_CART_SELECTOR = [
+        'button[type="submit"]',
+        '.add-to-cart',
+        '.single_add_to_cart_button',
+        '.buy-now',
+        '#add-to-cart-button',
+        '[data-action*="cart"]',
+        '[class*="add-to-cart"]',
+        '[class*="addtocart"]',
+        '[class*="AddToCart"]',
+        '[class*="buy-now"]',
+        '[class*="buynow"]',
+        'button[name*="cart"]',
+        'button[name*="add-to-cart"]',
+        'form.cart button',
+        'form[action*="cart"] button',
+        'a[href*="add-to-cart"]',
+        '[data-qa*="cart" i]',
+        '[data-qa*="buy" i]',
+        '[data-qa*="purchase" i]',
+        '[data-qa*="add-to-library" i]',
+        '[data-qa*="add-to-bag" i]',
+        '[data-testid*="cart" i]',
+        '[data-testid*="buy" i]',
+        '[data-testid*="purchase" i]',
+        '[data-testid*="add-to-library" i]',
+        '[aria-label*="add to cart" i]',
+        '[aria-label*="buy now" i]',
+        '[aria-label*="add to library" i]',
+        '[aria-label*="add to bag" i]',
+        '[aria-label*="purchase" i]',
+    ].join(', ');
+    const PURCHASE_TEXT = /\b(add[\s-]?to[\s-]?cart|buy[\s-]?now|purchase|checkout|pre[\s-]?(?:purchase|order)|order[\s-]?now)\b/i;
+
+    function focusedPurchaseRoot() {
+        const candidates = [];
+        for (const control of document.querySelectorAll(ADD_TO_CART_SELECTOR)) {
+            if (!visible(control)) continue;
+            const controlText = normalizeText(
+                (control.innerText || control.textContent || '') + ' ' +
+                (control.getAttribute('aria-label') || '') + ' ' +
+                (control.getAttribute('data-testid') || '') + ' ' +
+                (control.getAttribute('data-qa') || '')
+            );
+            if (!PURCHASE_TEXT.test(controlText)) continue;
+            const priority = /\b(buy[\s-]?now|purchase|checkout|pre[\s-]?(?:purchase|order)|order[\s-]?now)\b/i.test(controlText)
+                ? 0
+                : 1;
+            let cur = control.parentElement;
+            for (let depth = 0; depth < 8 && cur; depth += 1, cur = cur.parentElement) {
+                if (!cur.querySelectorAll) continue;
+                const innerText = normalizeText(cur.innerText || cur.textContent || '');
+                if (!innerText || innerText.length < 20 || innerText.length > 8000) continue;
+                if (!hasPriceText(innerText)) continue;
+                candidates.push({ el: cur, priority, depth, len: innerText.length });
+            }
+        }
+        candidates.sort((a, b) => a.priority - b.priority || a.len - b.len || a.depth - b.depth);
+        return candidates[0]?.el || null;
+    }
+
     let buyBox = null;
+    if (isEpicStoreHost()) {
+        buyBox = focusedPurchaseRoot();
+    }
     for (const sel of PRODUCT_ROOT_SELECTORS) {
+        if (buyBox) break;
         const found = document.querySelector(sel);
         if (found && visible(found)) { buyBox = found; break; }
     }
@@ -486,28 +670,9 @@ _BUY_AREA_DUMP_JS = r"""() => {
                 if (!cur.querySelectorAll) continue;
                 const innerText = normalizeText(cur.innerText || '');
                 if (!innerText || innerText.length < 60 || innerText.length > 18000) continue;
-                const hasAddToCart = !!cur.querySelector(
-                    'button[type="submit"], '
-                    + '.add-to-cart, .single_add_to_cart_button, .buy-now, '
-                    + '#add-to-cart-button, [data-action*="cart"], '
-                    + '[class*="add-to-cart"], [class*="addtocart"], [class*="AddToCart"], '
-                    + '[class*="buy-now"], [class*="buynow"], '
-                    + 'button[name*="cart"], button[name*="add-to-cart"], '
-                    + 'form.cart button, form[action*="cart"] button, '
-                    + 'a[href*="add-to-cart"], '
-                    + '[data-qa*="cart" i], [data-qa*="buy" i], [data-qa*="purchase" i], '
-                    + '[data-qa*="add-to-library" i], [data-qa*="add-to-bag" i], '
-                    + '[data-testid*="cart" i], [data-testid*="buy" i], '
-                    + '[data-testid*="purchase" i], [data-testid*="add-to-library" i], '
-                    + '[aria-label*="add to cart" i], [aria-label*="buy now" i], '
-                    + '[aria-label*="add to library" i], [aria-label*="add to bag" i], '
-                    + '[aria-label*="purchase" i]'
-                );
+                const hasAddToCart = !!cur.querySelector(ADD_TO_CART_SELECTOR);
                 if (!hasAddToCart) continue;
-                const hasPriceText = /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/.test(innerText)
-                    || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d{2,}/i.test(innerText)
-                    || /\b(?:free|included(?:\s+with)?|coming\s+soon|pre[\s-]?order|game\s+trial|trial\s+available)\b/i.test(innerText);
-                if (!hasPriceText) continue;
+                if (!hasPriceText(innerText)) continue;
                 buyBox = cur;
                 break;
             }
@@ -656,7 +821,7 @@ _BUY_AREA_DUMP_JS = r"""() => {
                 // Exclude bare percentages and small standalone integers
                 // when there is no currency context.
                 if (!hasCurrency && /^\d{1,2}\s*%/.test(text)) return null;
-                if (!hasCurrency && text.length <= 6 && value < 100) return null;
+                if (!hasCurrency && value < 100) return null;
                 return { kind: 'price', text, value };
             }
         }
@@ -981,10 +1146,11 @@ def _apply_buy_area_picks(
             if parsed != "unknown":
                 result.stock_status = parsed
             continue
-        # Numeric fields: only adopt when the pick maps to a live item with
-        # a non-null value. A user-pinned qualifier ("Free with PS Plus")
-        # sets the field to None and surfaces a note explaining why.
-        if match.value is None:
+        # Numeric fields: use parsed/free text first, then the captured
+        # numeric value. This lets visible "Free" flow through as 0.0.
+        parsed_value = _parse_price(match.qualifier or match.text)
+        value = parsed_value if parsed_value is not None else match.value
+        if value is None:
             _add_review_note(
                 result,
                 f"Buy-area pick for {target!r} matched a non-numeric item "
@@ -1002,13 +1168,13 @@ def _apply_buy_area_picks(
                 result.raw_dealer = None
             continue
         if target == "price":
-            result.price = match.value
+            result.price = value
             result.raw_price = match.text
         elif target == "discounted_price":
-            result.discounted_price = match.value
+            result.discounted_price = value
             result.raw_discounted = match.text
         elif target == "dealer_price":
-            result.dealer_price = match.value
+            result.dealer_price = value
             result.raw_dealer = match.text
     return _normalize_scrape_result(result)
 
@@ -1112,7 +1278,7 @@ def _normalize_scrape_result(result: ScrapeResult) -> ScrapeResult:
         _clear_discount(result)
         return result
 
-    if result.price > result.discounted_price * 5:
+    if result.discounted_price > 0 and result.price > result.discounted_price * 25:
         logger.debug(
             "Dropping suspicious discount pair regular=%s discounted=%s raw=%r raw_discounted=%r",
             result.price,
@@ -1230,7 +1396,7 @@ def _smart_candidate_is_weak_price(
 
     if title_like and signal <= 1 and not has_price_context:
         return True
-    if value < 100 and signal <= 1 and not has_price_context and score < 36:
+    if value < 100 and signal <= 1 and not has_price_context and score <= 36:
         return True
     if plain_number and signal <= 1 and not has_price_context and score < 28:
         return True
@@ -1357,6 +1523,36 @@ def _review_result_with_smart_scan(
     )
     major_divergence = current_ratio >= 1.25 or regular_ratio >= 1.25
     extreme_divergence = current_ratio >= 50 or regular_ratio >= 50
+    # Smart-scan that had to scan ``document.body`` (no buy-box found, or the
+    # buy-box was empty) is unreliable: it can latch onto stray "Rs 4" text
+    # in the description, related-product blocks, or footer copy. Don't let
+    # that scan silently override a structured-data or user-locked price.
+    smart_used_body_fallback = bool(smart_data.get("used_body_fallback"))
+    smart_authoritative = not smart_used_body_fallback
+    structured_free_sale_pair_enrichment = (
+        not price_locked
+        and smart_authoritative
+        and structured_price_locked
+        and result_current is not None
+        and result_regular is None
+        and smart.discounted_price is not None
+        and smart_current == 0
+        and smart_regular is not None
+        and smart_regular > smart_current
+        and (
+            _prices_close(result_current, smart_current)
+            or _prices_close(result_current, smart_regular)
+        )
+        and (
+            bool(original.get("struck"))
+            or bool(original.get("near_sale_signal"))
+            or smart_regular_signal >= 2
+        )
+    )
+    if structured_free_sale_pair_enrichment:
+        _adopt_smart_prices(reviewed, smart)
+        return _normalize_scrape_result(reviewed)
+
     if (
         structured_price_locked
         and extreme_divergence
@@ -1425,12 +1621,6 @@ def _review_result_with_smart_scan(
         and not raw_signal_authoritative
         and _raw_price_signal(reviewed.raw_price) <= 1
     )
-    # Smart-scan that had to scan ``document.body`` (no buy-box found, or the
-    # buy-box was empty) is unreliable: it can latch onto stray "Rs 4" text
-    # in the description, related-product blocks, or footer copy. Don't let
-    # that scan silently override a structured-data or user-locked price.
-    smart_used_body_fallback = bool(smart_data.get("used_body_fallback"))
-    smart_authoritative = not smart_used_body_fallback
     smart_supports_current = (
         result_current is None
         or suspicious_current_raw
@@ -1648,9 +1838,9 @@ def _merge_public_and_authenticated_result(
 
     if not merged.title and authenticated.title:
         merged.title = authenticated.title
-    if merged.stock_status in (None, "unknown") and authenticated.stock_status not in (
-        None,
-        "unknown",
+    if _should_replace_stock_status(
+        merged.stock_status,
+        authenticated.stock_status,
     ):
         merged.stock_status = authenticated.stock_status
 
@@ -1725,13 +1915,15 @@ async def _try_json_ld(page: Page) -> ScrapeResult:
 
                 raw_price = str(offers.get("price", "")) if offers else ""
                 raw_low = str(offers.get("lowPrice", "")) if offers else ""
-                price = _parse_price(raw_price) or _parse_price(raw_low)
+                parsed_price = _parse_price(raw_price)
+                parsed_low = _parse_price(raw_low)
+                price = parsed_price if parsed_price is not None else parsed_low
                 raw = raw_price or raw_low or None
 
                 avail = offers.get("availability", "") if offers else ""
                 stock = _stock_from_schema_url(avail) if avail else "unknown"
 
-                if name or price:
+                if name or price is not None:
                     logger.info("JSON-LD hit: name=%s price=%s", name, price)
                     return ScrapeResult(
                         title=name,
@@ -1760,7 +1952,7 @@ async def _try_microdata(page: Page) -> ScrapeResult:
                 if _is_installment_price(raw):
                     continue
                 p = _parse_price(raw)
-                if p:
+                if p is not None:
                     result.price = p
                     result.raw_price = raw
                     break
@@ -1774,7 +1966,7 @@ async def _try_microdata(page: Page) -> ScrapeResult:
     except Exception:
         pass
 
-    if result.price:
+    if result.price is not None:
         logger.info("Microdata hit: name=%s price=%s", result.title, result.price)
     return result
 
@@ -1905,7 +2097,7 @@ async def _try_common(page: Page) -> ScrapeResult:
                 if _is_installment_price(raw):
                     continue
                 p = _parse_price(raw)
-                if p:
+                if p is not None:
                     result.price = p
                     result.raw_price = raw.strip()
                     break
@@ -1922,7 +2114,7 @@ async def _try_common(page: Page) -> ScrapeResult:
                 if _is_installment_price(raw):
                     continue
                 p = _parse_price(raw)
-                if p and result.price is not None and p > result.price:
+                if p is not None and result.price is not None and p > result.price:
                     # Current sale price stays in .price; original moves to .discounted_price swap.
                     # Convention here: price = original/retail, discounted_price = sale/current.
                     result.discounted_price = result.price
@@ -1942,7 +2134,7 @@ async def _try_common(page: Page) -> ScrapeResult:
                 raw = await _read_element_text(el)
                 if not _is_installment_price(raw):
                     d = _parse_price(raw)
-                    if d:
+                    if d is not None:
                         result.dealer_price = d
                         result.raw_dealer = raw.strip()
                         break
@@ -1971,7 +2163,7 @@ async def _try_common(page: Page) -> ScrapeResult:
     except Exception as e:
         logger.debug("Common pattern extraction error: %s", e)
 
-    if result.price:
+    if result.price is not None:
         logger.info(
             "Common pattern hit: name=%s price=%s dealer=%s",
             result.title, result.price, result.dealer_price,
@@ -2442,6 +2634,8 @@ _SMART_SCAN_JS = r"""() => {
     const PRICE_CONTEXT = /\bprice\b|\bcost\b|\bamount\b/i;
     const PROD_CONTEXT = /product|summary|detail|info|offer|sale|now|current|item-main|ty-product-block|prod-main/i;
     const SALE_SIGNAL = /\b(save|was|regular|originally|compare|rrp|mrp|msrp|list[\s-]?price|retail[\s-]?price|you[\s-]?save|off)\b|\d+\s*%\s*off|−\s*\d|-\s*\d+\s*%/i;
+    const FREE_PRICE_SIGNAL = /\b(?:gratis|complimentary|no\s+charge|free(?!\s+(?:trial|demo|version|shipping|delivery|download|software|utility|tool|support|updates?|upgrades?)))\b/i;
+    const FREE_PRICE_EXCLUSION = /\btrial\b/i;
     const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|aed|sgd|myr|inr|php|bdt)\b|රු|\/=|\$|€|£|¥|฿|₹|₽)/i;
     const INLINE_PRICE_SIGNAL = /\b(?:price|list[\s-]?price|our[\s-]?price|selling[\s-]?price|special[\s-]?price|sale[\s-]?price|offer[\s-]?price|regular[\s-]?price|unit[\s-]?price|per[\s-]?unit|amount)\b/i;
     const INLINE_SPEC_SIGNAL = /\b(?:weight|item[\s-]?code|model|warranty|stock|availability|sku|serial|memory[\s-]?type|form[\s-]?factor|capacity|speeds?|latencies?|temperature|voltage|dimensions?|length|width|height|depth|size|color|colour|days?|years?|weeks?|months?|specification|specifications)\b/i;
@@ -2454,6 +2648,77 @@ _SMART_SCAN_JS = r"""() => {
     // a "selected/active/checked" marker.
     const VARIANT_ALT = /variant-option|swatch-option|variant-item|option-value|product-options|ty-product-options|ty-product-variant-image-item(?!-checked)|configurable_option|product-form__input|variant-selector|product-variants|attributes-selector|ty-pay-price|payment-method|ty-payment-method|ty-payment-options/i;
     const SELECTED = /selected|is-active|is-selected|is-checked|active|checked|current[\s-]?variant|ty-product-variant-image-item-checked|aria-selected/i;
+    const ADD_TO_CART_SELECTOR = [
+        'button[type="submit"]',
+        '.add-to-cart',
+        '.single_add_to_cart_button',
+        '.buy-now',
+        '#add-to-cart-button',
+        '[data-action*="cart"]',
+        '[class*="add-to-cart"]',
+        '[class*="addtocart"]',
+        '[class*="AddToCart"]',
+        '[class*="buy-now"]',
+        '[class*="buynow"]',
+        'button[name*="cart"]',
+        'button[name*="add-to-cart"]',
+        'form.cart button',
+        'form[action*="cart"] button',
+        'a[href*="add-to-cart"]',
+        '[data-qa*="cart" i]',
+        '[data-qa*="buy" i]',
+        '[data-qa*="purchase" i]',
+        '[data-qa*="add-to-library" i]',
+        '[data-qa*="add-to-bag" i]',
+        '[data-testid*="cart" i]',
+        '[data-testid*="buy" i]',
+        '[data-testid*="purchase" i]',
+        '[data-testid*="add-to-library" i]',
+        '[aria-label*="add to cart" i]',
+        '[aria-label*="buy now" i]',
+        '[aria-label*="add to library" i]',
+        '[aria-label*="add to bag" i]',
+        '[aria-label*="purchase" i]',
+    ].join(', ');
+    const PURCHASE_TEXT = /\b(add[\s-]?to[\s-]?cart|buy[\s-]?now|purchase|checkout|pre[\s-]?(?:purchase|order)|order[\s-]?now)\b/i;
+
+    function hasPriceText(value) {
+        const text = normalizeText(value);
+        return /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/.test(text)
+            || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d+(?:\.\d{1,2})?/i.test(text)
+            || /\b(?:free|included(?:\s+with)?|coming\s+soon|pre[\s-]?order|game\s+trial|trial\s+available)\b/i.test(text);
+    }
+
+    function isEpicStoreHost() {
+        return /(?:^|\.)epicgames\.com$/i.test(window.location.hostname || '');
+    }
+
+    function focusedPurchaseRoot() {
+        const candidates = [];
+        for (const control of document.querySelectorAll(ADD_TO_CART_SELECTOR)) {
+            if (!visible(control)) continue;
+            const controlText = normalizeText(
+                (control.innerText || control.textContent || '') + ' ' +
+                (control.getAttribute('aria-label') || '') + ' ' +
+                (control.getAttribute('data-testid') || '') + ' ' +
+                (control.getAttribute('data-qa') || '')
+            );
+            if (!PURCHASE_TEXT.test(controlText)) continue;
+            const priority = /\b(buy[\s-]?now|purchase|checkout|pre[\s-]?(?:purchase|order)|order[\s-]?now)\b/i.test(controlText)
+                ? 0
+                : 1;
+            let cur = control.parentElement;
+            for (let depth = 0; depth < 8 && cur; depth += 1, cur = cur.parentElement) {
+                if (!cur.querySelectorAll) continue;
+                const innerText = normalizeText(cur.innerText || cur.textContent || '');
+                if (!innerText || innerText.length < 20 || innerText.length > 8000) continue;
+                if (!hasPriceText(innerText)) continue;
+                candidates.push({ el: cur, priority, depth, len: innerText.length });
+            }
+        }
+        candidates.sort((a, b) => a.priority - b.priority || a.len - b.len || a.depth - b.depth);
+        return candidates[0]?.el || null;
+    }
 
     function isStruck(el) {
         let cur = el;
@@ -2634,6 +2899,15 @@ _SMART_SCAN_JS = r"""() => {
         const disabled = !!opts.disabled;
         const value = normalizeText(text).toLowerCase();
         if (!value) return null;
+        if (/\b(?:availability|stock)\s*:?\s*(?:no|false|0)\b/.test(value)) {
+            return 'out_of_stock';
+        }
+        if (/\b(?:availability|stock)\s*:?\s*(?:yes|true|1)\b/.test(value)) {
+            return 'in_stock';
+        }
+        if (/call\s+for\s+price|price\s+on\s+request|ask\s+for\s+price/.test(value)) {
+            return 'call_for_price';
+        }
         if (/pre[\s-]?order|pre[\s-]?sale|coming[\s-]?soon|notify[\s-]?me|notify[\s-]?when/.test(value)) {
             return 'preorder';
         }
@@ -2653,6 +2927,14 @@ _SMART_SCAN_JS = r"""() => {
             return 'in_stock';
         }
         return null;
+    }
+
+    function stockStatusScoreBonus(status) {
+        if (status === 'out_of_stock' || status === 'discontinued') return 30;
+        if (status === 'call_for_price' || status === 'contact_store') return 12;
+        if (status === 'preorder' || status === 'backorder') return 10;
+        if (status === 'limited') return 4;
+        return 0;
     }
 
     function collectStockSignal(scope) {
@@ -2684,6 +2966,7 @@ _SMART_SCAN_JS = r"""() => {
                 if (/add[\s-]?to[\s-]?cart|buy[\s-]?now|order[\s-]?now|purchase|checkout|shop.?now/.test(text.toLowerCase())) score += 20;
                 if (/out.?of.?stock|sold.?out|pre[\s-]?order|back[\s-]?order/.test(text.toLowerCase())) score += 20;
                 if (disabled) score += 6;
+                score += stockStatusScoreBonus(status);
                 signals.push({ status, score, order: order++ });
             }
         }
@@ -2705,6 +2988,7 @@ _SMART_SCAN_JS = r"""() => {
                 if (!status) continue;
                 let score = 28;
                 if (/stock|availability/.test(text.toLowerCase())) score += 18;
+                score += stockStatusScoreBonus(status);
                 signals.push({ status, score, order: order++ });
             }
         }
@@ -2767,11 +3051,17 @@ _SMART_SCAN_JS = r"""() => {
     }
 
     let scanRoot = document.body;
-    for (const selector of PRODUCT_ROOT_SELECTORS) {
-        const found = document.querySelector(selector);
-        if (found) {
-            scanRoot = found;
-            break;
+    if (isEpicStoreHost()) {
+        const focused = focusedPurchaseRoot();
+        if (focused) scanRoot = focused;
+    }
+    if (scanRoot === document.body) {
+        for (const selector of PRODUCT_ROOT_SELECTORS) {
+            const found = document.querySelector(selector);
+            if (found) {
+                scanRoot = found;
+                break;
+            }
         }
     }
 
@@ -2802,15 +3092,9 @@ _SMART_SCAN_JS = r"""() => {
             if (!cur.querySelectorAll) continue;
             const innerText = normalizeText(cur.innerText || '');
             if (!innerText || innerText.length < 60 || innerText.length > 18000) continue;
-            const hasAddToCart = !!cur.querySelector(
-                'button, input[type="submit"], [role="button"], .add-to-cart, .buy-now, '
-                + '#add-to-cart-button, [data-action*="cart"], [class*="add-to-cart"], '
-                + '[class*="buy-now"], a[href*="cart"]'
-            );
+            const hasAddToCart = !!cur.querySelector(ADD_TO_CART_SELECTOR);
             if (!hasAddToCart) continue;
-            const hasPriceText = /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/.test(innerText)
-                || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d{2,}/i.test(innerText);
-            if (!hasPriceText) continue;
+            if (!hasPriceText(innerText)) continue;
             return cur;
         }
         return null;
@@ -2845,6 +3129,32 @@ _SMART_SCAN_JS = r"""() => {
             const textLooksSpec = INLINE_SPEC_SIGNAL.test(normalizedText);
             const titleLike = looksTitleLike(el, normalizedText);
             if (PHONE_LIKE.test(normalizedText) && !textHasCurrency && !textHasPriceSignal) continue;
+            const freePrice = (
+                FREE_PRICE_SIGNAL.test(normalizedText)
+                && !FREE_PRICE_EXCLUSION.test(normalizedText)
+            );
+            if (freePrice) {
+                const context = contextScore(el);
+                out.push({
+                    text: normalizedText,
+                    node_text: normalizedText,
+                    value: 0,
+                    score: context + 60,
+                    font_size: fontSize,
+                    font_weight: fontWeight,
+                    struck: isStruck(el),
+                    dealer: isDealer(el),
+                    variant_alt: variantAlt(el),
+                    near_sale_signal: true,
+                    dom_path: domPath(el),
+                    selector: elementSelector(el),
+                    tag: el.tagName ? el.tagName.toLowerCase() : null,
+                    lineage: lineageKeys(el),
+                    _el: el,
+                });
+                continue;
+            }
+
             const matches = Array.from(normalizedText.matchAll(PRICE_FRAGMENT_RE));
             if (matches.length === 0) continue;
 
@@ -2960,7 +3270,7 @@ _SMART_SCAN_JS = r"""() => {
                 !candidate.dealer
                 && !candidate.variant_alt
                 && candidate.value > main.value
-                && candidate.value <= main.value * 10
+                && (main.value === 0 || candidate.value <= main.value * 25)
                 && (candidate.struck || candidate.near_sale_signal))
             .sort((a, b) =>
                    b._pair_score - a._pair_score
@@ -3964,21 +4274,39 @@ def _smart_scan_result_from_data(data: dict[str, Any]) -> ScrapeResult:
     original = data.get("original")
     dealer = data.get("dealer")
 
+    def candidate_value(candidate: dict[str, Any]) -> Optional[float]:
+        text = candidate.get("text")
+        parsed = _parse_price(text)
+        if parsed is not None:
+            return parsed
+        value = candidate.get("value")
+        if value == 0 and text and _FREE_PRICE_RE.search(str(text)):
+            return None
+        return value
+
     if main and not _is_installment_price(main.get("text")):
-        result.price = _parse_price(main["text"]) or main.get("value")
-        result.raw_price = main.get("text")
+        value = candidate_value(main)
+        if value is not None:
+            result.price = value
+            result.raw_price = main.get("text")
 
     if original and not _is_installment_price(original.get("text")):
         # Convention: price = retail/original, discounted_price = sale/current
         if result.price is not None:
             result.discounted_price = result.price
             result.raw_discounted = result.raw_price
-            result.price = _parse_price(original["text"]) or original.get("value")
-            result.raw_price = original.get("text")
+            original_value = candidate_value(original)
+            if original_value is not None:
+                result.price = original_value
+                result.raw_price = original.get("text")
+            else:
+                _clear_discount(result)
 
     if dealer and not _is_installment_price(dealer.get("text")):
-        result.dealer_price = _parse_price(dealer["text"]) or dealer.get("value")
-        result.raw_dealer = dealer.get("text")
+        dealer_value = candidate_value(dealer)
+        if dealer_value is not None:
+            result.dealer_price = dealer_value
+            result.raw_dealer = dealer.get("text")
 
     result.stock_status = data.get("stock", "unknown") or "unknown"
     return _normalize_scrape_result(result)
@@ -3988,7 +4316,7 @@ async def _try_smart_scan(page: Page) -> ScrapeResult:
     data = await _run_smart_scan(page)
     result = _sanitize_smart_scan_result(_smart_scan_result_from_data(data), data)
 
-    if result.price:
+    if result.price is not None:
         logger.info(
             "Smart scan hit: price=%s disc=%s dealer=%s",
             result.price, result.discounted_price, result.dealer_price,
@@ -4720,7 +5048,7 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
 
         if not response.candidates:
             response.notes.append("No price-like text nodes found on this page.")
-        if not extracted.price:
+        if extracted.price is None:
             response.notes.append(
                 "No price could be extracted. Likely requires login "
                 "(use /scraper/login-session) or a custom selector."
@@ -4784,27 +5112,31 @@ async def scrape_with_open_page(
             return _normalize_scrape_result(_clear_dealer_price(fb_result))
 
     result = await _try_json_ld(page)
-    if not result.price:
+    if result.price is None:
         result = await _try_microdata(page)
     structured_price_locked = result.price is not None
     smart_data = await _run_smart_scan(page)
     smart = _sanitize_smart_scan_result(_smart_scan_result_from_data(smart_data), smart_data)
 
-    if not result.price or result.stock_status in (None, "unknown"):
-        if not result.price and smart.price:
+    if result.price is None or result.stock_status in (None, "unknown"):
+        if result.price is None and smart.price is not None:
             preserved_title = result.title
             result = smart
             result.title = preserved_title or smart.title
-        if result.stock_status in (None, "unknown") and smart.stock_status not in (None, "unknown"):
+        if _should_replace_stock_status(result.stock_status, smart.stock_status):
             result.stock_status = smart.stock_status
-        if not is_facebook_marketplace and smart.dealer_price and not result.dealer_price:
+        if (
+            not is_facebook_marketplace
+            and smart.dealer_price is not None
+            and result.dealer_price is None
+        ):
             result.dealer_price = smart.dealer_price
             result.raw_dealer = smart.raw_dealer
-        if smart.discounted_price and not result.discounted_price:
+        if smart.discounted_price is not None and result.discounted_price is None:
             result.discounted_price = smart.discounted_price
             result.raw_discounted = smart.raw_discounted
 
-    if not result.price or not result.dealer_price or not result.title:
+    if result.price is None or result.dealer_price is None or not result.title:
         common = await _try_common(page)
         _merge_price_candidate(result, common)
         if not is_facebook_marketplace and not result.dealer_price and common.dealer_price:
@@ -4812,15 +5144,12 @@ async def scrape_with_open_page(
             result.raw_dealer = common.raw_dealer
         if not result.title and common.title:
             result.title = common.title
-        if result.stock_status in (None, "unknown") and common.stock_status not in (None, "unknown"):
+        if _should_replace_stock_status(result.stock_status, common.stock_status):
             result.stock_status = common.stock_status
 
     if fb_result.title and not result.title:
         result.title = fb_result.title
-    if (
-        result.stock_status in (None, "unknown")
-        and fb_result.stock_status not in (None, "unknown")
-    ):
+    if _should_replace_stock_status(result.stock_status, fb_result.stock_status):
         result.stock_status = fb_result.stock_status
 
     sel = config.selectors
