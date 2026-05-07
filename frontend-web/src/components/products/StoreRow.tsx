@@ -67,6 +67,11 @@ export function StoreRow({
   )
   const [manualWarranty, setManualWarranty] = useState(store.manual_warranty ?? '')
   const [overrideNote, setOverrideNote] = useState(store.override_note ?? '')
+  const [clearLogsOnUrlChange, setClearLogsOnUrlChange] = useState(false)
+  const resolvedProductUrl = resolveEditedProductUrl(productUrl, store.product_url)
+  const productUrlChanged =
+    resolvedProductUrl !== undefined &&
+    (resolvedProductUrl ?? '') !== store.product_url
 
   const scrape = useMutation({
     mutationFn: () => scraperApi.scrapeOne(store.id),
@@ -74,6 +79,7 @@ export function StoreRow({
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['products'] }),
         qc.invalidateQueries({ queryKey: ['product', productId] }),
+        qc.invalidateQueries({ queryKey: ['product-logs', productId] }),
       ])
       toast.success(`${store.store_name} refreshed`)
     },
@@ -88,7 +94,8 @@ export function StoreRow({
   const save = useMutation({
     mutationFn: () =>
       productsApi.updateStore(productId, store.id, {
-        product_url: resolveEditedProductUrl(productUrl, store.product_url),
+        product_url: resolvedProductUrl,
+        clear_logs_on_url_change: productUrlChanged && clearLogsOnUrlChange,
         manual_price: parseManualPrice(manualPrice),
         manual_stock_status: manualStockStatus || null,
         manual_warranty: manualWarranty.trim() || null,
@@ -96,6 +103,7 @@ export function StoreRow({
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['product', productId] })
+      qc.invalidateQueries({ queryKey: ['product-logs', productId] })
       qc.invalidateQueries({ queryKey: ['products'] })
       setEditing(false)
       toast.success(`${store.store_name} updated`)
@@ -107,6 +115,7 @@ export function StoreRow({
     mutationFn: () => productsApi.removeStore(productId, store.id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['product', productId] })
+      qc.invalidateQueries({ queryKey: ['product-logs', productId] })
       qc.invalidateQueries({ queryKey: ['products'] })
       toast.info(`${store.store_name} unlinked`)
     },
@@ -129,6 +138,7 @@ export function StoreRow({
     setManualStockStatus(store.manual_stock_status ?? '')
     setManualWarranty(store.manual_warranty ?? '')
     setOverrideNote(store.override_note ?? '')
+    setClearLogsOnUrlChange(false)
     save.reset()
   }
 
@@ -300,8 +310,24 @@ export function StoreRow({
                   ? 'Manual stores can leave this blank. Gabada will keep a local placeholder.'
                   : isInternalProductUrl(store.product_url)
                     ? 'This row came from file import without a website URL yet. Add the real product page here whenever you want scraping.'
-                  : 'Website-backed stores need the exact product page URL.'}
+                    : 'Website-backed stores need the exact product page URL.'}
               </p>
+              {productUrlChanged ? (
+                <label className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={clearLogsOnUrlChange}
+                    onChange={(event) =>
+                      setClearLogsOnUrlChange(event.target.checked)
+                    }
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+                  />
+                  <span>
+                    Clear existing price logs for this store link when saving this
+                    URL change.
+                  </span>
+                </label>
+              ) : null}
             </div>
 
             <div className="space-y-1.5">

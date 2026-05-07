@@ -190,6 +190,7 @@ class ProductStoreCreate(BaseModel):
 
 class ProductStoreUpdate(BaseModel):
     product_url: Optional[str] = None
+    clear_logs_on_url_change: bool = False
     manual_price: Optional[float] = None
     manual_stock_status: Optional[str] = None
     manual_warranty: Optional[str] = None

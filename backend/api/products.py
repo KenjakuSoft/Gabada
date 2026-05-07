@@ -204,6 +204,14 @@ async def update_store_link(
                     detail="Website-backed stores need an http(s) product URL",
                 )
 
+            current_url = (link_row["product_url"] or "").strip()
+            url_changed = current_url != next_url
+            if url_changed and body.clear_logs_on_url_change:
+                await db.execute(
+                    "DELETE FROM price_logs WHERE product_store_id = ?",
+                    (product_store_id,),
+                )
+
             await db.execute(
                 """UPDATE product_stores
                    SET product_url = ?, is_active = ?
