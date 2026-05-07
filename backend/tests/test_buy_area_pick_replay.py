@@ -196,9 +196,9 @@ def test_apply_falls_back_when_match_below_threshold() -> None:
     assert any("could not be matched" in n for n in out.review_notes)
 
 
-def test_apply_qualifier_pick_blanks_numeric_field() -> None:
+def test_apply_free_qualifier_pick_sets_zero_price() -> None:
     """User pinned 'Free with PS Plus' as the price; live item is also a
-    qualifier with no numeric value → field becomes None and a note is added.
+    qualifier with no numeric value, so it should track as a zero price.
     """
     result = ScrapeResult(price=29.99, raw_price="$29.99")
     pick = _pick(
@@ -219,9 +219,9 @@ def test_apply_qualifier_pick_blanks_numeric_field() -> None:
         text="Free with PS Plus",
     )]
     out = _apply_buy_area_picks(result, [pick], items)
-    assert out.price is None
-    assert out.raw_price is None
-    assert any("non-numeric" in n for n in out.review_notes)
+    assert out.price == 0.0
+    assert out.raw_price == "Free with PS Plus"
+    assert not any("non-numeric" in n for n in out.review_notes)
 
 
 def test_apply_handles_stock_status_pick() -> None:
@@ -309,7 +309,7 @@ if __name__ == "__main__":
         test_best_match_returns_none_for_empty_items,
         test_apply_overrides_price_when_pick_matches,
         test_apply_falls_back_when_match_below_threshold,
-        test_apply_qualifier_pick_blanks_numeric_field,
+        test_apply_free_qualifier_pick_sets_zero_price,
         test_apply_handles_stock_status_pick,
         test_apply_handles_title_pick,
         test_apply_no_picks_returns_unchanged_result,

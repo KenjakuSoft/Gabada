@@ -15,7 +15,14 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from database.models import ScrapeResult  # noqa: E402
-from scraper.engine import _review_result_with_smart_scan  # noqa: E402
+from scraper.engine import (  # noqa: E402
+    _parse_price,
+    _parse_stock,
+    _review_result_with_smart_scan,
+    _sanitize_smart_scan_result,
+    _should_replace_stock_status,
+    _smart_scan_result_from_data,
+)
 
 
 def _smart_data(value: float, score: int = 54) -> dict:
@@ -283,6 +290,137 @@ def test_structured_current_price_can_gain_struck_regular_price() -> None:
     assert reviewed.review_notes == []
 
 
+def test_epic_deep_sale_pair_is_preserved() -> None:
+    """Epic regularly runs 90%+ sales; keep that as a real sale pair."""
+    data = {
+        "main": {
+            "text": "$4.79",
+            "value": 4.79,
+            "score": 90,
+            "struck": False,
+            "near_sale_signal": True,
+        },
+        "original": {
+            "text": "$47.99",
+            "value": 47.99,
+            "score": 80,
+            "struck": True,
+            "near_sale_signal": True,
+        },
+        "dealer": None,
+        "stock": "in_stock",
+    }
+
+    result = _smart_scan_result_from_data(data)
+
+    assert result.price == 47.99
+    assert result.discounted_price == 4.79
+    assert result.raw_price == "$47.99"
+    assert result.raw_discounted == "$4.79"
+
+
+def test_free_price_parser_ignores_free_trial_copy() -> None:
+    assert _parse_price("Free") == 0.0
+    assert _parse_price("Free with PS Plus") == 0.0
+    assert _parse_price("WinRAR (40 Days Free Trial)") is None
+
+
+def test_smart_scan_ignores_free_trial_zero_candidate() -> None:
+    data = {
+        "main": {
+            "text": "WinRAR (40 Days Free Trial)",
+            "value": 0,
+            "score": 96,
+            "near_sale_signal": True,
+        },
+        "original": None,
+        "dealer": None,
+        "stock": "in_stock",
+    }
+
+    result = _smart_scan_result_from_data(data)
+
+    assert result.price is None
+    assert result.raw_price is None
+
+
+def test_smart_scan_ignores_low_plain_spec_number_at_boundary() -> None:
+    data = {
+        "main": {
+            "text": "1",
+            "node_text": "1 x Realtek 5Gb Ethernet",
+            "value": 1,
+            "score": 36,
+            "selector": "span.ProductSpecSingle__descriptionItemValue__IVzBl",
+            "dom_path": "div.ProductSpecSingle__productSpecItemRow__BKwUK > span",
+            "tag": "span",
+        },
+        "original": None,
+        "dealer": None,
+        "stock": "out_of_stock",
+        "used_body_fallback": True,
+    }
+
+    result = _sanitize_smart_scan_result(_smart_scan_result_from_data(data), data)
+
+    assert result.price is None
+    assert result.raw_price is None
+    assert result.stock_status == "out_of_stock"
+
+
+def test_structured_price_can_gain_free_sale_pair() -> None:
+    result = ScrapeResult(
+        title="Free promo",
+        price=47.99,
+        raw_price="47.99",
+        stock_status="in_stock",
+    )
+    smart = ScrapeResult(
+        price=47.99,
+        discounted_price=0.0,
+        raw_price="$47.99",
+        raw_discounted="Free",
+        stock_status="in_stock",
+    )
+    smart_data = {
+        "main": {
+            "text": "Free",
+            "value": 0,
+            "score": 90,
+            "near_sale_signal": True,
+        },
+        "original": {
+            "text": "$47.99",
+            "value": 47.99,
+            "score": 80,
+            "struck": True,
+            "near_sale_signal": True,
+        },
+        "dealer": None,
+    }
+
+    reviewed = _review_result_with_smart_scan(
+        result,
+        smart,
+        smart_data,
+        has_custom=False,
+        structured_price_locked=True,
+    )
+
+    assert reviewed.price == 47.99
+    assert reviewed.discounted_price == 0.0
+    assert reviewed.raw_discounted == "Free"
+    assert reviewed.review_notes == []
+
+
+def test_stock_no_status_beats_generic_in_stock() -> None:
+    assert _parse_stock("Availability: No") == "out_of_stock"
+    assert _parse_stock("Stock No") == "out_of_stock"
+    assert _parse_stock("Availability: Yes") == "in_stock"
+    assert _should_replace_stock_status("in_stock", "out_of_stock") is True
+    assert _should_replace_stock_status("out_of_stock", "in_stock") is False
+
+
 if __name__ == "__main__":
     tests = [
         test_extreme_divergence_keeps_structured_price,
@@ -294,6 +432,12 @@ if __name__ == "__main__":
         test_user_driven_test_does_not_emit_corrected_for_added_dealer,
         test_user_locked_dealer_price_is_authoritative,
         test_structured_current_price_can_gain_struck_regular_price,
+        test_epic_deep_sale_pair_is_preserved,
+        test_free_price_parser_ignores_free_trial_copy,
+        test_smart_scan_ignores_free_trial_zero_candidate,
+        test_smart_scan_ignores_low_plain_spec_number_at_boundary,
+        test_structured_price_can_gain_free_sale_pair,
+        test_stock_no_status_beats_generic_in_stock,
     ]
     for t in tests:
         t()
