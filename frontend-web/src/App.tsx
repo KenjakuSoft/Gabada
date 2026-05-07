@@ -1,19 +1,57 @@
+import { lazy, Suspense, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Shell } from '@/components/layout/Shell'
 import { Toaster } from '@/components/ui/toaster'
 import { useApplyTheme } from '@/store/theme'
-import { HomePage } from '@/pages/HomePage'
-import { CategoriesPage } from '@/pages/CategoriesPage'
-import { ProductDetailPage } from '@/pages/ProductDetailPage'
-import { AddProductPage } from '@/pages/AddProductPage'
-import { StoresPage } from '@/pages/StoresPage'
-import { ImportPage } from '@/pages/ImportPage'
-import { ProbePage } from '@/pages/ProbePage'
-import { SelectorLabPage } from '@/pages/SelectorLabPage'
-import { ActivityPage } from '@/pages/ActivityPage'
-import { SettingsPage } from '@/pages/SettingsPage'
-import { NotFoundPage } from '@/pages/NotFoundPage'
+
+const HomePage = lazy(() =>
+  import('@/pages/HomePage').then((module) => ({ default: module.HomePage })),
+)
+const CategoriesPage = lazy(() =>
+  import('@/pages/CategoriesPage').then((module) => ({
+    default: module.CategoriesPage,
+  })),
+)
+const ProductDetailPage = lazy(() =>
+  import('@/pages/ProductDetailPage').then((module) => ({
+    default: module.ProductDetailPage,
+  })),
+)
+const AddProductPage = lazy(() =>
+  import('@/pages/AddProductPage').then((module) => ({
+    default: module.AddProductPage,
+  })),
+)
+const StoresPage = lazy(() =>
+  import('@/pages/StoresPage').then((module) => ({ default: module.StoresPage })),
+)
+const ImportPage = lazy(() =>
+  import('@/pages/ImportPage').then((module) => ({ default: module.ImportPage })),
+)
+const ProbePage = lazy(() =>
+  import('@/pages/ProbePage').then((module) => ({ default: module.ProbePage })),
+)
+const SelectorLabPage = lazy(() =>
+  import('@/pages/SelectorLabPage').then((module) => ({
+    default: module.SelectorLabPage,
+  })),
+)
+const ActivityPage = lazy(() =>
+  import('@/pages/ActivityPage').then((module) => ({
+    default: module.ActivityPage,
+  })),
+)
+const SettingsPage = lazy(() =>
+  import('@/pages/SettingsPage').then((module) => ({
+    default: module.SettingsPage,
+  })),
+)
+const NotFoundPage = lazy(() =>
+  import('@/pages/NotFoundPage').then((module) => ({
+    default: module.NotFoundPage,
+  })),
+)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,20 +68,32 @@ function ThemedApp() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route index element={<HomePage />} />
-        <Route path="categories" element={<CategoriesPage />} />
-        <Route path="product/:id" element={<ProductDetailPage />} />
-        <Route path="add" element={<AddProductPage />} />
-        <Route path="stores" element={<StoresPage />} />
-        <Route path="import" element={<ImportPage />} />
-        <Route path="probe" element={<ProbePage />} />
-        <Route path="selector-lab" element={<SelectorLabPage />} />
-        <Route path="activity" element={<ActivityPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="404" element={<NotFoundPage />} />
+        <Route index element={<PageRoute><HomePage /></PageRoute>} />
+        <Route path="categories" element={<PageRoute><CategoriesPage /></PageRoute>} />
+        <Route path="product/:id" element={<PageRoute><ProductDetailPage /></PageRoute>} />
+        <Route path="add" element={<PageRoute><AddProductPage /></PageRoute>} />
+        <Route path="stores" element={<PageRoute><StoresPage /></PageRoute>} />
+        <Route path="import" element={<PageRoute><ImportPage /></PageRoute>} />
+        <Route path="probe" element={<PageRoute><ProbePage /></PageRoute>} />
+        <Route path="selector-lab" element={<PageRoute><SelectorLabPage /></PageRoute>} />
+        <Route path="activity" element={<PageRoute><ActivityPage /></PageRoute>} />
+        <Route path="settings" element={<PageRoute><SettingsPage /></PageRoute>} />
+        <Route path="404" element={<PageRoute><NotFoundPage /></PageRoute>} />
         <Route path="*" element={<Navigate to="/404" replace />} />
       </Route>
     </Routes>
+  )
+}
+
+function PageRoute({ children }: { children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="h-32 rounded-md border border-border bg-card/50 gbd-skeleton" />
+      }
+    >
+      {children}
+    </Suspense>
   )
 }
 

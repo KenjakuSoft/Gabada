@@ -4,6 +4,9 @@ import type {
   ApiPlatform,
   ApiProductPreview,
   ApiSyncResult,
+  BuyAreaPick,
+  BuyAreaPicksResponse,
+  BuyAreaPickTarget,
   Category,
   DatabaseImportResponse,
   DatabaseTransferInfo,
@@ -279,6 +282,7 @@ export const scraperApi = {
     wait_timeout?: number
     platform?: string | null
     selectors: ScrapeSelectorMap
+    buy_area_picks?: BuyAreaPick[]
   }): Promise<ScrapeResult> => {
     const { data } = await http.post<ScrapeResult>(
       '/scraper/selector-lab/test',
@@ -298,6 +302,33 @@ export const scraperApi = {
     const { data } = await http.put<SelectorLabSaveResponse>(
       '/scraper/selector-lab/profile',
       body,
+    )
+    return data
+  },
+  listBuyAreaPicks: async (
+    productStoreId: number,
+  ): Promise<BuyAreaPicksResponse> => {
+    const { data } = await http.get<BuyAreaPicksResponse>(
+      `/scraper/selector-lab/buy-area-picks/${productStoreId}`,
+    )
+    return data
+  },
+  upsertBuyAreaPick: async (body: {
+    product_store_id: number
+    pick: BuyAreaPick
+  }): Promise<BuyAreaPicksResponse> => {
+    const { data } = await http.put<BuyAreaPicksResponse>(
+      '/scraper/selector-lab/buy-area-pick',
+      body,
+    )
+    return data
+  },
+  deleteBuyAreaPick: async (
+    productStoreId: number,
+    targetField: BuyAreaPickTarget,
+  ): Promise<BuyAreaPicksResponse> => {
+    const { data } = await http.delete<BuyAreaPicksResponse>(
+      `/scraper/selector-lab/buy-area-pick/${productStoreId}/${targetField}`,
     )
     return data
   },

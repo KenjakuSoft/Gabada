@@ -15,7 +15,7 @@ export function formatMoney(
   value: number | null | undefined,
   symbol: string = '$',
 ): string {
-  if (value == null) return '—'
+  if (value == null) return '\u2014'
   return `${symbol}${value.toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -60,7 +60,7 @@ export function formatDisplayMoney(
     locale?: string | null
   },
 ): string {
-  if (value == null) return 'â€”'
+  if (value == null) return '\u2014'
   if (options.mode === 'source') {
     const sourceCurrency = formatCurrencyCodeMoney(
       value,

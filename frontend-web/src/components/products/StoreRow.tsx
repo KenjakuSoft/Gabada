@@ -1,6 +1,15 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Pencil, RefreshCw, Save, Trash2, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import {
+  ExternalLink,
+  Pencil,
+  RefreshCw,
+  Save,
+  Target,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -45,6 +54,7 @@ export function StoreRow({
   productId,
 }: StoreRowProps) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const canOpenUrl = isWebUrl(store.product_url)
   const canScrape = store.is_active && canOpenUrl && !store.store_manual_only
   const [editing, setEditing] = useState(false)
@@ -196,6 +206,23 @@ export function StoreRow({
             title={editing ? 'Close editor' : 'Edit linked store'}
           >
             <Pencil className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() =>
+              navigate(
+                `/selector-lab?productStoreId=${store.id}&url=${encodeURIComponent(store.product_url)}`,
+              )
+            }
+            disabled={!canOpenUrl}
+            title={
+              canOpenUrl
+                ? 'Configure tracking - open Selector Lab to pin which buy-area item this row should follow'
+                : 'Add a real product URL first'
+            }
+          >
+            <Target className="h-4 w-4" />
           </Button>
           <Button
             variant="ghost"
