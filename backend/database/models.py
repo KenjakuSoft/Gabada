@@ -580,6 +580,10 @@ class SelectorLabRequest(BaseModel):
 class SelectorLabTestRequest(SelectorLabRequest):
     platform: Optional[str] = None
     selectors: dict[str, Optional[str]] = Field(default_factory=dict)
+    # Live buy-area picks the user has staged in the Selector Lab UI.
+    # Passed through to the test scrape so the test reflects what the next
+    # real scrape would produce, without requiring the user to save first.
+    buy_area_picks: list[BuyAreaPick] = Field(default_factory=list)
 
 
 class SelectorLabSaveRequest(BaseModel):

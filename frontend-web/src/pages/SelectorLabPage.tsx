@@ -1,5 +1,6 @@
 import { useMemo, useState, type ComponentProps } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -15,6 +16,7 @@ import {
   Target,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { BuyAreaPanel } from '@/components/scraper/BuyAreaPanel'
 import { ScrapeReviewNotice } from '@/components/scraper/ScrapeReviewNotice'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,6 +30,7 @@ import { toast } from '@/components/ui/toast-store'
 import { useCurrencySymbol } from '@/hooks/useSettings'
 import { formatMoney } from '@/lib/utils'
 import type {
+  BuyAreaPicksResponse,
   ScrapeResult,
   ScrapeSelectorField,
   ScrapeSelectorMap,
@@ -298,7 +301,27 @@ function isAssignedToTarget(
 
 export function SelectorLabPage() {
   const symbol = useCurrencySymbol()
-  const [url, setUrl] = useState('')
+  const [searchParams] = useSearchParams()
+  // ``?productStoreId=N`` arrives from the Product Detail page's "Configure
+  // tracking" link. When present, the buy-area panel switches into pin/unpin
+  // mode (per-product mappings stored on the product_store row). Without it
+  // the panel is informational only; picks need a specific product to bind to.
+  const productStoreId = useMemo(() => {
+    const raw = searchParams.get('productStoreId')
+    if (!raw) return null
+    const parsed = Number.parseInt(raw, 10)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }, [searchParams])
+  // Optional ``?url=...`` prefill, also from the entry point on Product Detail.
+  const urlParam = searchParams.get('url') ?? ''
+  const [urlDraft, setUrlDraft] = useState({
+    source: urlParam,
+    value: urlParam,
+  })
+  const url = urlDraft.source === urlParam ? urlDraft.value : urlParam
+  const updateUrl = (value: string) => {
+    setUrlDraft({ source: urlParam, value })
+  }
   const [waitForInput, setWaitForInput] = useState('')
   const [usePlaywright, setUsePlaywright] = useState(true)
   const [activeTarget, setActiveTarget] = useState<ActiveTarget>('price')
@@ -306,10 +329,37 @@ export function SelectorLabPage() {
   const [search, setSearch] = useState('')
   const [helpfulOnly, setHelpfulOnly] = useState(false)
   const [draft, setDraft] = useState<SelectorDraft | null>(null)
+  // In pin mode the per-product buy-area picks are the primary action.
+  // Legacy hostname-wide selector dropdowns + Save profile flow get tucked
+  // behind a toggle so they don't compete for attention. Default: collapse
+  // when productStoreId is set, expand otherwise.
+  const [advancedDraft, setAdvancedDraft] = useState<{
+    productStoreId: number | null
+    value: boolean
+  }>({
+    productStoreId,
+    value: productStoreId == null,
+  })
+  const showAdvanced =
+    advancedDraft.productStoreId === productStoreId
+      ? advancedDraft.value
+      : productStoreId == null
+  const toggleAdvanced = () => {
+    setAdvancedDraft({ productStoreId, value: !showAdvanced })
+  }
 
   const stores = useQuery<Store[]>({
     queryKey: ['stores'],
     queryFn: () => storesApi.list(),
+  })
+
+  // Same key as BuyAreaPanel so the two views share the cached pick list
+  // and stay in sync. ``test`` reads picks from here so the user's most
+  // recent pin is reflected immediately, without needing to re-save.
+  const buyAreaPicks = useQuery<BuyAreaPicksResponse>({
+    queryKey: ['buyAreaPicks', productStoreId],
+    queryFn: () => scraperApi.listBuyAreaPicks(productStoreId as number),
+    enabled: productStoreId != null,
   })
 
   const analyze = useMutation({
@@ -332,12 +382,17 @@ export function SelectorLabPage() {
   const test = useMutation({
     mutationFn: () => {
       if (!draft) throw new Error('No selector draft')
+      // In pin mode, pass the user's live pinned picks so the test reflects
+      // what the next real scrape would actually produce. In legacy mode
+      // (no productStoreId) the picks list is empty and only the selector
+      // path is exercised, matching pre-Phase-2 behaviour.
       return scraperApi.testSelectorLab({
         url: url.trim(),
         use_playwright: usePlaywright,
         wait_for: draft.waitFor.trim() || null,
         platform: draft.platform || null,
         selectors: draft.selectors,
+        buy_area_picks: buyAreaPicks.data?.picks ?? [],
       })
     },
     onSuccess: () => toast.success('Selection tested'),
@@ -484,7 +539,7 @@ export function SelectorLabPage() {
               <Input
                 id="selector-lab-url"
                 value={url}
-                onChange={(event) => setUrl(event.target.value)}
+                onChange={(event) => updateUrl(event.target.value)}
                 placeholder="https://shop.example.com/product/item"
                 disabled={analyze.isPending}
               />
@@ -550,7 +605,10 @@ export function SelectorLabPage() {
       {result && draft && recommendations ? (
         <div className="space-y-6">
           <BentoGrid cols={6}>
-            <BentoTile colSpan={2} tone={noisyHost ? 'accent' : 'default'}>
+            <BentoTile
+              colSpan={showAdvanced ? 2 : 6}
+              tone={noisyHost ? 'accent' : 'default'}
+            >
               <TileHeader
                 eyebrow="Workflow"
                 title="Make it reliable"
@@ -563,9 +621,27 @@ export function SelectorLabPage() {
                 }
               />
               <div className="mt-3 space-y-3 text-sm text-muted-foreground">
-                <p>1. Start with the recommended selectors below.</p>
-                <p>2. Test before saving so the extracted price and stock look right.</p>
-                <p>3. If a page is noisy, turn on useful-only filtering and ignore payment or related rows.</p>
+                {productStoreId != null ? (
+                  <>
+                    <p>1. Pick the price you actually see on the page from the Buy Area below.</p>
+                    <p>2. Click <em>Test pinned picks</em> to confirm the engine reads what you picked.</p>
+                    <p>3. Done - the picks save automatically and run on every future scrape.</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={toggleAdvanced}
+                      className="mt-2"
+                    >
+                      {showAdvanced ? 'Hide advanced selectors' : 'Show advanced selectors'}
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <p>1. Start with the recommended selectors below.</p>
+                    <p>2. Test before saving so the extracted price and stock look right.</p>
+                    <p>3. If a page is noisy, turn on useful-only filtering and ignore payment or related rows.</p>
+                  </>
+                )}
                 {noisyHost ? (
                   <div className="rounded-md border border-amber-500/25 bg-amber-500/10 p-3 text-amber-800 dark:text-amber-200">
                     redacted-store pages often include KOKO installment numbers and related-product prices.
@@ -576,43 +652,46 @@ export function SelectorLabPage() {
               </div>
             </BentoTile>
 
-            <BentoTile colSpan={4}>
-              <TileHeader
-                eyebrow="Recommended"
-                title="Best guesses from this page"
-                icon={<Sparkles className="h-4 w-4" />}
-                action={
-                  <Button size="sm" variant="outline" onClick={resetDraft}>
-                    <RotateCcw className="h-4 w-4" />
-                    Reset to detected
-                  </Button>
-                }
-              />
-              <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <RecommendedCard
-                  label="wait_for"
-                  description="Element to wait for"
-                  candidate={recommendations.wait_for}
-                  symbol={symbol}
-                  selected={draft.waitFor}
-                  onUse={(selector) => assignToTarget('wait_for', selector)}
+            {showAdvanced ? (
+              <BentoTile colSpan={4}>
+                <TileHeader
+                  eyebrow="Recommended"
+                  title="Best guesses from this page"
+                  icon={<Sparkles className="h-4 w-4" />}
+                  action={
+                    <Button size="sm" variant="outline" onClick={resetDraft}>
+                      <RotateCcw className="h-4 w-4" />
+                      Reset to detected
+                    </Button>
+                  }
                 />
-                {FIELD_META.map((field) => (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <RecommendedCard
-                    key={field.key}
-                    label={field.label}
-                    description={field.description}
-                    candidate={recommendations[field.key] ?? null}
+                    label="wait_for"
+                    description="Element to wait for"
+                    candidate={recommendations.wait_for}
                     symbol={symbol}
-                    selected={draft.selectors[field.key] ?? null}
-                    onUse={(selector) => assignToTarget(field.key, selector)}
+                    selected={draft.waitFor}
+                    onUse={(selector) => assignToTarget('wait_for', selector)}
                   />
-                ))}
-              </div>
-            </BentoTile>
+                  {FIELD_META.map((field) => (
+                    <RecommendedCard
+                      key={field.key}
+                      label={field.label}
+                      description={field.description}
+                      candidate={recommendations[field.key] ?? null}
+                      symbol={symbol}
+                      selected={draft.selectors[field.key] ?? null}
+                      onUse={(selector) => assignToTarget(field.key, selector)}
+                    />
+                  ))}
+                </div>
+              </BentoTile>
+            ) : null}
           </BentoGrid>
 
           <BentoGrid cols={6}>
+            {showAdvanced ? (
             <BentoTile colSpan={4}>
               <TileHeader
                 eyebrow="Assignments"
@@ -746,8 +825,9 @@ export function SelectorLabPage() {
                 ))}
               </div>
             </BentoTile>
+            ) : null}
 
-            <BentoTile colSpan={2}>
+            <BentoTile colSpan={showAdvanced ? 2 : 6}>
               <TileHeader
                 eyebrow="Preview"
                 title={test.data ? 'Test result' : 'Current extraction'}
@@ -801,6 +881,7 @@ export function SelectorLabPage() {
             </BentoTile>
           </BentoGrid>
 
+          {showAdvanced ? (
           <BentoGrid cols={6}>
             <BentoTile colSpan={6}>
               <TileHeader
@@ -956,6 +1037,40 @@ export function SelectorLabPage() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </BentoTile>
+          </BentoGrid>
+          ) : null}
+
+          <BentoGrid cols={6}>
+            <BentoTile colSpan={6} tone="accent">
+              <TileHeader
+                eyebrow="Phase 2 - adaptive picks"
+                title="Buy area"
+                icon={<Target className="h-4 w-4" />}
+              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                Everything the scraper saw inside the detected buy-box,
+                in DOM order. Pin one item as the value to track for a
+                specific product - the engine replays the pick on every
+                future scrape and survives minor template churn.
+                {productStoreId == null
+                  ? ' Open Selector Lab from a product detail page to enable pinning.'
+                  : ` Pinning to product_store #${productStoreId}.`}
+              </p>
+              <div className="mt-4">
+                <BuyAreaPanel
+                  buyArea={result.buy_area}
+                  buyAreaRoot={result.buy_area_root}
+                  productStoreId={productStoreId}
+                  symbol={symbol}
+                  onTest={
+                    productStoreId != null
+                      ? () => test.mutate()
+                      : undefined
+                  }
+                  testIsPending={test.isPending}
+                />
               </div>
             </BentoTile>
           </BentoGrid>

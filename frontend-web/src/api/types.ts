@@ -314,6 +314,61 @@ export interface SelectorLabProfile {
   selectors: ScrapeSelectorMap
 }
 
+export type BuyAreaItemKind =
+  | 'title'
+  | 'price'
+  | 'qualifier'
+  | 'badge'
+  | 'label'
+  | 'stock'
+  | 'image'
+  | 'other'
+
+export type BuyAreaPickTarget =
+  | 'price'
+  | 'discounted_price'
+  | 'dealer_price'
+  | 'stock_status'
+  | 'title'
+
+export interface BuyAreaItem {
+  kind: BuyAreaItemKind
+  text: string
+  value: number | null
+  qualifier: string | null
+  selector: string | null
+  dom_path: string | null
+  tag: string | null
+  struck: boolean
+  is_button: boolean
+  is_disabled: boolean
+  font_size: number | null
+  font_weight: number | null
+  order: number
+  label_before: string | null
+  label_after: string | null
+  near_badges: string[]
+  near_price: string | null
+}
+
+export interface BuyAreaPick {
+  target_field: BuyAreaPickTarget
+  selector: string | null
+  dom_path: string | null
+  kind: string
+  text: string
+  value: number | null
+  qualifier: string | null
+  label_before: string | null
+  label_after: string | null
+  picked_at: string | null
+}
+
+export interface BuyAreaPicksResponse {
+  product_store_id: number
+  picks: BuyAreaPick[]
+}
+
 export interface SelectorLabResponse {
   url: string
   final_url: string | null
@@ -324,6 +379,8 @@ export interface SelectorLabResponse {
   current_profile: SelectorLabProfile | null
   suggested_assignments: Record<string, string | null>
   candidates: SelectorLabCandidate[]
+  buy_area: BuyAreaItem[]
+  buy_area_root: string | null
   notes: string[]
 }
 
@@ -339,6 +396,8 @@ export interface ProbeResponse {
   json_ld_availability: string | null
   extracted: ScrapeResult
   candidates: ProbeCandidate[]
+  buy_area: BuyAreaItem[]
+  buy_area_root: string | null
   notes: string[]
 }
 

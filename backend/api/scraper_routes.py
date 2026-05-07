@@ -527,13 +527,22 @@ async def selector_lab(request: SelectorLabRequest) -> SelectorLabResponse:
 
 @router.post("/selector-lab/test", response_model=ScrapeResult)
 async def selector_lab_test(request: SelectorLabTestRequest) -> ScrapeResult:
-    """Run a scrape using the Selector Lab's currently selected fields."""
+    """Run a scrape using the Selector Lab's currently selected fields.
+
+    When ``buy_area_picks`` is supplied, those picks are replayed by the
+    engine just like a real scrape would, so the user can pin items in
+    the UI, hit Test, and see immediately whether the picks produce the
+    values they expected, without having to commit them to the
+    product_store row first.
+    """
     try:
         config, _ = await _diagnostic_config(
             request,
             selectors=request.selectors,
             platform=request.platform,
         )
+        if request.buy_area_picks:
+            config.buy_area_picks = list(request.buy_area_picks)
         return await scrape(request.url, config)
     except Exception as exc:
         logger.error("Selector lab test failed for %s: %s", request.url, exc)

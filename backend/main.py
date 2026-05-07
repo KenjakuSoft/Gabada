@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
-# Playwright requires ProactorEventLoop on Windows to spawn subprocesses
-if sys.platform == "win32":
+# Playwright needs ProactorEventLoop on older Windows Python builds to spawn
+# subprocesses. Python 3.14 deprecates explicit event-loop policies.
+if sys.platform == "win32" and sys.version_info < (3, 14):
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -160,5 +161,5 @@ if _FRONTEND_DIST.is_dir():
     )
 else:
     logging.getLogger(__name__).info(
-        "frontend-web/dist not found — skipping static mount (run `npm run build` in frontend-web)"
+        "frontend-web/dist not found - skipping static mount (run `npm run build` in frontend-web)"
     )
