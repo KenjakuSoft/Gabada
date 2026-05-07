@@ -41,8 +41,8 @@ selectors = { image = "button.owl-prev:nth-of-type(1) > img", price = "#productP
 
 ["store.epicgames.com"]
 platform = "generic"
-wait_for = "div.css-l24hbj > div.css-1nblg0t > div.css-l24hbj > span.eds_1ypbntd0.eds_1ypbntdc"
-selectors = { discounted_price = "div.css-l24hbj > div.css-1nblg0t > div.css-l24hbj > span.eds_1ypbntd0.eds_1ypbntdc", image = "img.css-14zdv02", price = "span.css-4jky3p", stock_status = "div.css-e045x8 > div.css-1ai4mn:nth-of-type(2) > div.css-1xaekgw:nth-of-type(5) > div > button.eds_14hl3lj9.eds_14hl3ljb", title = "h1.eds_1ypbntd0.eds_1ypbntd3" }
+wait_for = "div.css-l24hbj:nth-of-type(2) > div.css-1nblg0t > div.css-l24hbj:nth-of-type(1) > span.eds_1ypbntd0.eds_1ypbntda > span.css-4jky3p"
+selectors = { discounted_price = "div.css-169q7x3 > div.css-140e7ku > div.css-l24hbj:nth-of-type(2) > div.css-1nblg0t > div.css-l24hbj:nth-of-type(2)", price = "div.css-l24hbj:nth-of-type(2) > div.css-1nblg0t > div.css-l24hbj:nth-of-type(1) > span.eds_1ypbntd0.eds_1ypbntda > span.css-4jky3p" }
 
 ["store.playstation.com"]
 platform = "generic"
