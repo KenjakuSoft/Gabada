@@ -31,6 +31,7 @@ from playwright.async_api import (
 )
 
 from database.models import (
+    BuyAreaItem,
     ProbeCandidate,
     ProbeResponse,
     SelectorLabCandidate,
@@ -270,8 +271,14 @@ _BUY_BOX_DETECTOR_JS = r"""() => {
 
     function hasPriceText(value) {
         const text = normalizeText(value);
+        // Accept either a numeric price or a non-numeric "price qualifier"
+        // (Free, Coming Soon, Game Trial, Pre-order, Included). Without
+        // the qualifier branch, PS Store free-with-PS-Plus pages and Epic
+        // "Coming Soon" listings fail buy-box detection because the
+        // visible buy area has no currency-prefixed digits to anchor on.
         return /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/.test(text)
-            || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d{2,}/i.test(text);
+            || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d{2,}/i.test(text)
+            || /\b(?:free|included(?:\s+with)?|coming\s+soon|pre[\s-]?order|game\s+trial|trial\s+available)\b/i.test(text);
     }
 
     const PRODUCT_ROOT_SELECTORS = [
@@ -343,7 +350,17 @@ _BUY_BOX_DETECTOR_JS = r"""() => {
             + '[class*="buy-now"], [class*="buynow"], '
             + 'button[name*="cart"], button[name*="add-to-cart"], '
             + 'form.cart button, form[action*="cart"] button, '
-            + 'a[href*="add-to-cart"]'
+            + 'a[href*="add-to-cart"], '
+            // Modern data-attribute hooks (PS Store, Xbox, Epic, Shopify
+            // Hydrogen, Steam). Case-insensitive `i` flag in attribute
+            // selectors is widely supported in evergreen browsers.
+            + '[data-qa*="cart" i], [data-qa*="buy" i], [data-qa*="purchase" i], '
+            + '[data-qa*="add-to-library" i], [data-qa*="add-to-bag" i], '
+            + '[data-testid*="cart" i], [data-testid*="buy" i], '
+            + '[data-testid*="purchase" i], [data-testid*="add-to-library" i], '
+            + '[aria-label*="add to cart" i], [aria-label*="buy now" i], '
+            + '[aria-label*="add to library" i], [aria-label*="add to bag" i], '
+            + '[aria-label*="purchase" i]'
         );
         if (!hasAddToCart) continue;
         if (!hasPriceText(innerText)) continue;
@@ -394,6 +411,446 @@ async def _get_product_root(page: Page):
         if root:
             return root
     return None
+
+
+# Buy-area content dump.
+#
+# Phase 1 of the "self-adaptive scraper" rework: instead of forcing every
+# product page through the price / discounted_price / dealer_price slots,
+# return EVERYTHING in the detected buy-box with its visible text and a
+# best-guess role (title / price / qualifier / badge / label / stock /
+# image). Storefronts with non-numeric "prices" (PlayStation Store's
+# "Free with PS Plus" and "Game Trial", Xbox's "Included with Game Pass",
+# Epic's "Coming Soon") become representable as ``kind="price"`` items
+# with ``value=None`` and a ``qualifier`` string.
+#
+# This runs additionally to the existing waterfall — it doesn't replace
+# extraction. Probe and Selector Lab surface it so the user can see what
+# the scraper actually saw, then later phases will let them pin one item
+# as the value to track per product_store.
+_BUY_AREA_DUMP_JS = r"""() => {
+    function visible(el) {
+        if (!el) return false;
+        try {
+            const s = window.getComputedStyle(el);
+            return s.display !== 'none' && s.visibility !== 'hidden'
+                && parseFloat(s.opacity || '1') > 0;
+        } catch (_) { return true; }
+    }
+    function normalizeText(value) {
+        return (value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    // ── Buy-box anchor (same logic as _BUY_BOX_DETECTOR_JS) ──
+    const PRODUCT_ROOT_SELECTORS = [
+        'div.summary.entry-summary',
+        '.summary.entry-summary',
+        '#product .summary',
+        '.product-details-area',
+        '.product-view-area',
+        '.ty-product-block',
+        '.ty-productPage-body',
+        '.ty-productPage',
+        '#product-info-main',
+        '.product__info-container',
+        '.product-single__info',
+        '.product-page',
+        'article.product',
+        '[itemtype*="Product"]',
+    ];
+    let buyBox = null;
+    for (const sel of PRODUCT_ROOT_SELECTORS) {
+        const found = document.querySelector(sel);
+        if (found && visible(found)) { buyBox = found; break; }
+    }
+    if (!buyBox) {
+        const titleSelectors = [
+            'h1.product_title', 'h1.product-title', 'h1.product-name',
+            '.product_title', '.product-title', '.product-name',
+            '[itemprop="name"]', 'h1',
+        ];
+        let anchor = null, bestLen = 0;
+        for (const sel of titleSelectors) {
+            for (const el of document.querySelectorAll(sel)) {
+                if (!visible(el)) continue;
+                const text = normalizeText(el.textContent || '');
+                if (text.length < 8) continue;
+                if (text.length > bestLen) { bestLen = text.length; anchor = el; }
+            }
+            if (anchor) break;
+        }
+        if (anchor) {
+            let cur = anchor;
+            for (let i = 0; i < 8 && cur; i += 1, cur = cur.parentElement) {
+                if (!cur.querySelectorAll) continue;
+                const innerText = normalizeText(cur.innerText || '');
+                if (!innerText || innerText.length < 60 || innerText.length > 18000) continue;
+                const hasAddToCart = !!cur.querySelector(
+                    'button[type="submit"], '
+                    + '.add-to-cart, .single_add_to_cart_button, .buy-now, '
+                    + '#add-to-cart-button, [data-action*="cart"], '
+                    + '[class*="add-to-cart"], [class*="addtocart"], [class*="AddToCart"], '
+                    + '[class*="buy-now"], [class*="buynow"], '
+                    + 'button[name*="cart"], button[name*="add-to-cart"], '
+                    + 'form.cart button, form[action*="cart"] button, '
+                    + 'a[href*="add-to-cart"], '
+                    + '[data-qa*="cart" i], [data-qa*="buy" i], [data-qa*="purchase" i], '
+                    + '[data-qa*="add-to-library" i], [data-qa*="add-to-bag" i], '
+                    + '[data-testid*="cart" i], [data-testid*="buy" i], '
+                    + '[data-testid*="purchase" i], [data-testid*="add-to-library" i], '
+                    + '[aria-label*="add to cart" i], [aria-label*="buy now" i], '
+                    + '[aria-label*="add to library" i], [aria-label*="add to bag" i], '
+                    + '[aria-label*="purchase" i]'
+                );
+                if (!hasAddToCart) continue;
+                const hasPriceText = /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/.test(innerText)
+                    || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d{2,}/i.test(innerText)
+                    || /\b(?:free|included(?:\s+with)?|coming\s+soon|pre[\s-]?order|game\s+trial|trial\s+available)\b/i.test(innerText);
+                if (!hasPriceText) continue;
+                buyBox = cur;
+                break;
+            }
+        }
+    }
+    if (!buyBox) return { root_selector: null, items: [] };
+
+    function rootSelector(el) {
+        if (!el) return null;
+        if (el.id) return '#' + el.id;
+        const tag = el.tagName.toLowerCase();
+        const classes = (typeof el.className === 'string' ? el.className : '')
+            .split(/\s+/).filter(Boolean).slice(0, 2).join('.');
+        return classes ? `${tag}.${classes}` : tag;
+    }
+
+    function escapeCss(value) {
+        if (window.CSS && typeof window.CSS.escape === 'function') {
+            return window.CSS.escape(value);
+        }
+        return String(value).replace(/([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1');
+    }
+
+    function elementSelector(el) {
+        if (!el || !el.tagName) return null;
+        if (el.id) return '#' + escapeCss(el.id);
+        const parts = [];
+        let cur = el;
+        for (let i = 0; i < 5 && cur && cur.tagName; i += 1, cur = cur.parentElement) {
+            let part = cur.tagName.toLowerCase();
+            const classes = (typeof cur.className === 'string' ? cur.className : '')
+                .split(/\s+/).filter(Boolean).slice(0, 2);
+            if (classes.length) part += '.' + classes.map(escapeCss).join('.');
+            if (cur.parentElement) {
+                const siblings = Array.from(cur.parentElement.children)
+                    .filter((s) => s.tagName === cur.tagName);
+                if (siblings.length > 1) {
+                    part += `:nth-of-type(${siblings.indexOf(cur) + 1})`;
+                }
+            }
+            parts.unshift(part);
+            if (classes.length) break;
+        }
+        return parts.join(' > ');
+    }
+
+    function domPath(el) {
+        const parts = [];
+        let cur = el;
+        for (let i = 0; i < 4 && cur; i += 1, cur = cur.parentElement) {
+            const cls = (typeof cur.className === 'string' ? cur.className : '')
+                .split(/\s+/).filter(Boolean).slice(0, 2).join('.');
+            parts.push(cur.tagName.toLowerCase() + (cls ? '.' + cls : ''));
+        }
+        return parts.reverse().join(' > ');
+    }
+
+    function isStruck(el) {
+        let cur = el;
+        for (let i = 0; i < 5 && cur; i += 1, cur = cur.parentElement) {
+            const t = cur.tagName;
+            if (t === 'DEL' || t === 'S' || t === 'STRIKE') return true;
+            try {
+                const td = window.getComputedStyle(cur).textDecorationLine
+                    || window.getComputedStyle(cur).textDecoration || '';
+                if (td.includes('line-through')) return true;
+            } catch (_) {}
+            const info = ((cur.className || '') + ' ' + (cur.id || '')).toString();
+            if (/\b(retail|was|original|old|regular|strike|crossed|del-price|list-price|mrp|rrp|msrp|line-through|strikethrough)\b/i.test(info)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ── Classifiers ──
+    const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|aed|sgd|myr|inr|php|bdt|eur|gbp|jpy|aud|cad)\b|රු|\/=|\$|€|£|¥|฿|₹|₽)/i;
+    const PRICE_NUMERIC = /\d[\d,]*(?:\.\d{1,2})?/;
+    const FREE_PHRASE = /\b(free|gratis|complimentary|no\s+charge)\b/i;
+    const TRIAL_PHRASE = /\b(game\s+trial|trial\s+available|free\s+trial|trial)\b/i;
+    const SUB_PHRASE = /\b(?:included\s+with[\w\s+'-]*|with\s+(?:ps\s*plus|playstation\s*plus|gold|game\s*pass|prime|hbo|netflix|game\s*plus)|subscriber\s*price|members?\s+price|members?\s+only)\b/i;
+    const COMING_SOON = /\b(coming\s+soon|releases?\s+(?:on|in)\s+|available\s+\w+\s+\d|pre[\s-]?order(?:\s+now)?|notify\s+me)\b/i;
+    const BADGE_EXACT = /^(?:[-−]\s*\d+\s*%(?:\s*off)?|sale|new|hot|deal|best\s*seller|limited|exclusive|featured|popular|trending)$/i;
+    const PERCENT_OFF = /[-−]\s*\d+\s*%/;
+    const STOCK_VERBS = /\b(add[\s-]?to[\s-]?cart|buy[\s-]?now|order[\s-]?now|purchase|checkout|shop[\s-]?now|out[\s-]?of[\s-]?stock|sold[\s-]?out|unavailable|notify\s*me|pre[\s-]?order|in[\s-]?stock)\b/i;
+
+    function ownText(el) {
+        const parts = [];
+        for (const node of el.childNodes) {
+            if (node.nodeType === 3) {
+                parts.push(node.textContent || '');
+            }
+        }
+        return normalizeText(parts.join(''));
+    }
+
+    function classify(el, text) {
+        if (!text) return null;
+        const tag = (el.tagName || '').toLowerCase();
+        const isButton = tag === 'button' || tag === 'input'
+            || el.getAttribute('role') === 'button';
+        const itemprop = (el.getAttribute('itemprop') || '').toLowerCase();
+        const isHeading = /^h[1-3]$/.test(tag) || itemprop === 'name';
+
+        if (tag === 'img') {
+            const src = el.currentSrc || el.getAttribute('src') || '';
+            if (!src || src.startsWith('data:')) return null;
+            return { kind: 'image', text: src };
+        }
+
+        if (isHeading && text.length >= 4 && text.length <= 240) {
+            return { kind: 'title', text };
+        }
+
+        if (isButton && STOCK_VERBS.test(text)) {
+            return {
+                kind: 'stock',
+                text,
+                is_button: true,
+                is_disabled: el.disabled === true
+                    || el.getAttribute('disabled') !== null
+                    || el.getAttribute('aria-disabled') === 'true',
+            };
+        }
+
+        // Compact promo/sale callouts.
+        if (text.length <= 24 && (BADGE_EXACT.test(text) || PERCENT_OFF.test(text))) {
+            return { kind: 'badge', text };
+        }
+
+        // Non-numeric prices: "Free with PS Plus", "Game Trial", "Included
+        // with Game Pass", "Coming Soon", "Pre-order".
+        if (text.length <= 80) {
+            if (FREE_PHRASE.test(text) || TRIAL_PHRASE.test(text)
+                || SUB_PHRASE.test(text) || COMING_SOON.test(text)) {
+                return { kind: 'price', text, value: null, qualifier: text };
+            }
+        }
+
+        // Numeric price.
+        const m = text.match(PRICE_NUMERIC);
+        if (m && text.length <= 80) {
+            const hasCurrency = CURRENCY_SIGNAL.test(text);
+            const value = parseFloat(m[0].replace(/,/g, ''));
+            if (!isNaN(value) && value > 0 && value < 50_000_000) {
+                // Exclude bare percentages and small standalone integers
+                // when there is no currency context.
+                if (!hasCurrency && /^\d{1,2}\s*%/.test(text)) return null;
+                if (!hasCurrency && text.length <= 6 && value < 100) return null;
+                return { kind: 'price', text, value };
+            }
+        }
+
+        // Stock-like text without a button context.
+        if (text.length <= 60 && STOCK_VERBS.test(text)) {
+            return { kind: 'stock', text, is_button: false };
+        }
+
+        // Short, non-empty leftover text near other items becomes a label.
+        if (text.length >= 1 && text.length <= 80) {
+            return { kind: 'label', text };
+        }
+        return null;
+    }
+
+    // ── DOM walk: emit one item per element with non-empty own text. ──
+    const items = [];
+    const walker = document.createTreeWalker(buyBox, NodeFilter.SHOW_ELEMENT);
+    let order = 0;
+    let node = walker.currentNode;
+    while (node) {
+        const el = node;
+        node = walker.nextNode();
+        if (!el || el === buyBox) continue;
+        if (!visible(el)) continue;
+        const tag = (el.tagName || '').toLowerCase();
+        if (['script', 'style', 'noscript', 'svg', 'path', 'meta', 'link', 'template'].includes(tag)) continue;
+
+        // Take own text (excluding descendants') so a parent .price node
+        // doesn't double-emit text that already came from its <del>/<ins>
+        // children.
+        let text = ownText(el);
+        if (!text && tag === 'img') text = '__image__';
+        if (!text && (tag === 'button' || tag === 'input' || tag === 'a')) {
+            // Form controls often have child spans for icons; fall back
+            // to innerText so we still capture "Add to Cart".
+            const inner = normalizeText(el.innerText || el.textContent || '');
+            if (inner && inner.length <= 60) text = inner;
+        }
+        if (!text) continue;
+
+        const classified = classify(el, text);
+        if (!classified) continue;
+
+        let fontSize = null, fontWeight = null;
+        try {
+            const cs = window.getComputedStyle(el);
+            fontSize = parseFloat(cs.fontSize) || null;
+            fontWeight = parseInt(cs.fontWeight, 10) || null;
+        } catch (_) {}
+
+        items.push({
+            kind: classified.kind,
+            text: classified.text || text,
+            value: classified.value !== undefined ? classified.value : null,
+            qualifier: classified.qualifier || null,
+            selector: elementSelector(el),
+            dom_path: domPath(el),
+            tag,
+            struck: isStruck(el),
+            is_button: !!classified.is_button,
+            is_disabled: !!classified.is_disabled,
+            font_size: fontSize,
+            font_weight: fontWeight,
+            order: order++,
+        });
+    }
+
+    // ── Post-pass: associate labels and badges with neighbouring prices. ──
+    function findNearestPrice(start, dir) {
+        let i = start + dir;
+        const limit = dir > 0 ? items.length : -1;
+        while (i !== limit) {
+            const it = items[i];
+            if (it.kind === 'price') return it;
+            // Stop at structural breaks.
+            if (it.kind === 'title' || it.kind === 'stock') break;
+            i += dir;
+        }
+        return null;
+    }
+
+    for (let i = 0; i < items.length; i += 1) {
+        const it = items[i];
+        if (it.kind === 'price') {
+            // Walk back for the most-recent label.
+            for (let j = i - 1; j >= Math.max(0, i - 4); j -= 1) {
+                if (items[j].kind === 'label') {
+                    it.label_before = items[j].text;
+                    break;
+                }
+                if (items[j].kind === 'price' || items[j].kind === 'title') break;
+            }
+            for (let j = i + 1; j < Math.min(items.length, i + 4); j += 1) {
+                if (items[j].kind === 'label') {
+                    it.label_after = items[j].text;
+                    break;
+                }
+                if (items[j].kind === 'price' || items[j].kind === 'stock') break;
+            }
+            it.near_badges = [];
+            for (let j = Math.max(0, i - 3); j <= Math.min(items.length - 1, i + 3); j += 1) {
+                if (j === i) continue;
+                if (items[j].kind === 'badge') it.near_badges.push(items[j].text);
+            }
+        } else if (it.kind === 'badge') {
+            const before = findNearestPrice(i, -1);
+            const after = findNearestPrice(i, +1);
+            const pick = (before && after)
+                ? (Math.abs(items.indexOf(before) - i) <= Math.abs(items.indexOf(after) - i) ? before : after)
+                : (before || after);
+            if (pick) it.near_price = pick.text;
+        }
+    }
+
+    return { root_selector: rootSelector(buyBox), items };
+}"""
+
+
+async def _run_buy_area_dump(page: Page) -> dict:
+    """Run the buy-area dump JS and normalise its return shape."""
+    try:
+        data = await page.evaluate(_BUY_AREA_DUMP_JS)
+    except Exception as e:
+        logger.debug("Buy-area dump error: %s", e)
+        return {"root_selector": None, "items": []}
+    if not isinstance(data, dict):
+        return {"root_selector": None, "items": []}
+    items = data.get("items")
+    if not isinstance(items, list):
+        items = []
+    return {
+        "root_selector": data.get("root_selector"),
+        "items": items,
+    }
+
+
+_ALLOWED_BUY_AREA_KINDS = {
+    "title",
+    "price",
+    "qualifier",
+    "badge",
+    "label",
+    "stock",
+    "image",
+    "other",
+}
+
+
+def _coerce_buy_area_items(raw_items: list[Any]) -> list[BuyAreaItem]:
+    """Convert raw JS-side buy-area dump entries into ``BuyAreaItem`` rows.
+
+    Defensive: silently drops entries that fail validation so a single
+    quirky DOM node never sinks the whole probe response.
+    """
+    items: list[BuyAreaItem] = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        kind = str(raw.get("kind") or "").strip().lower()
+        if kind not in _ALLOWED_BUY_AREA_KINDS:
+            kind = "other"
+        text = str(raw.get("text") or "").strip()
+        if not text:
+            continue
+        near_badges_raw = raw.get("near_badges") or []
+        if not isinstance(near_badges_raw, list):
+            near_badges_raw = []
+        try:
+            items.append(
+                BuyAreaItem(
+                    kind=kind,
+                    text=text[:240],
+                    value=raw.get("value") if isinstance(raw.get("value"), (int, float)) else None,
+                    qualifier=str(raw["qualifier"])[:160] if raw.get("qualifier") else None,
+                    selector=str(raw["selector"])[:240] if raw.get("selector") else None,
+                    dom_path=str(raw["dom_path"])[:240] if raw.get("dom_path") else None,
+                    tag=str(raw["tag"])[:24] if raw.get("tag") else None,
+                    struck=bool(raw.get("struck")),
+                    is_button=bool(raw.get("is_button")),
+                    is_disabled=bool(raw.get("is_disabled")),
+                    font_size=raw.get("font_size") if isinstance(raw.get("font_size"), (int, float)) else None,
+                    font_weight=int(raw["font_weight"]) if isinstance(raw.get("font_weight"), (int, float)) else None,
+                    order=int(raw.get("order") or len(items)),
+                    label_before=str(raw["label_before"])[:160] if raw.get("label_before") else None,
+                    label_after=str(raw["label_after"])[:160] if raw.get("label_after") else None,
+                    near_badges=[str(b)[:60] for b in near_badges_raw if b],
+                    near_price=str(raw["near_price"])[:160] if raw.get("near_price") else None,
+                )
+            )
+        except Exception as exc:
+            logger.debug("Skipping malformed buy-area item: %s", exc)
+            continue
+    return items
 
 
 async def _query_selector_scoped(
@@ -3183,12 +3640,15 @@ async def _populate_selector_lab(
 
     lab = await _run_selector_lab(page)
     smart = await _run_smart_scan(page)
+    buy_area_data = await _run_buy_area_dump(page)
     response.platform = (
         "facebook-marketplace"
         if is_facebook_marketplace
         else (lab.get("platform") or smart.get("platform") or "generic")
     )
     response.root_selector = lab.get("root_selector")
+    response.buy_area = _coerce_buy_area_items(buy_area_data.get("items") or [])
+    response.buy_area_root = buy_area_data.get("root_selector") or None
     lab_candidates = [
         candidate
         for item in (lab.get("candidates") or [])
@@ -3253,6 +3713,21 @@ async def _populate_selector_lab(
     )
     if not response.candidates:
         response.notes.append("No useful candidates were found on the page.")
+    if response.buy_area:
+        response.notes.append(
+            f"Captured {len(response.buy_area)} buy-area item"
+            f"{'' if len(response.buy_area) == 1 else 's'}"
+            + (f" inside {response.buy_area_root}" if response.buy_area_root else "")
+            + "."
+        )
+    elif response.extracted.price is not None:
+        response.notes.append(
+            "No visible buy-box detected. The extracted price came from "
+            "server-rendered metadata only — qualifiers (Free with PS Plus, "
+            "Game Trial, Coming Soon) and sale badges live in the React "
+            "buy-area which is not visible to the headless browser on this "
+            "page."
+        )
 
 
 async def inspect_selectors(url: str, config: ScrapeConfig) -> SelectorLabResponse:
@@ -3640,7 +4115,40 @@ async def _detected_challenge(page: Page) -> bool:
         text = await page.evaluate(
             "() => (document.body && document.body.innerText || '').slice(0, 600).toLowerCase()"
         )
-        return any(h in text for h in _CLOUDFLARE_HINTS)
+        if any(h in text for h in _CLOUDFLARE_HINTS):
+            return True
+
+        # Akamai bot block (PlayStation Store, many enterprise sites).
+        # Akamai keeps the page's server-rendered metadata (so JSON-LD still
+        # carries a price) but injects an "Access Denied" h1 in place of the
+        # real buy-box. Without this detector we silently extract the cached
+        # JSON-LD price from a blocked page and treat it as live data.
+        return await page.evaluate(
+            r"""() => {
+                const heads = Array.from(document.querySelectorAll('h1, h2'));
+                const hasAccessDenied = heads.some((el) => {
+                    if (!el.offsetParent && !el.getClientRects().length) return false;
+                    const text = (el.textContent || '').trim();
+                    return /^access denied$/i.test(text)
+                        || /^you don'?t have permission/i.test(text);
+                });
+                if (!hasAccessDenied) return false;
+                // Be conservative: a real product page that just happens to
+                // mention "Access Denied" in copy is fine. Only flag when
+                // the page is suspiciously thin (Akamai's block page is
+                // typically <12 KB of body text) AND has no buy controls.
+                const bodyText = (document.body && document.body.innerText || '');
+                if (bodyText.length > 18000) return false;
+                const hasBuyControl = !!document.querySelector(
+                    '[data-qa*="cart" i], [data-qa*="add-to-library" i], '
+                    + '[data-testid*="cart" i], [aria-label*="add to cart" i], '
+                    + '[aria-label*="buy now" i], [aria-label*="add to library" i], '
+                    + '.add-to-cart, .single_add_to_cart_button, .buy-now, '
+                    + '#add-to-cart-button'
+                );
+                return !hasBuyControl;
+            }"""
+        )
     except Exception:
         return False
 
@@ -4006,6 +4514,9 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
 
         # Smart scan + candidates
         data = await _run_smart_scan(page)
+        buy_area_data = await _run_buy_area_dump(page)
+        response.buy_area = _coerce_buy_area_items(buy_area_data.get("items") or [])
+        response.buy_area_root = buy_area_data.get("root_selector") or None
         response.platform = (
             "facebook-marketplace"
             if is_facebook_marketplace
@@ -4058,6 +4569,27 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
             response.notes.append(
                 "Stock status could not be determined — "
                 "add-to-cart button may be hidden behind login."
+            )
+        if response.buy_area:
+            response.notes.append(
+                f"Captured {len(response.buy_area)} buy-area item"
+                f"{'' if len(response.buy_area) == 1 else 's'}"
+                + (f" inside {response.buy_area_root}" if response.buy_area_root else "")
+                + "."
+            )
+        elif extracted.price is not None:
+            # Got a price (typically from JSON-LD / microdata) but no buy-box
+            # was detected. PlayStation Store, some enterprise storefronts,
+            # and bot-walled sites leak server-rendered metadata while the
+            # interactive buy-box never renders. Tell the user the value is
+            # metadata-only so they don't trust it as the live displayed price.
+            response.notes.append(
+                "No visible buy-box could be detected on this page. The "
+                "price came from server-rendered metadata (JSON-LD / "
+                "microdata) only — Gabada cannot see PS Plus tiers, "
+                "qualifiers, or sale badges that may live in the React "
+                "buy-area. Consider tracking this product via the API "
+                "Catalog or a Custom JSON template instead."
             )
 
         return response

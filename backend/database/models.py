@@ -415,6 +415,55 @@ class ProbeCandidate(BaseModel):
     dom_path: Optional[str] = None
 
 
+class BuyAreaItem(BaseModel):
+    """One visible item inside the detected product buy-box.
+
+    The scraper used to project every product page onto a fixed schema
+    (price / discounted_price / dealer_price / stock_status), which broke
+    on storefronts that surface qualifiers like "Free with PS Plus",
+    "Game Trial", "Included", or "Coming Soon" — none of which fit a
+    numeric price slot. ``BuyAreaItem`` captures the buy-area as it
+    actually appears so the user can decide what to track per store.
+
+    ``value`` is intentionally optional: a ``kind="price"`` item with
+    ``value=None`` represents a non-numeric price (free, included, etc.)
+    where the human-readable text lives in ``text`` / ``qualifier``.
+    """
+
+    # Best-guess role of the item in the buy area.
+    #
+    #   "title"     — product title heading
+    #   "price"     — a number (or "Free" / "Included" qualifier in the
+    #                 price slot — see ``value``)
+    #   "qualifier" — text that modifies a nearby price (e.g. "with PS Plus",
+    #                 "Game Trial", "Subscriber price", "Trial")
+    #   "badge"     — sale stickers and promo callouts (-40%, "SALE", "NEW")
+    #   "label"     — short text near a price that names what the price is
+    #                 for (edition name, variant, region)
+    #   "stock"     — add-to-cart / buy-now / out-of-stock controls
+    #   "image"     — product image URL
+    #   "other"     — visible text that didn't classify cleanly
+    kind: str
+    text: str
+    value: Optional[float] = None
+    qualifier: Optional[str] = None
+    selector: Optional[str] = None
+    dom_path: Optional[str] = None
+    tag: Optional[str] = None
+    struck: bool = False
+    is_button: bool = False
+    is_disabled: bool = False
+    font_size: Optional[float] = None
+    font_weight: Optional[int] = None
+    # Visual / DOM-order index inside the buy area, useful for replaying
+    # a saved user mapping when selectors rotate.
+    order: int = 0
+    label_before: Optional[str] = None
+    label_after: Optional[str] = None
+    near_badges: list[str] = Field(default_factory=list)
+    near_price: Optional[str] = None
+
+
 class ProbeResponse(BaseModel):
     url: str
     final_url: Optional[str] = None
@@ -427,6 +476,8 @@ class ProbeResponse(BaseModel):
     json_ld_availability: Optional[str] = None
     extracted: ScrapeResult = ScrapeResult()
     candidates: list[ProbeCandidate] = Field(default_factory=list)
+    buy_area: list[BuyAreaItem] = Field(default_factory=list)
+    buy_area_root: Optional[str] = None
     notes: list[str] = Field(default_factory=list)
 
 
@@ -462,6 +513,8 @@ class SelectorLabResponse(BaseModel):
     current_profile: Optional[SelectorLabProfile] = None
     suggested_assignments: dict[str, Optional[str]] = Field(default_factory=dict)
     candidates: list[SelectorLabCandidate] = Field(default_factory=list)
+    buy_area: list[BuyAreaItem] = Field(default_factory=list)
+    buy_area_root: Optional[str] = None
     notes: list[str] = Field(default_factory=list)
 
 
