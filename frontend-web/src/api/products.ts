@@ -82,6 +82,7 @@ export const productsApi = {
     storeLinkId: number,
     body: {
       product_url?: string | null
+      clear_logs_on_url_change?: boolean
       manual_price?: number | null
       manual_stock_status?: string | null
       manual_warranty?: string | null
