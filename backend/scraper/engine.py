@@ -196,11 +196,11 @@ _STOCK_IN_RE = re.compile(
 )
 _STOCK_STATUS_PRIORITY = {
     "unknown": 0,
-    "in_stock": 1,
+    "contact_store": 1,
+    "in_stock": 2,
     "limited": 2,
     "preorder": 3,
     "backorder": 3,
-    "contact_store": 4,
     "call_for_price": 4,
     "discontinued": 5,
     "out_of_stock": 5,
@@ -227,6 +227,7 @@ def _parse_stock(raw: Optional[str]) -> str:
     if not raw:
         return "unknown"
     t = raw.strip()
+    first_line = next((line.strip() for line in t.splitlines() if line.strip()), "")
     if re.search(
         r"\b(?:availability|stock)\s*:?\s*(?:no|false|0)\b",
         t,
@@ -239,6 +240,21 @@ def _parse_stock(raw: Optional[str]) -> str:
         re.IGNORECASE,
     ):
         return "in_stock"
+    if first_line and len(first_line) <= 80:
+        if _STOCK_CALL_PRICE_RE.search(first_line):
+            return "call_for_price"
+        if _STOCK_DISCONTINUED_RE.search(first_line):
+            return "discontinued"
+        if _STOCK_OUT_RE.search(first_line):
+            return "out_of_stock"
+        if _STOCK_PREORDER_RE.search(first_line):
+            return "preorder"
+        if _STOCK_BACKORDER_RE.search(first_line):
+            return "backorder"
+        if _STOCK_LIMITED_RE.search(first_line):
+            return "limited"
+        if _STOCK_IN_RE.search(first_line):
+            return "in_stock"
     # Order matters: preorder / backorder BEFORE in-stock, because those pages
     # often also show "available" / "add to cart" copy.
     if _STOCK_CALL_PRICE_RE.search(t):
@@ -2897,6 +2913,11 @@ _SMART_SCAN_JS = r"""() => {
 
     function stockStatusFromText(text, opts = {}) {
         const disabled = !!opts.disabled;
+        const rawLines = String(text || '')
+            .split(/\n+/)
+            .map((line) => normalizeText(line).toLowerCase())
+            .filter(Boolean);
+        const firstLine = rawLines[0] || '';
         const value = normalizeText(text).toLowerCase();
         if (!value) return null;
         if (/\b(?:availability|stock)\s*:?\s*(?:no|false|0)\b/.test(value)) {
@@ -2904,6 +2925,29 @@ _SMART_SCAN_JS = r"""() => {
         }
         if (/\b(?:availability|stock)\s*:?\s*(?:yes|true|1)\b/.test(value)) {
             return 'in_stock';
+        }
+        if (firstLine && firstLine.length <= 80) {
+            if (/call\s+for\s+price|price\s+on\s+request|ask\s+for\s+price/.test(firstLine)) {
+                return 'call_for_price';
+            }
+            if (/discontinued|end\s+of\s+life|eol/.test(firstLine)) {
+                return 'discontinued';
+            }
+            if (/out.?of.?stock|sold.?out|unavailable|not available/.test(firstLine)) {
+                return 'out_of_stock';
+            }
+            if (/pre[\s-]?order|pre[\s-]?sale|coming[\s-]?soon|notify[\s-]?me|notify[\s-]?when/.test(firstLine)) {
+                return 'preorder';
+            }
+            if (/back[\s-]?order|on[\s-]?backorder/.test(firstLine)) {
+                return 'backorder';
+            }
+            if (/limited[\s-]?stock|low[\s-]?stock|few[\s-]?left/.test(firstLine)) {
+                return 'limited';
+            }
+            if (/in[\s-]?stock|available\s+now|ready\s+to\s+ship|add|buy|cart|order|purchase|checkout|shop.?now/.test(firstLine)) {
+                return 'in_stock';
+            }
         }
         if (/call\s+for\s+price|price\s+on\s+request|ask\s+for\s+price/.test(value)) {
             return 'call_for_price';
@@ -3575,9 +3619,23 @@ _SELECTOR_LAB_JS = r"""() => {
     } catch (_) {}
 
     function parseStock(text) {
+        const rawLines = String(text || '')
+            .split(/\n+/)
+            .map((line) => normalizeText(line).toLowerCase())
+            .filter(Boolean);
+        const firstLine = rawLines[0] || '';
         const value = normalizeText(text).toLowerCase();
         if (!value) return null;
         if (STOCK_PAYMENT_NOISE.test(value)) return null;
+        if (firstLine && firstLine.length <= 80) {
+            if (STOCK_CALL_PRICE.test(firstLine)) return 'call_for_price';
+            if (STOCK_DISCONTINUED.test(firstLine)) return 'discontinued';
+            if (STOCK_OUT.test(firstLine)) return 'out_of_stock';
+            if (STOCK_PREORDER.test(firstLine)) return 'preorder';
+            if (STOCK_BACKORDER.test(firstLine)) return 'backorder';
+            if (STOCK_LIMITED.test(firstLine)) return 'limited';
+            if (STOCK_IN.test(firstLine)) return 'in_stock';
+        }
         if (STOCK_CALL_PRICE.test(value)) return 'call_for_price';
         if (STOCK_CONTACT.test(value)) return 'contact_store';
         if (STOCK_DISCONTINUED.test(value)) return 'discontinued';

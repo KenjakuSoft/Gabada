@@ -421,6 +421,20 @@ def test_stock_no_status_beats_generic_in_stock() -> None:
     assert _should_replace_stock_status("out_of_stock", "in_stock") is False
 
 
+def test_in_stock_line_beats_contact_help_copy() -> None:
+    raw = (
+        "IN STOCK\n"
+        "ASUS DUAL GEFORCE RTX 3050 8GB GDDR6\n"
+        "Quantity:\n"
+        "ADD TO CART\n"
+        "Need Help? Contact Us via WhatsApp\n"
+    )
+
+    assert _parse_stock(raw) == "in_stock"
+    assert _should_replace_stock_status("in_stock", "contact_store") is False
+    assert _should_replace_stock_status("contact_store", "in_stock") is True
+
+
 if __name__ == "__main__":
     tests = [
         test_extreme_divergence_keeps_structured_price,
@@ -438,6 +452,7 @@ if __name__ == "__main__":
         test_smart_scan_ignores_low_plain_spec_number_at_boundary,
         test_structured_price_can_gain_free_sale_pair,
         test_stock_no_status_beats_generic_in_stock,
+        test_in_stock_line_beats_contact_help_copy,
     ]
     for t in tests:
         t()
