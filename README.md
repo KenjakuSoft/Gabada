@@ -11,10 +11,13 @@ when a site layout changes.
 
 ## Current Release
 
-Latest stable release: `v0.6.0`
+Latest stable release: `v0.6.1`
 
 Recent highlights:
 
+- Price extraction now stays inside the actual buy-box on themes that don't expose `.summary.entry-summary` or other well-known class hooks (redacted-store WoodMart, redacted-store Elementor). A new anchor-based buy-box detector + scoped selector queries stop the scraper from picking up related-product, recently-viewed, mini-cart, and footer prices.
+- Reviewer no longer overrides correct structured-data (JSON-LD / microdata) prices with smart-scan candidates just because the raw text is plain digits, and a body-fallback smart scan can no longer replace any locked field — only fill missing ones.
+- Suppressed the misleading "Smart scan suggests Rs X" review note on sale items when the smart-scan candidate is just the regular price already on file.
 - Added a stealth Chrome fallback that auto-clicks Cloudflare Turnstile checkboxes via SeleniumBase + pyautogui when the headless Chromium scrape hits a bot challenge. Probe, Selector Lab, manual scrapes, and the daily scheduled scrape all use it.
 - Added an API catalog import flow with built-in Steam, Apple App Store, and GOG providers, plus a Custom JSON template for PlayStation, Xbox, Epic, and other storefronts. API-enabled stores skip Playwright and sync via HTTP.
 - Added currency tagging (`Rs/LKR`, `USD`, `EUR`, `GBP`, `INR`, `JPY`, ISO codes) on every price log row, with new Settings for `price_display_mode` (regional / source) and `exchange_rates`.
@@ -440,7 +443,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./packaging/build_release.sh --app-version 0.6.0
+./packaging/build_release.sh --app-version 0.6.1
 ```
 
 Pushing a `v*` tag or publishing a GitHub Release triggers
