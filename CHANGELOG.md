@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.6.2] — 2026-05-07
+
+### Added
+- **Product URL history control.** Editing a linked store's Product URL now shows a clear-logs option. When selected, Gabada deletes only that store link's existing price logs before future scrapes use the replacement URL, avoiding mixed history for different SKUs.
+
+### Fixed
+- **Epic Games Store extraction.** The scraper now focuses Epic scans on the purchase box, supports one-digit currency prices like `$4.79`, preserves 90%+ sale pairs, and treats real `Free` labels as `0.0` while ignoring non-price copy such as "Free Trial".
+- **Call-for-price and unavailable pages.** redacted-store-style pages that show `CALL FOR PRICE` plus `Availability: No` now keep `price` empty and return `out_of_stock` instead of parsing item codes, spec numbers, or free-trial text.
+- **Contact/help text no longer overrides real stock.** redacted-store pages whose product box starts with `IN STOCK` but later contains "Contact Us via WhatsApp" now remain `in_stock` instead of being downgraded to `contact_store`.
+- **Selector Lab buy-area picks can track free prices.** User-pinned free qualifier rows such as "Free with PS Plus" now replay as a zero price instead of being blanked as non-numeric.
+
+### Changed
+- **App version** bumped to **0.6.2** for the scraper hotfix and Product URL history-control release.
+
+### Tests
+- Backend suite now covers Epic deep-sale pairs, free-price parsing, redacted-store no-price/out-of-stock handling, redacted-store contact-copy precedence, and URL-change log clearing. Full backend suite: 75 tests.
+
 ## [0.6.1] — 2026-05-07
 
 ### Fixed
@@ -230,7 +247,10 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
-[Unreleased]: https://github.com/Xx-LiDAF-xX/Gabada/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Xx-LiDAF-xX/Gabada/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.6.2
+[0.6.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.6.1
+[0.6.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.6.0
 [0.5.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.4.0
 [0.3.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.3.1
