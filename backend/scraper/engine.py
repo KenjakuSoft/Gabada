@@ -241,7 +241,151 @@ _PRODUCT_ROOT_SELECTORS = [
 ]
 
 
+# Anchor-based buy-box detector. Runs in the page so it can read computed
+# styles, visibility, and inner text without round-tripping each candidate.
+#
+# Strategy:
+#   1. Try the well-known PRODUCT_ROOT class/ID selectors above first.
+#   2. Otherwise pick the longest visible H1/title-like element as the anchor
+#      and walk up at most 8 ancestors looking for one that contains BOTH
+#      an add-to-cart-style control AND price-looking digits.
+#
+# The "must contain add-to-cart AND a price" filter is what stops this from
+# matching the page header, related-products grid, or footer banners.
+# Returns ``null`` when no confident buy-box can be located, in which case
+# the engine intentionally falls back to looser scoping rather than guess.
+_BUY_BOX_DETECTOR_JS = r"""() => {
+    function visible(el) {
+        if (!el) return false;
+        try {
+            const s = window.getComputedStyle(el);
+            return s.display !== 'none' && s.visibility !== 'hidden'
+                && parseFloat(s.opacity || '1') > 0;
+        } catch (_) { return true; }
+    }
+
+    function normalizeText(value) {
+        return (value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function hasPriceText(value) {
+        const text = normalizeText(value);
+        return /\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?/.test(text)
+            || /(?:rs\.?|lkr|\$|€|£|¥|₹|฿)\s*\d{2,}/i.test(text);
+    }
+
+    const PRODUCT_ROOT_SELECTORS = [
+        'div.summary.entry-summary',
+        '.summary.entry-summary',
+        '#product .summary',
+        '.product-details-area',
+        '.product-view-area',
+        '.ty-product-block',
+        '.ty-productPage-body',
+        '.ty-productPage',
+        '#product-info-main',
+        '.product__info-container',
+        '.product-single__info',
+        '.product-page',
+        'article.product',
+        '[itemtype*="Product"]',
+    ];
+    for (const selector of PRODUCT_ROOT_SELECTORS) {
+        const found = document.querySelector(selector);
+        if (
+            found
+            && visible(found)
+            && hasPriceText(found.innerText || found.textContent || '')
+        ) return found;
+    }
+
+    // Anchor: the longest visible product-title node on the page.
+    const titleSelectors = [
+        'h1.product_title',
+        'h1.product-title',
+        'h1.product-name',
+        '.product_title',
+        '.product-title',
+        '.product-name',
+        '[itemprop="name"]',
+        'h1',
+    ];
+    let anchor = null;
+    let bestLen = 0;
+    for (const sel of titleSelectors) {
+        for (const el of document.querySelectorAll(sel)) {
+            if (!visible(el)) continue;
+            const text = normalizeText(el.textContent || '');
+            if (text.length < 8) continue;
+            if (text.length > bestLen) {
+                bestLen = text.length;
+                anchor = el;
+            }
+        }
+        if (anchor) break;
+    }
+    if (!anchor) return null;
+
+    // Walk up at most 8 ancestors looking for the buy-box. Required:
+    //  - moderate text size (filters out tiny carousels and the body itself)
+    //  - an add-to-cart control inside this subtree
+    //  - at least one price-looking number inside this subtree
+    let cur = anchor;
+    for (let i = 0; i < 8 && cur; i += 1, cur = cur.parentElement) {
+        if (!cur.querySelectorAll) continue;
+        const innerText = normalizeText(cur.innerText || '');
+        if (!innerText || innerText.length < 60 || innerText.length > 18000) continue;
+        const hasAddToCart = !!cur.querySelector(
+            'button[type="submit"], '
+            + '.add-to-cart, .single_add_to_cart_button, .buy-now, '
+            + '#add-to-cart-button, [data-action*="cart"], '
+            + '[class*="add-to-cart"], [class*="addtocart"], [class*="AddToCart"], '
+            + '[class*="buy-now"], [class*="buynow"], '
+            + 'button[name*="cart"], button[name*="add-to-cart"], '
+            + 'form.cart button, form[action*="cart"] button, '
+            + 'a[href*="add-to-cart"]'
+        );
+        if (!hasAddToCart) continue;
+        if (!hasPriceText(innerText)) continue;
+        return cur;
+    }
+    return null;
+}"""
+
+
 async def _get_product_root(page: Page):
+    """Locate the product buy-box / price-box on the page.
+
+    Returns an ``ElementHandle`` for the smallest container that holds the
+    product title + add-to-cart control + price digits, or ``None`` when no
+    confident buy-box can be found. Callers use the returned handle to scope
+    selector queries so they cannot match prices in related-products,
+    recently-viewed, mini-cart, or footer regions.
+
+    Tries the JS anchor-based detector first because it validates that a
+    candidate root actually contains price-looking text. That distinction
+    matters for templates where ``.summary.entry-summary`` exists but the
+    visible price sits in a sibling container. Falls back to the original
+    class-selector list only when the JS evaluator itself fails.
+    """
+    try:
+        handle = await page.evaluate_handle(_BUY_BOX_DETECTOR_JS)
+    except Exception as e:
+        logger.debug("Buy-box detector failed: %s", e)
+        handle = None
+    if handle is not None:
+        try:
+            element = handle.as_element()
+        except Exception:
+            element = None
+        if element is not None:
+            return element
+        try:
+            await handle.dispose()
+        except Exception:
+            pass
+        return None
+
     for selector in _PRODUCT_ROOT_SELECTORS:
         try:
             root = await page.query_selector(selector)
@@ -622,7 +766,21 @@ def _review_result_with_smart_scan(
     if price_locked and current_mismatch and result_current is not None:
         # User pinned the selector. Don't touch their price; just surface the
         # smart-scan candidate so the UI can offer a one-click switch.
-        if reviewed.review_alternative_price is None:
+        #
+        # Special case: when both regular and sale prices were extracted
+        # (e.g. Woo defaults pulled `del .amount` + `ins .amount`), smart
+        # scan on Woody / WoodMart themes often mis-picks the struck
+        # regular as its "main" because its strike-through ancestor walk
+        # misses the theme's wrapper. That candidate isn't a real
+        # disagreement — it's the same regular price we already stored,
+        # just relabelled. Surfacing it as an alternative would make the
+        # UI ask "Switch to {regular}?" which is nonsense.
+        smart_matches_regular = (
+            reviewed.discounted_price is not None
+            and reviewed.price is not None
+            and _prices_close(reviewed.price, smart_current)
+        )
+        if not smart_matches_regular and reviewed.review_alternative_price is None:
             reviewed.review_alternative_price = smart_current
             reviewed.review_alternative_raw = smart_current_raw or smart.raw_price
             reviewed.review_alternative_label = "smart-scan candidate"
@@ -632,8 +790,30 @@ def _review_result_with_smart_scan(
                 f"Lab pick of {result_current:.2f}.",
             )
 
-    suspicious_current_raw = _raw_price_signal(current_raw) <= 1
-    suspicious_regular_raw = reviewed.discounted_price is not None and _raw_price_signal(reviewed.raw_price) <= 1
+    # JSON-LD / microdata return prices as plain digits like "275000.00" with
+    # no currency prefix and no thousands separators. Treating that low raw
+    # signal as "suspicious" lets smart scan override structured prices the
+    # moment it finds anything currency-tagged elsewhere in the buy-box, which
+    # is exactly the "fix one product, break another" pattern. When the
+    # structured source provided the price, plain-digit raw is expected, not
+    # weak — so don't penalise it. User-locked prices (Selector Lab) are
+    # likewise treated as authoritative; their raw signal should not unlock
+    # a smart-scan override.
+    raw_signal_authoritative = structured_price_locked or price_locked
+    suspicious_current_raw = (
+        not raw_signal_authoritative and _raw_price_signal(current_raw) <= 1
+    )
+    suspicious_regular_raw = (
+        reviewed.discounted_price is not None
+        and not raw_signal_authoritative
+        and _raw_price_signal(reviewed.raw_price) <= 1
+    )
+    # Smart-scan that had to scan ``document.body`` (no buy-box found, or the
+    # buy-box was empty) is unreliable: it can latch onto stray "Rs 4" text
+    # in the description, related-product blocks, or footer copy. Don't let
+    # that scan silently override a structured-data or user-locked price.
+    smart_used_body_fallback = bool(smart_data.get("used_body_fallback"))
+    smart_authoritative = not smart_used_body_fallback
     smart_supports_current = (
         result_current is None
         or suspicious_current_raw
@@ -651,6 +831,7 @@ def _review_result_with_smart_scan(
     )
     structured_sale_pair_enrichment = (
         not price_locked
+        and smart_authoritative
         and structured_price_locked
         and result_regular is None
         and result_current is not None
@@ -679,12 +860,17 @@ def _review_result_with_smart_scan(
     elif result_current is None:
         should_adopt = True
         reasons.append("missing current price")
-    elif current_mismatch and (
-        has_custom
-        or not structured_price_locked
-        or suspicious_current_raw
-        or major_divergence
-    ) and smart_supports_current:
+    elif (
+        smart_authoritative
+        and current_mismatch
+        and (
+            has_custom
+            or not structured_price_locked
+            or suspicious_current_raw
+            or major_divergence
+        )
+        and smart_supports_current
+    ):
         should_adopt = True
         reasons.append("current price disagrees with smart scan")
 
@@ -693,17 +879,23 @@ def _review_result_with_smart_scan(
             if result_regular is None and (has_custom or not structured_price_locked):
                 should_adopt = True
                 reasons.append("missing regular price")
-            elif regular_mismatch and (
-                has_custom
-                or not structured_price_locked
-                or suspicious_regular_raw
-                or major_divergence
-            ) and smart_supports_regular:
+            elif (
+                smart_authoritative
+                and regular_mismatch
+                and (
+                    has_custom
+                    or not structured_price_locked
+                    or suspicious_regular_raw
+                    or major_divergence
+                )
+                and smart_supports_regular
+            ):
                 should_adopt = True
                 reasons.append("regular price disagrees with smart scan")
-        elif reviewed.discounted_price is not None and (
-            suspicious_current_raw
-            or suspicious_regular_raw
+        elif (
+            smart_authoritative
+            and reviewed.discounted_price is not None
+            and (suspicious_current_raw or suspicious_regular_raw)
         ):
             should_adopt = True
             reasons.append("smart scan found no sale pair")
@@ -752,6 +944,11 @@ def _review_result_with_smart_scan(
             )
 
     user_driven = bool(locks)
+    # Filling a missing dealer field is fine (we have to source it from
+    # somewhere). Replacing an existing one when smart scan is in body-
+    # fallback mode is not — the candidate can come from anywhere on the
+    # page, including unrelated product blocks.
+    can_replace_existing_dealer = smart_authoritative
     if (
         not dealer_locked
         and not user_driven
@@ -759,7 +956,8 @@ def _review_result_with_smart_scan(
         and (
             reviewed.dealer_price is None
             or (
-                (_price_ratio(reviewed.dealer_price, smart.dealer_price) >= 1.25)
+                can_replace_existing_dealer
+                and (_price_ratio(reviewed.dealer_price, smart.dealer_price) >= 1.25)
                 and (has_custom or _raw_price_signal(reviewed.raw_dealer) <= 1)
             )
         )
@@ -2099,10 +2297,16 @@ _SMART_SCAN_JS = r"""() => {
     }
 
     let candidates = collectCandidates(scanRoot);
-    // Safety fallback: if the focused buy-box scope yielded almost nothing,
-    // re-run against document.body so we don't shrink ourselves out of the
-    // real price (e.g. unusual templates where price sits outside the box).
-    if (candidates.length < 2 && scanRoot !== document.body) {
+    let usedBodyFallback = false;
+    // Safety fallback: only re-scan document.body when the buy-box scope
+    // produced ZERO candidates. The previous "<2" threshold was too eager —
+    // many product pages have a single visible price in the buy-box, and
+    // re-scanning the body lets stray "Rs 4" / footer / related-product
+    // numbers compete for "main price" with no way to distinguish them.
+    // Downstream reviewers consult ``used_body_fallback`` to refuse
+    // overriding structured-data prices when this fired.
+    if (candidates.length === 0 && scanRoot !== document.body) {
+        usedBodyFallback = true;
         scanRoot = document.body;
         candidates = collectCandidates(scanRoot);
     }
@@ -2213,6 +2417,7 @@ _SMART_SCAN_JS = r"""() => {
         candidates: candidates.slice(0, 30).map(publicCandidate),
         stock,
         platform,
+        used_body_fallback: usedBodyFallback,
     };
 }"""
 
@@ -2225,6 +2430,7 @@ async def _run_smart_scan(page: Page) -> dict:
         return {
             "main": None, "original": None, "dealer": None,
             "candidates": [], "stock": "unknown", "platform": "generic",
+            "used_body_fallback": False,
         }
 
 
@@ -3165,29 +3371,33 @@ async def _apply_custom(
     override them with smart-scan picks."""
     sel = config.selectors
     product_root = await _get_product_root(page)
+    # When a confident buy-box was detected, price-related selectors must
+    # stay inside it. Page-wide fallback is a bleed source — a Woo theme's
+    # `.price > .amount` matches related-products, recently-viewed, and
+    # mini-cart blocks too. Title and stock can still fall back page-wide
+    # because their selectors are usually specific (`.product_title`,
+    # `.stock`) and the cost of missing them is worse than the bleed.
+    price_scope_only = product_root is not None
 
     async def get_text(
         selector: Optional[str],
         *,
         root=None,
+        allow_page_fallback: bool = True,
     ) -> Optional[str]:
         # Iterate over every match and return the first one with non-empty
         # inner_text.
         #
-        # Two reasons we need iteration + page fallback:
+        # Two reasons we need iteration:
         #
         # 1. Variant-aware Woo themes (Woody, WoodMart) ship multiple
         #    .price blocks, only the currently-selected variant block has
         #    visible text. query_selector returns the first DOM-order
         #    match, which can be a hidden placeholder.
         #
-        # 2. Some Woo themes (nexxcom) place the .price block OUTSIDE the
-        #    `.summary.entry-summary` element that _get_product_root picks
-        #    as the product root. Scoped queries return nothing in that
-        #    case, but a page-wide query finds the main product's price
-        #    first (the related-product blocks come later in DOM order),
-        #    so iterating the page fallback gives the right answer
-        #    without breaking sites where scoping works correctly.
+        # 2. Page-wide fallback (when allowed) covers the rare template
+        #    where the buy-box detector returns nothing — there the
+        #    main product's price is the first match in DOM order anyway.
         if not selector:
             return None
         if root is not None:
@@ -3199,6 +3409,8 @@ async def _apply_custom(
                 text = await _read_element_text(el)
                 if text:
                     return text
+            if not allow_page_fallback:
+                return None
         try:
             els = await page.query_selector_all(selector)
         except Exception:
@@ -3210,9 +3422,21 @@ async def _apply_custom(
         return None
 
     title = await get_text(sel.title, root=product_root)
-    raw_price = await get_text(sel.price, root=product_root)
-    raw_disc = await get_text(sel.discounted_price, root=product_root)
-    raw_dealer = await get_text(sel.dealer_price, root=product_root)
+    raw_price = await get_text(
+        sel.price,
+        root=product_root,
+        allow_page_fallback=not price_scope_only,
+    )
+    raw_disc = await get_text(
+        sel.discounted_price,
+        root=product_root,
+        allow_page_fallback=not price_scope_only,
+    )
+    raw_dealer = await get_text(
+        sel.dealer_price,
+        root=product_root,
+        allow_page_fallback=not price_scope_only,
+    )
     stock_raw = await get_text(sel.stock_status, root=product_root)
 
     if _is_installment_price(raw_price):
