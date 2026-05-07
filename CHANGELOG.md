@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.6.1] — 2026-05-07
+
+### Fixed
+- **Price extraction now stays inside the actual buy-box on more themes.** The hardcoded `_get_product_root` selector list (`.summary.entry-summary`, `.ty-product-block`, etc.) only matched a handful of templates. Themes that don't use those class hooks — Nexxcom's WoodMart, thelaptopaccessories' Elementor — fell through to page-wide selector queries that picked up prices from related products, recently-viewed strips, mini-cart subtotals, and footer testimonials. A new anchor-based detector finds the longest visible product-title node and walks up to the smallest ancestor that contains both an add-to-cart control and a price-looking number, then `_apply_custom` refuses page-wide fallback for `price`, `discounted_price`, and `dealer_price` whenever a buy-box was detected. End-to-end verified across nexxcom.lk, genarc.lk, and thelaptopaccessories.lk on both sale and non-sale products.
+- **Smart-scan body fallback no longer overrides correct extractions.** Previously the JS smart scan re-scanned `document.body` whenever the focused buy-box scope produced fewer than two candidates — which is most product pages with a single visible price — and the reviewer happily adopted whatever stray "Rs 4" or related-product number it then latched onto. The fallback now only fires when the buy-box is genuinely empty, and the JS reports `used_body_fallback: true` so the Python reviewer can refuse override of price, discounted price, and dealer price (still allowed to fill missing fields).
+- **Structured-data prices are no longer treated as "weak raw" by the reviewer.** JSON-LD and microdata return prices as plain `"275000.00"` with no currency prefix, which scored low on `_raw_price_signal`. The reviewer used that low score to justify overriding correct structured prices with whatever smart scan found — exactly the "fix one product, break another" pattern. Locked structured prices and user-pinned Selector Lab prices are now treated as authoritative regardless of the raw text formatting.
+- **Removed the misleading "Smart scan suggests Rs X" alternative on sale items** when the smart-scan candidate matches the regular price already extracted. On Woody / WoodMart sale pages the smart scan's strike-detection sometimes mis-picks the regular as its "main", and the reviewer surfaced "Switch to Rs 275,000?" — which was the regular the user already had on file. The alternative is now suppressed when smart's value is within tolerance of the extracted regular and a discounted price is set.
+
+### Changed
+- Refreshed the `store.epicgames.com` selectors in `sites.toml` after Epic rotated their `css-*` class hashes again. Title, image, and stock_status were dropped from the profile pending re-mapping; the engine falls back to platform defaults until they're verified.
+- App version bumped to **0.6.1**.
+
+### Tests
+- Added `backend/tests/test_scraper_scoping.py` (11 tests) covering buy-box detection nullability, body-fallback authority gating, structured-price weak-raw protection, dealer-price replacement gating, and the sale-pair note suppression. Full backend suite: 43 tests.
+
 ## [0.6.0] — 2026-05-03
 
 ### Added
