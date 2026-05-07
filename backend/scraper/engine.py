@@ -32,6 +32,7 @@ from playwright.async_api import (
 
 from database.models import (
     BuyAreaItem,
+    BuyAreaPick,
     ProbeCandidate,
     ProbeResponse,
     SelectorLabCandidate,
@@ -851,6 +852,165 @@ def _coerce_buy_area_items(raw_items: list[Any]) -> list[BuyAreaItem]:
             logger.debug("Skipping malformed buy-area item: %s", exc)
             continue
     return items
+
+
+# ── Buy-area pick replay (Phase 2a) ──────────────────────────────────────────
+#
+# A ``BuyAreaPick`` is the user's decision: "track THIS specific item I see in
+# the Selector Lab as the price (or discounted_price / dealer_price /
+# stock_status / title) for this product." At scrape time we re-run the buy-
+# area dump and score every current item against the saved fingerprint, then
+# adopt the best match (above a confidence threshold) as that field's value.
+#
+# Scoring is heuristic on purpose so layout churn within a theme doesn't break
+# the mapping. Selector match is the strongest signal but a class rotation
+# alone won't be fatal as long as the item still sits next to the same label,
+# carries the same qualifier, or has the same DOM-path shape.
+
+# Minimum total score required for a pick to apply. Values below this leave
+# the existing waterfall result alone and surface a "site changed, please
+# re-pick" review note. Tuned so a pick that matches by selector OR by any
+# two soft signals (kind + label_before, qualifier + dom_path) still applies.
+_BUY_AREA_PICK_MIN_SCORE = 30
+
+# Maximum value drift tolerated before the value-similarity bonus drops off,
+# expressed as a fraction. A pinned price of 1000 still scores the bonus when
+# the live item is anywhere from 950 to 1050.
+_BUY_AREA_VALUE_TOLERANCE = 0.05
+
+
+def _buy_area_pick_score(pick: BuyAreaPick, item: BuyAreaItem) -> int:
+    """Heuristic similarity score between a saved pick and a live item.
+
+    Higher is better. Components:
+      * Same exact selector              +50
+      * Same dom_path                    +20
+      * Same kind                        +10
+      * Same qualifier                   +15
+      * Same label_before                +10
+      * Same label_after                 +10
+      * Numeric value within 5%          +5
+    """
+    score = 0
+    if pick.selector and item.selector and pick.selector == item.selector:
+        score += 50
+    if pick.dom_path and item.dom_path and pick.dom_path == item.dom_path:
+        score += 20
+    if pick.kind and item.kind and pick.kind == item.kind:
+        score += 10
+    if pick.qualifier and item.qualifier and pick.qualifier == item.qualifier:
+        score += 15
+    if pick.label_before and item.label_before and pick.label_before == item.label_before:
+        score += 10
+    if pick.label_after and item.label_after and pick.label_after == item.label_after:
+        score += 10
+    if pick.value is not None and item.value is not None:
+        low = min(abs(pick.value), abs(item.value))
+        if low > 0:
+            drift = abs(pick.value - item.value) / max(low, 1.0)
+            if drift <= _BUY_AREA_VALUE_TOLERANCE:
+                score += 5
+    return score
+
+
+def _best_match_for_pick(
+    pick: BuyAreaPick,
+    items: list[BuyAreaItem],
+) -> tuple[Optional[BuyAreaItem], int]:
+    """Return the highest-scoring live item for a pick (or ``None, 0``)."""
+    best: Optional[BuyAreaItem] = None
+    best_score = 0
+    for item in items:
+        score = _buy_area_pick_score(pick, item)
+        if score > best_score:
+            best_score = score
+            best = item
+    return best, best_score
+
+
+def _apply_buy_area_picks(
+    result: ScrapeResult,
+    picks: list[BuyAreaPick],
+    items: list[BuyAreaItem],
+) -> ScrapeResult:
+    """Override extracted fields where a saved pick matches a live item.
+
+    Mutates and returns ``result``. Picks that fail to match (best score
+    below threshold) leave the field alone and add a review note pointing
+    the user back to the Selector Lab.
+    """
+    if not picks:
+        return result
+    if not items:
+        # No live buy-area to match against — almost certainly a partial
+        # bot block. Surface this clearly so the user knows their pinned
+        # picks didn't apply (rather than silently shipping waterfall data).
+        _add_review_note(
+            result,
+            "Saved buy-area picks could not be replayed — the buy-area was "
+            "not visible on this scrape (page may be partially blocked). "
+            "Falling back to the standard extraction.",
+        )
+        if result.review_status == "ok":
+            result.review_status = "needs_review"
+        return result
+
+    for pick in picks:
+        target = (pick.target_field or "").strip()
+        if target not in {"price", "discounted_price", "dealer_price", "stock_status", "title"}:
+            continue
+        match, score = _best_match_for_pick(pick, items)
+        if match is None or score < _BUY_AREA_PICK_MIN_SCORE:
+            _add_review_note(
+                result,
+                f"Buy-area pick for {target!r} could not be matched on this "
+                f"scrape (best score {score}). Site layout may have changed "
+                "— re-pin the item in Selector Lab.",
+            )
+            if result.review_status == "ok":
+                result.review_status = "needs_review"
+            continue
+
+        if target == "title":
+            result.title = match.text or result.title
+            continue
+        if target == "stock_status":
+            # Treat the picked item's text as the source of truth and
+            # reuse the existing parser for normalisation.
+            parsed = _parse_stock(match.text)
+            if parsed != "unknown":
+                result.stock_status = parsed
+            continue
+        # Numeric fields: only adopt when the pick maps to a live item with
+        # a non-null value. A user-pinned qualifier ("Free with PS Plus")
+        # sets the field to None and surfaces a note explaining why.
+        if match.value is None:
+            _add_review_note(
+                result,
+                f"Buy-area pick for {target!r} matched a non-numeric item "
+                f"({match.qualifier or match.text!r}); leaving the field "
+                "blank for this scrape.",
+            )
+            if target == "price":
+                result.price = None
+                result.raw_price = None
+            elif target == "discounted_price":
+                result.discounted_price = None
+                result.raw_discounted = None
+            elif target == "dealer_price":
+                result.dealer_price = None
+                result.raw_dealer = None
+            continue
+        if target == "price":
+            result.price = match.value
+            result.raw_price = match.text
+        elif target == "discounted_price":
+            result.discounted_price = match.value
+            result.raw_discounted = match.text
+        elif target == "dealer_price":
+            result.dealer_price = match.value
+            result.raw_dealer = match.text
+    return _normalize_scrape_result(result)
 
 
 async def _query_selector_scoped(
@@ -4681,6 +4841,17 @@ async def scrape_with_open_page(
     )
     if is_facebook_marketplace:
         _clear_dealer_price(result)
+
+    # Phase 2a: replay user-pinned buy-area picks. The user picked specific
+    # items in the Selector Lab and told Gabada "track this exact thing as
+    # the price / discounted_price / etc." for this product_store. We re-
+    # run the buy-area dump and score every saved fingerprint against the
+    # current items, then override matching fields. Failed matches leave
+    # the waterfall result alone and surface a "site changed" review note.
+    if config.buy_area_picks:
+        buy_area_dump = await _run_buy_area_dump(page)
+        live_items = _coerce_buy_area_items(buy_area_dump.get("items") or [])
+        result = _apply_buy_area_picks(result, list(config.buy_area_picks), live_items)
 
     if not result.stock_status:
         result.stock_status = "unknown"

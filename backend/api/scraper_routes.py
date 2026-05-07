@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 from database.db import get_db
 from database.models import (
+    BuyAreaPickRequest,
+    BuyAreaPicksResponse,
     LoginSessionRequest,
     ProbeRequest,
     ProbeResponse,
@@ -577,6 +579,129 @@ async def selector_lab_save_profile(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to save selector profile: {exc}",
+        )
+    finally:
+        await db.close()
+
+
+_BUY_AREA_TARGETS = {"price", "discounted_price", "dealer_price", "stock_status", "title"}
+
+
+def _validate_buy_area_target(target: str) -> str:
+    target = (target or "").strip()
+    if target not in _BUY_AREA_TARGETS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown target_field {target!r}; must be one of "
+                f"{sorted(_BUY_AREA_TARGETS)}"
+            ),
+        )
+    return target
+
+
+async def _load_scrape_config(db, product_store_id: int) -> ScrapeConfig:
+    rows = await db.execute_fetchall(
+        "SELECT scrape_config FROM product_stores WHERE id=?",
+        (product_store_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="product_store not found")
+    return ScrapeConfig(**json.loads(rows[0]["scrape_config"] or "{}"))
+
+
+async def _save_scrape_config(db, product_store_id: int, config: ScrapeConfig) -> None:
+    await db.execute(
+        "UPDATE product_stores SET scrape_config=? WHERE id=?",
+        (config.model_dump_json(), product_store_id),
+    )
+    await db.commit()
+
+
+@router.put("/selector-lab/buy-area-pick", response_model=BuyAreaPicksResponse)
+async def selector_lab_buy_area_pick_upsert(
+    body: BuyAreaPickRequest,
+) -> BuyAreaPicksResponse:
+    """Pin a buy-area item as the value to track for one schema field.
+
+    The pick replaces any existing pick with the same ``target_field`` on
+    the same product_store. The engine replays this on every subsequent
+    scrape, scoring live buy-area items against the saved fingerprint.
+    """
+    target = _validate_buy_area_target(body.pick.target_field)
+    db = await get_db()
+    try:
+        config = await _load_scrape_config(db, body.product_store_id)
+        # Replace-or-append by target_field.
+        kept = [p for p in config.buy_area_picks if p.target_field != target]
+        new_pick = body.pick.model_copy(update={"target_field": target})
+        config.buy_area_picks = kept + [new_pick]
+        await _save_scrape_config(db, body.product_store_id, config)
+        return BuyAreaPicksResponse(
+            product_store_id=body.product_store_id,
+            picks=list(config.buy_area_picks),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Buy-area pick upsert failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save buy-area pick: {exc}",
+        )
+    finally:
+        await db.close()
+
+
+@router.delete(
+    "/selector-lab/buy-area-pick/{product_store_id}/{target_field}",
+    response_model=BuyAreaPicksResponse,
+)
+async def selector_lab_buy_area_pick_delete(
+    product_store_id: int,
+    target_field: str,
+) -> BuyAreaPicksResponse:
+    """Remove the pinned pick for a single ``target_field``."""
+    target = _validate_buy_area_target(target_field)
+    db = await get_db()
+    try:
+        config = await _load_scrape_config(db, product_store_id)
+        before = len(config.buy_area_picks)
+        config.buy_area_picks = [
+            p for p in config.buy_area_picks if p.target_field != target
+        ]
+        if len(config.buy_area_picks) != before:
+            await _save_scrape_config(db, product_store_id, config)
+        return BuyAreaPicksResponse(
+            product_store_id=product_store_id,
+            picks=list(config.buy_area_picks),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Buy-area pick delete failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to clear buy-area pick: {exc}",
+        )
+    finally:
+        await db.close()
+
+
+@router.get(
+    "/selector-lab/buy-area-picks/{product_store_id}",
+    response_model=BuyAreaPicksResponse,
+)
+async def selector_lab_buy_area_picks_list(
+    product_store_id: int,
+) -> BuyAreaPicksResponse:
+    """List the current buy-area picks pinned to a product_store."""
+    db = await get_db()
+    try:
+        config = await _load_scrape_config(db, product_store_id)
+        return BuyAreaPicksResponse(
+            product_store_id=product_store_id,
+            picks=list(config.buy_area_picks),
         )
     finally:
         await db.close()
