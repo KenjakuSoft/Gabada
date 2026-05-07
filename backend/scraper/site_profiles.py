@@ -177,6 +177,7 @@ def apply_platform_defaults(config: ScrapeConfig, platform: str) -> ScrapeConfig
         headers=config.headers,
         storage_state_path=config.storage_state_path,
         platform=plat,
+        buy_area_picks=config.buy_area_picks,
     )
 
 
@@ -377,6 +378,7 @@ def apply_profile(url: str, config: ScrapeConfig) -> ScrapeConfig:
         headers=merged_headers,
         storage_state_path=config.storage_state_path,
         platform=config.platform or prof.platform,
+        buy_area_picks=config.buy_area_picks,
     )
     # Fall through to platform defaults for any slot still empty.
     if prof.platform:

@@ -106,6 +106,41 @@ class ScrapeSelectors(BaseModel):
     stock_status: Optional[str] = None
     image: Optional[str] = None
 
+_BUY_AREA_TARGET_FIELDS = (
+    "price",
+    "discounted_price",
+    "dealer_price",
+    "stock_status",
+    "title",
+)
+
+
+class BuyAreaPick(BaseModel):
+    """A user's "track THIS specific buy-area item" mapping for one field.
+
+    Phase 2 of the self-adaptive scraper: instead of relying on a global
+    selector, the user picks one ``BuyAreaItem`` from the Selector Lab and
+    tells Gabada to use it as the ``target_field`` value on every future
+    scrape. The fingerprint fields are matched against the live buy-area
+    dump at replay time so the pick survives minor template churn.
+
+    Persisted inside ``ScrapeConfig.buy_area_picks`` and replayed by the
+    engine after the existing extraction waterfall.
+    """
+
+    target_field: str  # one of _BUY_AREA_TARGET_FIELDS
+    selector: Optional[str] = None
+    dom_path: Optional[str] = None
+    kind: str = "price"
+    text: str = ""
+    value: Optional[float] = None
+    qualifier: Optional[str] = None
+    label_before: Optional[str] = None
+    label_after: Optional[str] = None
+    # Recorded for the user's reference; not used for matching.
+    picked_at: Optional[datetime] = None
+
+
 class ScrapeConfig(BaseModel):
     use_playwright: bool = True
     wait_for: Optional[str] = None
@@ -117,6 +152,10 @@ class ScrapeConfig(BaseModel):
     storage_state_path: Optional[str] = None
     # Hint from platform auto-detection, e.g. "cs-cart", "woocommerce", "shopify"
     platform: Optional[str] = None
+    # User-pinned buy-area items. Engine replays these after the waterfall
+    # to override ``target_field`` with the matching live item. At most one
+    # pick per ``target_field``; later writes for the same field overwrite.
+    buy_area_picks: list[BuyAreaPick] = Field(default_factory=list)
 
 
 # ── Manual override ───────────────────────────────────────────────────────────
@@ -556,6 +595,24 @@ class SelectorLabSaveResponse(BaseModel):
     profile: SelectorLabProfile
     path: str
     hostnames: list[str] = Field(default_factory=list)
+
+
+class BuyAreaPickRequest(BaseModel):
+    """Request body for upserting a buy-area pick on a product_store.
+
+    The ``pick.target_field`` value identifies which schema slot the user
+    is mapping (price / discounted_price / dealer_price / stock_status /
+    title). Saving a second pick with the same ``target_field`` overwrites
+    the previous one.
+    """
+    product_store_id: int
+    pick: BuyAreaPick
+
+
+class BuyAreaPicksResponse(BaseModel):
+    """Current set of buy-area picks pinned to a product_store."""
+    product_store_id: int
+    picks: list[BuyAreaPick] = Field(default_factory=list)
 
 
 class LoginSessionRequest(BaseModel):
