@@ -1900,56 +1900,164 @@ def _clear_dealer_price(result: ScrapeResult) -> ScrapeResult:
 
 # ── Strategy 1: JSON-LD ───────────────────────────────────────────────────────
 
-async def _try_json_ld(page: Page) -> ScrapeResult:
-    scripts = await page.query_selector_all('script[type="application/ld+json"]')
-    for script in scripts:
+_JSONLD_STOCK_PRIORITY = {
+    "unknown": 0,
+    "discontinued": 10,
+    "out_of_stock": 20,
+    "contact_store": 30,
+    "call_for_price": 35,
+    "backorder": 40,
+    "preorder": 45,
+    "limited": 50,
+    "in_stock": 55,
+}
+
+
+def _jsonld_type_contains(item: dict[str, Any], needle: str) -> bool:
+    raw_type = item.get("@type", "")
+    type_text = (
+        " ".join(str(t) for t in raw_type)
+        if isinstance(raw_type, list)
+        else str(raw_type)
+    )
+    return needle in type_text
+
+
+def _expand_jsonld_items(data: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    stack = data if isinstance(data, list) else [data]
+
+    while stack:
+        item = stack.pop(0)
+        if not isinstance(item, dict):
+            continue
+        if isinstance(item.get("@graph"), list):
+            stack.extend(item["@graph"])
+        items.append(item)
+
+    return items
+
+
+def _iter_jsonld_dicts(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _iter_jsonld_offers(product: dict[str, Any]) -> list[dict[str, Any]]:
+    offers = list(_iter_jsonld_dicts(product.get("offers")))
+    for variant in _iter_jsonld_dicts(product.get("hasVariant")):
+        offers.extend(_iter_jsonld_dicts(variant.get("offers")))
+    return offers
+
+
+def _jsonld_offer_price(offer: dict[str, Any]) -> tuple[Optional[float], Optional[str]]:
+    for key in ("price", "lowPrice"):
+        raw_value = offer.get(key)
+        if raw_value is None:
+            continue
+        raw = str(raw_value)
+        parsed = _parse_price(raw)
+        if parsed is not None:
+            return parsed, raw
+
+    for spec in _iter_jsonld_dicts(offer.get("priceSpecification")):
+        price, raw = _jsonld_offer_price(spec)
+        if price is not None:
+            return price, raw
+
+    return None, None
+
+
+def _jsonld_offer_stock(offer: dict[str, Any]) -> str:
+    def parse_stock(value: Any) -> str:
+        raw = str(value)
+        stock = _stock_from_schema_url(raw)
+        return stock if stock != "unknown" else _parse_stock(raw)
+
+    availability = offer.get("availability")
+    if isinstance(availability, list):
+        for value in availability:
+            stock = parse_stock(value)
+            if stock != "unknown":
+                return stock
+        return "unknown"
+    if availability is None:
+        return "unknown"
+    return parse_stock(availability)
+
+
+def _aggregate_jsonld_stock(statuses: list[str]) -> str:
+    if not statuses:
+        return "unknown"
+    return max(statuses, key=lambda stock: _JSONLD_STOCK_PRIORITY.get(stock, 0))
+
+
+def _extract_jsonld_product(item: dict[str, Any]) -> ScrapeResult:
+    name = item.get("name")
+    if name is not None:
+        name = str(name).strip() or None
+
+    price_candidates: list[tuple[float, str]] = []
+    stocks: list[str] = []
+    for offer in _iter_jsonld_offers(item):
+        price, raw = _jsonld_offer_price(offer)
+        if price is not None and raw is not None:
+            price_candidates.append((price, raw))
+        stock = _jsonld_offer_stock(offer)
+        if stock != "unknown":
+            stocks.append(stock)
+
+    price: Optional[float] = None
+    raw_price: Optional[str] = None
+    if price_candidates:
+        price, raw_price = min(price_candidates, key=lambda candidate: candidate[0])
+
+    return ScrapeResult(
+        title=name,
+        price=price,
+        raw_price=raw_price,
+        stock_status=_aggregate_jsonld_stock(stocks),
+    )
+
+
+def _extract_jsonld_result_from_scripts(scripts: list[str]) -> ScrapeResult:
+    fallback = ScrapeResult()
+
+    for text in scripts:
         try:
-            text = await script.inner_text()
             data = json.loads(text)
-            items = data if isinstance(data, list) else [data]
-            # Handle @graph wrapper
-            expanded = []
-            for item in items:
-                if isinstance(item, dict) and isinstance(item.get("@graph"), list):
-                    expanded.extend(item["@graph"])
-                else:
-                    expanded.append(item)
-
-            for item in expanded:
-                if not isinstance(item, dict):
-                    continue
-                t = item.get("@type", "")
-                t_str = " ".join(t) if isinstance(t, list) else str(t)
-                if "Product" not in t_str:
-                    continue
-
-                name = item.get("name")
-
-                offers = item.get("offers", {})
-                if isinstance(offers, list):
-                    offers = offers[0] if offers else {}
-
-                raw_price = str(offers.get("price", "")) if offers else ""
-                raw_low = str(offers.get("lowPrice", "")) if offers else ""
-                parsed_price = _parse_price(raw_price)
-                parsed_low = _parse_price(raw_low)
-                price = parsed_price if parsed_price is not None else parsed_low
-                raw = raw_price or raw_low or None
-
-                avail = offers.get("availability", "") if offers else ""
-                stock = _stock_from_schema_url(avail) if avail else "unknown"
-
-                if name or price is not None:
-                    logger.info("JSON-LD hit: name=%s price=%s", name, price)
-                    return ScrapeResult(
-                        title=name,
-                        price=price,
-                        stock_status=stock,
-                        raw_price=raw,
-                    )
         except Exception:
             continue
-    return ScrapeResult()
+
+        for item in _expand_jsonld_items(data):
+            if not _jsonld_type_contains(item, "Product"):
+                continue
+
+            result = _extract_jsonld_product(item)
+            if result.price is not None:
+                return result
+            if not fallback.title and result.title:
+                fallback = result
+
+    return fallback
+
+
+async def _try_json_ld(page: Page) -> ScrapeResult:
+    scripts = await page.query_selector_all('script[type="application/ld+json"]')
+    texts: list[str] = []
+    for script in scripts:
+        try:
+            texts.append(await script.inner_text())
+        except Exception:
+            continue
+
+    result = _extract_jsonld_result_from_scripts(texts)
+    if result.title or result.price is not None:
+        logger.info("JSON-LD hit: name=%s price=%s", result.title, result.price)
+    return result
 
 
 # ── Strategy 2: Schema.org microdata ─────────────────────────────────────────

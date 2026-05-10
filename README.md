@@ -11,10 +11,11 @@ when a site layout changes.
 
 ## Current Release
 
-Latest stable release: `v0.6.5`
+Latest stable release: `v0.6.6`
 
 Recent highlights:
 
+- **Shopify variant JSON-LD stock fix.** Product pages that publish `ProductGroup.hasVariant[].offers` now aggregate variant prices and availability correctly, fixing sold-out Shopify variant groups such as the redacted-store DualSense page being misread as `in_stock`.
 - **Activity feed is collapsible per product and per store.** Each product now defaults to a one-line header with chevron toggle (matching the HomePage Details pattern). Expanding a product reveals collapsible per-store sub-rows so you can drill into one store's changes without seeing every other store's history. Expand-all / Collapse-all buttons sit next to the search box, and typing in search auto-opens matching rows.
 - **Security hardening** — Playwright `storage_state` paths are now confined to the sessions directory (no absolute escapes, no `..` traversal); `/api/*` enforces a loopback `Host` header to defeat DNS rebinding; every response carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `nosniff`, `Referrer-Policy`, and a `Permissions-Policy` lockdown; scraper inputs reject anything that isn't `http://` or `https://` (no more `file://` or `javascript:` URLs reaching Playwright). 14 new regression tests cover these defenses.
 - **`axios` bumped to 1.15.2**, closing 8 GitHub Dependabot alerts (2 high, 5 moderate, 1 low) on the 1.x line. `npm audit` reports 0 vulnerabilities.
@@ -466,7 +467,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./packaging/build_release.sh --app-version 0.6.5
+./packaging/build_release.sh --app-version 0.6.6
 ```
 
 Pushing a `v*` tag or publishing a GitHub Release triggers
