@@ -11,21 +11,14 @@ when a site layout changes.
 
 ## Current Release
 
-Latest stable release: `v0.6.2`
+Latest stable release: `v0.6.5`
 
 Recent highlights:
 
-- Epic Games Store sale prices, free-price labels, and deep discounts now extract from the visible purchase box instead of unrelated page numbers.
-- Barclays-style "Call for price" pages now keep price empty and honor `Availability: No`, while Nexxcom in-stock pages no longer get downgraded by nearby WhatsApp/contact copy.
-- Changing a linked store's Product URL now offers a clear-logs option so old price history does not silently mix with a replacement SKU.
-- Price extraction stays inside the actual buy-box on themes that don't expose `.summary.entry-summary` or other well-known class hooks (Nexxcom WoodMart, thelaptopaccessories Elementor). A new anchor-based buy-box detector + scoped selector queries stop the scraper from picking up related-product, recently-viewed, mini-cart, and footer prices.
-- Reviewer no longer overrides correct structured-data (JSON-LD / microdata) prices with smart-scan candidates just because the raw text is plain digits, and a body-fallback smart scan can no longer replace any locked field — only fill missing ones.
-- Suppressed the misleading "Smart scan suggests Rs X" review note on sale items when the smart-scan candidate is just the regular price already on file.
-- Added a stealth Chrome fallback that auto-clicks Cloudflare Turnstile checkboxes via SeleniumBase + pyautogui when the headless Chromium scrape hits a bot challenge. Probe, Selector Lab, manual scrapes, and the daily scheduled scrape all use it.
-- Added an API catalog import flow with built-in Steam, Apple App Store, and GOG providers, plus a Custom JSON template for PlayStation, Xbox, Epic, and other storefronts. API-enabled stores skip Playwright and sync via HTTP.
-- Added currency tagging (`Rs/LKR`, `USD`, `EUR`, `GBP`, `INR`, `JPY`, ISO codes) on every price log row, with new Settings for `price_display_mode` (regional / source) and `exchange_rates`.
-- Saved Selector Lab profiles in `sites.toml` now win over stale platform defaults that got baked in at add-time.
-- Failed scrapes that find no price no longer overwrite the last good price log; they skip and keep the previous values instead.
+- **Activity feed is collapsible per product and per store.** Each product now defaults to a one-line header with chevron toggle (matching the HomePage Details pattern). Expanding a product reveals collapsible per-store sub-rows so you can drill into one store's changes without seeing every other store's history. Expand-all / Collapse-all buttons sit next to the search box, and typing in search auto-opens matching rows.
+- **Security hardening** — Playwright `storage_state` paths are now confined to the sessions directory (no absolute escapes, no `..` traversal); `/api/*` enforces a loopback `Host` header to defeat DNS rebinding; every response carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `nosniff`, `Referrer-Policy`, and a `Permissions-Policy` lockdown; scraper inputs reject anything that isn't `http://` or `https://` (no more `file://` or `javascript:` URLs reaching Playwright). 14 new regression tests cover these defenses.
+- **`axios` bumped to 1.15.2**, closing 8 GitHub Dependabot alerts (2 high, 5 moderate, 1 low) on the 1.x line. `npm audit` reports 0 vulnerabilities.
+- Earlier in the 0.6.x line: Epic Games Store buy-box scoping; "Call for price" / `Availability: No` precedence; Product URL change clears stale logs; anchor-based buy-box detector for themes without `.summary.entry-summary` hooks; structured-data prices no longer overridden by smart-scan; SeleniumBase Cloudflare stealth fallback; API catalog imports (Steam / Apple App Store / GOG / Custom JSON); per-row currency tagging; saved Selector Lab profiles winning over stale platform defaults.
 
 See [CHANGELOG.md](./CHANGELOG.md) for full release notes.
 
@@ -35,6 +28,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for full release notes.
 - Save price, discounted price, dealer price, stock status, warranty text, and scrape history.
 - Tag every price log row with the source currency parsed from the page (`Rs/LKR`, `USD`, `EUR`, `GBP`, `INR`, `JPY`, ISO codes), with optional exchange-rate conversion in the UI.
 - Compare current store prices from the Home and Product Detail pages.
+- Browse the Activity feed with collapsible per-product and per-store dropdowns, plus Expand-all / Collapse-all controls and search-driven auto-expand.
 - Organize products by category.
 - Import products from WooCommerce, CSV, XLSX, XLS, and PDF.
 - Import from store APIs (built-in Steam, Apple App Store, GOG; Custom JSON template for PlayStation, Xbox, Epic, EA Play, Ubisoft, Nintendo, Apple Store, Google Play). API-enabled stores sync via HTTP and skip Playwright entirely.
@@ -329,16 +323,42 @@ Recommended multi-device workflow:
 
 ## Local API Security
 
-Gabada is a local desktop-style app, not a hosted multi-user service. The backend
-binds to localhost for launcher use and only allows browser API requests from
-trusted local app origins:
+Gabada is a local desktop-style app, not a hosted multi-user service. Defenses
+applied to every `/api/*` request:
 
-- `http://127.0.0.1:8000` through `http://127.0.0.1:8010`
-- `http://localhost:8000` through `http://localhost:8010`
-- `http://localhost:5173` and `http://127.0.0.1:5173` for Vite development
+- **Origin allowlist.** Browser requests are only accepted from trusted local
+  app origins:
+  - `http://127.0.0.1:8000` through `http://127.0.0.1:8010`
+  - `http://localhost:8000` through `http://localhost:8010`
+  - `http://localhost:5173` and `http://127.0.0.1:5173` for Vite development
 
-Use `GABADA_ALLOWED_ORIGINS` to add comma-separated extra origins for a custom
-local setup.
+  Use `GABADA_ALLOWED_ORIGINS` to add comma-separated extra origins for a
+  custom local setup.
+
+- **Host header validation.** Requests whose `Host` header does not point at a
+  loopback interface on an allowed port are rejected, even if `Origin` and
+  `Sec-Fetch-Site` are absent. This blocks DNS-rebinding attacks where a
+  hostile page bound to `evil.example` later resolves to `127.0.0.1`.
+
+- **`Sec-Fetch-Site` allowlist.** Only `same-origin`, `same-site`, and `none`
+  are accepted; any cross-site fetch is rejected.
+
+- **Security headers on every response.** `X-Frame-Options: DENY`,
+  `Content-Security-Policy: frame-ancestors 'none'`, `X-Content-Type-Options:
+  nosniff`, `Referrer-Policy: no-referrer`, and a `Permissions-Policy` lockdown
+  for camera / microphone / geolocation. The local UI cannot be embedded in a
+  hostile iframe.
+
+- **Path confinement on session files.** The Playwright `storage_state` paths
+  used by `/api/scraper/login-session` and `/api/scraper/probe` are confined to
+  the Gabada sessions directory (and `backend/` in source checkouts). Absolute
+  paths and `..` traversal that escape the allowed base are rejected with a
+  400 — no arbitrary file reads or writes.
+
+- **URL scheme allowlist for scraper inputs.** `/api/scraper/probe`,
+  `/selector-lab`, `/selector-lab/test`, and `/login-session` only accept
+  `http://` and `https://` URLs. `file://`, `javascript:`, and `data:` URLs
+  are rejected before they reach Playwright.
 
 ## Runtime Data
 
@@ -446,7 +466,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./packaging/build_release.sh --app-version 0.6.2
+./packaging/build_release.sh --app-version 0.6.5
 ```
 
 Pushing a `v*` tag or publishing a GitHub Release triggers
