@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.6.4] — 2026-05-10
+
+### Security
+- **Bumped `axios` to ^1.15.2** in `frontend-web/package.json` (was `^1.15.0`, lockfile resolved to 1.15.0). Closes 8 GitHub Dependabot alerts (2 high, 5 moderate, 1 low) covering header injection via prototype pollution, response/request hijacking, CRLF injection in multipart bodies, `no_proxy` SSRF bypass, JSON response tampering via `parseReviver`, `maxBodyLength` and `maxContentLength` bypasses on streamed adapters, and null-byte injection in `AxiosURLSearchParams`. `npm audit` now reports 0 vulnerabilities.
+
+### Changed
+- App version bumped to **0.6.4**.
+
 ## [0.6.3] — 2026-05-10
 
 ### Security
