@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.6.7] - 2026-05-10
+
+### Fixed
+- **Variant-level JSON-LD stock now stays authoritative through the whole scraper waterfall.** The 0.6.6 parser correctly read `ProductGroup.hasVariant[].offers`, but broad saved platform-default stock selectors could still overwrite that structured stock later in the waterfall. SimplyTek exposed this: JSON-LD said every variant was `OutOfStock`, while stale Shopify inventory snippets elsewhere in the DOM said "1 in stock". Gabada now locks variant-offer structured stock against weaker platform defaults while preserving true custom selector overrides.
+- **Mixed-variant stores keep their structured stock.** Stores such as GenArc, MyTechPoint, and GQMobiles also publish variant-level offers; the stock lock prevents a single stale platform-default `.stock` or inventory node from flipping an otherwise valid variant aggregate.
+
+### Changed
+- App version bumped to **0.6.7**.
+- Update-check repository slug changed to `KenjakuSoft/Gabada` after the GitHub repository move.
+
+### Tests
+- Added stock-authority regression coverage for platform-default selectors versus variant-level structured stock. Full backend suite: 102 tests.
+
 ## [0.6.6] — 2026-05-10
 
 ### Fixed
@@ -280,22 +293,25 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
-[Unreleased]: https://github.com/Xx-LiDAF-xX/Gabada/compare/v0.6.2...HEAD
-[0.6.2]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.6.2
-[0.6.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.6.1
-[0.6.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.6.0
-[0.5.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.5.0
-[0.4.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.4.0
-[0.3.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.3.1
-[0.3.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.3.0
-[0.2.5]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.5
-[0.2.4]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.4
-[0.2.3]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.3
-[0.2.2]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.2
-[0.2.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.1
-[0.2.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.2.0
-[0.1.4]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.4
-[0.1.3]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.3
-[0.1.2]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.2
-[0.1.1]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.1
-[0.1.0]: https://github.com/Xx-LiDAF-xX/Gabada/releases/tag/v0.1.0
+[Unreleased]: https://github.com/KenjakuSoft/Gabada/compare/v0.6.7...HEAD
+[0.6.7]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.6.7
+[0.6.6]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.6.6
+[0.6.5]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.6.5
+[0.6.2]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.6.2
+[0.6.1]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.6.1
+[0.6.0]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.6.0
+[0.5.0]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.5.0
+[0.4.0]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.4.0
+[0.3.1]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.3.1
+[0.3.0]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.3.0
+[0.2.5]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.2.5
+[0.2.4]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.2.4
+[0.2.3]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.2.3
+[0.2.2]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.2.2
+[0.2.1]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.2.1
+[0.2.0]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.2.0
+[0.1.4]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.1.4
+[0.1.3]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.1.3
+[0.1.2]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.1.2
+[0.1.1]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.1.1
+[0.1.0]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.1.0
