@@ -1,13 +1,47 @@
-# Gabada
+<h1 align="center">Gabada</h1>
 
-Local-first price and stock tracking for products across online stores.
+<p align="center">
+  <strong>Local-first price and stock tracking for products across online stores.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/KenjakuSoft/Gabada?label=release&style=for-the-badge"></a>
+  <a href="https://github.com/KenjakuSoft/Gabada/actions/workflows/release.yml"><img alt="Release workflow" src="https://img.shields.io/github/actions/workflow/status/KenjakuSoft/Gabada/release.yml?branch=main&label=release&style=for-the-badge"></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/github/license/KenjakuSoft/Gabada?style=for-the-badge"></a>
+</p>
+
+<p align="center">
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white&style=flat-square">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white&style=flat-square">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111&style=flat-square">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-UI-3178C6?logo=typescript&logoColor=white&style=flat-square">
+  <img alt="Playwright" src="https://img.shields.io/badge/Playwright-scraper-2EAD33?logo=playwright&logoColor=white&style=flat-square">
+  <img alt="SQLite" src="https://img.shields.io/badge/SQLite-local%20database-003B57?logo=sqlite&logoColor=white&style=flat-square">
+  <img alt="Windows Linux macOS" src="https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS-supported-444?style=flat-square">
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a>
+  |
+  <a href="#features">Features</a>
+  |
+  <a href="#scraping-model">Scraping Model</a>
+  |
+  <a href="#import-workflow">Imports</a>
+  |
+  <a href="#packaging-and-releases">Releases</a>
+  |
+  <a href="./CHANGELOG.md">Changelog</a>
+</p>
 
 Gabada runs a FastAPI backend, a React web UI, Playwright-powered scraping, and a
 SQLite database on your own machine. It is built for comparing store prices,
 keeping historical price logs, importing catalogs, and repairing scraper results
 when a site layout changes.
 
-[Changelog](./CHANGELOG.md) | [License](./LICENSE)
+| Local-first | Scraper-aware | Release-ready |
+| --- | --- | --- |
+| Data stays on your machine in SQLite. | JSON-LD, microdata, smart scan, custom selectors, and Selector Lab profiles. | Windows installer, portable bundles, update checks, and GitHub Release workflow. |
 
 ## Current Release
 
@@ -78,7 +112,7 @@ existing `needs_review` result.
 ### Clone
 
 ```powershell
-git clone https://github.com/Xx-LiDAF-xX/Gabada.git
+git clone https://github.com/KenjakuSoft/Gabada.git
 cd Gabada
 ```
 
