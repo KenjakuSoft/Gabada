@@ -26,7 +26,12 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from database.models import ScrapeResult  # noqa: E402
-from scraper.engine import _get_product_root, _review_result_with_smart_scan  # noqa: E402
+from scraper.engine import (  # noqa: E402
+    _get_product_root,
+    _resolve_custom_stock_status,
+    _review_result_with_smart_scan,
+)
+from scraper.site_profiles import PLATFORM_SELECTORS  # noqa: E402
 
 
 def _smart_data(
@@ -385,6 +390,69 @@ def test_smart_scan_disagreement_on_single_price_still_surfaces_alternative() ->
     assert reviewed.review_alternative_label == "smart-scan candidate"
 
 
+def test_platform_default_stock_selector_cannot_weaken_structured_stock() -> None:
+    """Broad platform defaults may see stale variant snippets.
+
+    Shopify pages can expose JSON-LD saying every variant is OutOfStock while
+    old inventory snippets elsewhere in the DOM still say "1 in stock". The
+    default selector may fill unknown stock, but it must not weaken an
+    authoritative structured out_of_stock result.
+    """
+    resolved = _resolve_custom_stock_status(
+        "out_of_stock",
+        "in_stock",
+        platform="shopify",
+        stock_selector=PLATFORM_SELECTORS["shopify"]["stock_status"],
+    )
+
+    assert resolved == "out_of_stock"
+
+
+def test_variant_jsonld_stock_blocks_platform_default_stock_override() -> None:
+    resolved = _resolve_custom_stock_status(
+        "in_stock",
+        "out_of_stock",
+        platform="woocommerce",
+        stock_selector=PLATFORM_SELECTORS["woocommerce"]["stock_status"],
+        structured_variant_stock_locked=True,
+    )
+
+    assert resolved == "in_stock"
+
+
+def test_platform_default_stock_selector_can_override_without_variant_lock() -> None:
+    resolved = _resolve_custom_stock_status(
+        "in_stock",
+        "out_of_stock",
+        platform="woocommerce",
+        stock_selector=PLATFORM_SELECTORS["woocommerce"]["stock_status"],
+    )
+
+    assert resolved == "out_of_stock"
+
+
+def test_platform_default_stock_selector_can_fill_unknown_stock() -> None:
+    resolved = _resolve_custom_stock_status(
+        "unknown",
+        "in_stock",
+        platform="shopify",
+        stock_selector=PLATFORM_SELECTORS["shopify"]["stock_status"],
+    )
+
+    assert resolved == "in_stock"
+
+
+def test_true_custom_stock_selector_can_override_structured_stock() -> None:
+    resolved = _resolve_custom_stock_status(
+        "out_of_stock",
+        "in_stock",
+        platform="shopify",
+        stock_selector=".real-current-variant-stock",
+    )
+
+    assert resolved == "in_stock"
+
+
 if __name__ == "__main__":
     tests = [
         test_structured_plain_digit_raw_not_overridden_when_no_other_signal,
@@ -398,6 +466,11 @@ if __name__ == "__main__":
         test_default_smart_scan_payload_treated_as_buy_box,
         test_smart_scan_matching_extracted_regular_does_not_surface_alternative,
         test_smart_scan_disagreement_on_single_price_still_surfaces_alternative,
+        test_platform_default_stock_selector_cannot_weaken_structured_stock,
+        test_variant_jsonld_stock_blocks_platform_default_stock_override,
+        test_platform_default_stock_selector_can_override_without_variant_lock,
+        test_platform_default_stock_selector_can_fill_unknown_stock,
+        test_true_custom_stock_selector_can_override_structured_stock,
     ]
     for t in tests:
         t()

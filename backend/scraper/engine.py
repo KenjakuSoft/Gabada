@@ -223,6 +223,23 @@ def _should_replace_stock_status(
     )
 
 
+def _should_apply_stock_candidate(
+    current: Optional[str],
+    candidate: Optional[str],
+    *,
+    structured_variant_stock_locked: bool = False,
+) -> bool:
+    current = current or "unknown"
+    candidate = candidate or "unknown"
+    if (
+        structured_variant_stock_locked
+        and current != "unknown"
+        and candidate != current
+    ):
+        return False
+    return _should_replace_stock_status(current, candidate)
+
+
 def _parse_stock(raw: Optional[str]) -> str:
     if not raw:
         return "unknown"
@@ -1953,6 +1970,13 @@ def _iter_jsonld_offers(product: dict[str, Any]) -> list[dict[str, Any]]:
     return offers
 
 
+def _jsonld_has_variant_offers(product: dict[str, Any]) -> bool:
+    return any(
+        _iter_jsonld_dicts(variant.get("offers"))
+        for variant in _iter_jsonld_dicts(product.get("hasVariant"))
+    )
+
+
 def _jsonld_offer_price(offer: dict[str, Any]) -> tuple[Optional[float], Optional[str]]:
     for key in ("price", "lowPrice"):
         raw_value = offer.get(key)
@@ -2024,7 +2048,15 @@ def _extract_jsonld_product(item: dict[str, Any]) -> ScrapeResult:
 
 
 def _extract_jsonld_result_from_scripts(scripts: list[str]) -> ScrapeResult:
+    result, _ = _extract_jsonld_result_with_variant_flag_from_scripts(scripts)
+    return result
+
+
+def _extract_jsonld_result_with_variant_flag_from_scripts(
+    scripts: list[str],
+) -> tuple[ScrapeResult, bool]:
     fallback = ScrapeResult()
+    fallback_used_variant_offers = False
 
     for text in scripts:
         try:
@@ -2037,15 +2069,22 @@ def _extract_jsonld_result_from_scripts(scripts: list[str]) -> ScrapeResult:
                 continue
 
             result = _extract_jsonld_product(item)
+            used_variant_offers = _jsonld_has_variant_offers(item)
             if result.price is not None:
-                return result
+                return result, used_variant_offers
             if not fallback.title and result.title:
                 fallback = result
+                fallback_used_variant_offers = used_variant_offers
 
-    return fallback
+    return fallback, fallback_used_variant_offers
 
 
 async def _try_json_ld(page: Page) -> ScrapeResult:
+    result, _ = await _try_json_ld_with_variant_flag(page)
+    return result
+
+
+async def _try_json_ld_with_variant_flag(page: Page) -> tuple[ScrapeResult, bool]:
     scripts = await page.query_selector_all('script[type="application/ld+json"]')
     texts: list[str] = []
     for script in scripts:
@@ -2054,10 +2093,12 @@ async def _try_json_ld(page: Page) -> ScrapeResult:
         except Exception:
             continue
 
-    result = _extract_jsonld_result_from_scripts(texts)
+    result, used_variant_offers = _extract_jsonld_result_with_variant_flag_from_scripts(
+        texts,
+    )
     if result.title or result.price is not None:
         logger.info("JSON-LD hit: name=%s price=%s", result.title, result.price)
-    return result
+    return result, used_variant_offers
 
 
 # ── Strategy 2: Schema.org microdata ─────────────────────────────────────────
@@ -4492,8 +4533,58 @@ async def _try_smart_scan(page: Page) -> ScrapeResult:
 
 # ── Strategy 4: Custom selectors (user-configured override) ──────────────────
 
+def _is_platform_default_selector(
+    *,
+    platform: Optional[str],
+    field: str,
+    selector: Optional[str],
+) -> bool:
+    if not platform or not selector:
+        return False
+    defaults = _PLATFORM_SELECTORS.get(platform)
+    return bool(defaults and selector == defaults.get(field))
+
+
+def _resolve_custom_stock_status(
+    base_stock: Optional[str],
+    parsed_stock: Optional[str],
+    *,
+    platform: Optional[str],
+    stock_selector: Optional[str],
+    structured_variant_stock_locked: bool = False,
+) -> str:
+    base = base_stock or "unknown"
+    if not parsed_stock:
+        return base
+
+    # Platform defaults are broad fallbacks, not user intent. Shopify themes
+    # often leave hidden/stale variant inventory snippets in the DOM; do not let
+    # those weaker defaults turn structured OutOfStock variant data into
+    # in_stock. Truly custom per-link/profile selectors still override.
+    if _is_platform_default_selector(
+        platform=platform,
+        field="stock_status",
+        selector=stock_selector,
+    ):
+        return (
+            parsed_stock
+            if _should_apply_stock_candidate(
+                base,
+                parsed_stock,
+                structured_variant_stock_locked=structured_variant_stock_locked,
+            )
+            else base
+        )
+
+    return parsed_stock
+
+
 async def _apply_custom(
-    page: Page, config: ScrapeConfig, base: ScrapeResult
+    page: Page,
+    config: ScrapeConfig,
+    base: ScrapeResult,
+    *,
+    structured_variant_stock_locked: bool = False,
 ) -> tuple[ScrapeResult, set[str]]:
     """Apply user-supplied selectors and report which fields actually produced
     a value. Locked fields are authoritative — downstream review must not
@@ -4590,7 +4681,16 @@ async def _apply_custom(
     if sel.dealer_price and parsed_dealer is not None:
         locks.add("dealer_price")
     if sel.stock_status and parsed_stock:
-        locks.add("stock_status")
+        if not _is_platform_default_selector(
+            platform=config.platform,
+            field="stock_status",
+            selector=sel.stock_status,
+        ) or _should_apply_stock_candidate(
+            base.stock_status,
+            parsed_stock,
+            structured_variant_stock_locked=structured_variant_stock_locked,
+        ):
+            locks.add("stock_status")
 
     result = ScrapeResult(
         title=title or base.title,
@@ -4601,7 +4701,13 @@ async def _apply_custom(
         dealer_price=(
             parsed_dealer if parsed_dealer is not None else base.dealer_price
         ),
-        stock_status=parsed_stock or base.stock_status,
+        stock_status=_resolve_custom_stock_status(
+            base.stock_status,
+            parsed_stock,
+            platform=config.platform,
+            stock_selector=sel.stock_status,
+            structured_variant_stock_locked=structured_variant_stock_locked,
+        ),
         raw_price=raw_price or base.raw_price,
         raw_discounted=raw_disc or base.raw_discounted,
         raw_dealer=raw_dealer or base.raw_dealer,
@@ -5277,10 +5383,13 @@ async def scrape_with_open_page(
                 fb_result.stock_status = "unknown"
             return _normalize_scrape_result(_clear_dealer_price(fb_result))
 
-    result = await _try_json_ld(page)
+    result, used_variant_offers = await _try_json_ld_with_variant_flag(page)
     if result.price is None:
         result = await _try_microdata(page)
     structured_price_locked = result.price is not None
+    structured_variant_stock_locked = (
+        used_variant_offers and result.stock_status not in (None, "unknown")
+    )
     smart_data = await _run_smart_scan(page)
     smart = _sanitize_smart_scan_result(_smart_scan_result_from_data(smart_data), smart_data)
 
@@ -5289,7 +5398,11 @@ async def scrape_with_open_page(
             preserved_title = result.title
             result = smart
             result.title = preserved_title or smart.title
-        if _should_replace_stock_status(result.stock_status, smart.stock_status):
+        if _should_apply_stock_candidate(
+            result.stock_status,
+            smart.stock_status,
+            structured_variant_stock_locked=structured_variant_stock_locked,
+        ):
             result.stock_status = smart.stock_status
         if (
             not is_facebook_marketplace
@@ -5310,12 +5423,20 @@ async def scrape_with_open_page(
             result.raw_dealer = common.raw_dealer
         if not result.title and common.title:
             result.title = common.title
-        if _should_replace_stock_status(result.stock_status, common.stock_status):
+        if _should_apply_stock_candidate(
+            result.stock_status,
+            common.stock_status,
+            structured_variant_stock_locked=structured_variant_stock_locked,
+        ):
             result.stock_status = common.stock_status
 
     if fb_result.title and not result.title:
         result.title = fb_result.title
-    if _should_replace_stock_status(result.stock_status, fb_result.stock_status):
+    if _should_apply_stock_candidate(
+        result.stock_status,
+        fb_result.stock_status,
+        structured_variant_stock_locked=structured_variant_stock_locked,
+    ):
         result.stock_status = fb_result.stock_status
 
     sel = config.selectors
@@ -5325,7 +5446,12 @@ async def scrape_with_open_page(
     ])
     user_locks: set[str] = set()
     if has_custom:
-        result, user_locks = await _apply_custom(page, config, result)
+        result, user_locks = await _apply_custom(
+            page,
+            config,
+            result,
+            structured_variant_stock_locked=structured_variant_stock_locked,
+        )
     result = _review_result_with_smart_scan(
         result,
         smart,

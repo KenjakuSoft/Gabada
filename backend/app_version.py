@@ -1,6 +1,6 @@
 APP_NAME = "Gabada"
-APP_VERSION = "0.6.6"
-APP_REPOSITORY = "Xx-LiDAF-xX/Gabada"
+APP_VERSION = "0.6.7"
+APP_REPOSITORY = "KenjakuSoft/Gabada"
 
 
 def normalized_version(value: str) -> str:
