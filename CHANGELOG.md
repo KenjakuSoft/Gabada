@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.6.6] — 2026-05-10
+
+### Fixed
+- **Shopify `ProductGroup` JSON-LD variants now report stock correctly.** Some Shopify storefronts, including `simplytek.lk`, publish the product as a top-level `ProductGroup` and put the real `Offer` records under `hasVariant[].offers`. Gabada now aggregates those variant offers, uses the lowest variant price, and combines variant availability before falling through to smart scan. This fixes sold-out variant groups being misread as `in_stock` because the smart scan saw disabled "Add to cart" copy.
+
+### Changed
+- App version bumped to **0.6.6**.
+
+### Tests
+- Added `backend/tests/test_jsonld_product_group.py` covering all-out-of-stock variant groups, mixed availability, preorder precedence, plain `Product.offers`, `AggregateOffer.lowPrice`, and the real SimplyTek DualSense payload shape. Full backend suite: 97 tests.
+
 ## [0.6.5] — 2026-05-10
 
 This release rolls up everything previously staged on `main` as 0.6.3 (security hardening) and 0.6.4 (axios bump) together with the new collapsible Activity feed. Versions 0.6.3 and 0.6.4 were never tagged separately — install 0.6.5 to receive all three sets of changes.
