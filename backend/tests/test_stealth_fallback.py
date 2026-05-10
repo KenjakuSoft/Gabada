@@ -41,14 +41,22 @@ def test_storage_state_cookies_returns_empty_when_path_unset() -> None:
 
 
 def test_storage_state_cookies_returns_empty_when_file_missing(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = ScrapeConfig(storage_state_path=str(tmp_path / "does-not-exist.json"))
+    monkeypatch.setenv("GABADA_DATA_DIR", str(tmp_path))
+    sessions = tmp_path / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    config = ScrapeConfig(storage_state_path=str(sessions / "does-not-exist.json"))
     assert stealth._storage_state_cookies(config) == []
 
 
-def test_storage_state_cookies_extracts_cookies_array(tmp_path: Path) -> None:
-    state_file = tmp_path / "state.json"
+def test_storage_state_cookies_extracts_cookies_array(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GABADA_DATA_DIR", str(tmp_path))
+    sessions = tmp_path / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    state_file = sessions / "state.json"
     state_file.write_text(
         '{"cookies": [{"name": "sid", "value": "abc", "domain": ".example.com", '
         '"path": "/"}], "origins": []}',
@@ -58,3 +66,17 @@ def test_storage_state_cookies_extracts_cookies_array(tmp_path: Path) -> None:
     cookies = stealth._storage_state_cookies(config)
     assert len(cookies) == 1
     assert cookies[0]["name"] == "sid"
+
+
+def test_storage_state_cookies_rejects_path_traversal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Paths that escape sessions_dir must be ignored, not silently followed."""
+    monkeypatch.setenv("GABADA_DATA_DIR", str(tmp_path / "data"))
+    outside = tmp_path / "outside.json"
+    outside.write_text(
+        '{"cookies": [{"name": "leak", "value": "x", "domain": "ex.com", "path": "/"}]}',
+        encoding="utf-8",
+    )
+    config = ScrapeConfig(storage_state_path=str(outside))
+    assert stealth._storage_state_cookies(config) == []
