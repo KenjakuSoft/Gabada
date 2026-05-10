@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.6.5] — 2026-05-10
+
+### Changed
+- **Activity feed is now collapsible per product and per store.** Each product row defaults to a compact one-line header (product name, store count, change count, primary change badges, latest time) with a chevron toggle that mirrors the HomePage's Details pattern. Expanding a product reveals a list of per-store sub-rows that are themselves collapsible — clicking a store header reveals only that store's individual change lines. With many stores and many changes the previous always-expanded view was hard to scan; the new layout collapses to one line per product by default and lets the user drill in only where they care.
+- **Expand-all / Collapse-all controls** added to the feed header alongside the existing search input. Typing in the search box also auto-opens the matching products and stores so hits are visible without an extra click; manual toggles override the auto-expand and survive subsequent keystrokes.
+
+### Added
+- `ActivityEntry.store_id` is now returned by `/api/activity/` and exposed in the frontend `ActivityEntry` type so the UI can group by store without colliding on identical store names.
+
+### Changed
+- App version bumped to **0.6.5**.
+
 ## [0.6.4] — 2026-05-10
 
 ### Security

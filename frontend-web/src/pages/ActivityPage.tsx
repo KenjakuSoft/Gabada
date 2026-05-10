@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom'
 import {
   Activity as ActivityIcon,
   ArrowRight,
+  ChevronDown,
+  ChevronRight,
   CircleDot,
   Radio,
   Store as StoreIcon,
@@ -63,11 +65,19 @@ interface ChangePresentation {
   variant: 'success' | 'warning' | 'info' | 'destructive' | 'outline'
 }
 
+interface ActivityStoreGroup {
+  storeId: number
+  storeName: string
+  latestAt: string
+  entries: ActivityEntry[]
+}
+
 interface ActivityGroup {
   productId: number
   productName: string
   latestAt: string
   entries: ActivityEntry[]
+  stores: ActivityStoreGroup[]
 }
 
 const CHANGE_PRESENTATION: Record<NormalizedChangeType, ChangePresentation> = {
@@ -166,6 +176,93 @@ export function ActivityPage() {
   )
   const hasSearch = search.trim().length > 0
 
+  // Collapsible state. Track explicit overrides separately from the
+  // derived "default open when searching" so a user toggle survives the
+  // next keystroke without locking the user out of the search-driven
+  // auto-expand behavior the next time they clear the box.
+  const [openProducts, setOpenProducts] = useState<Set<number>>(() => new Set())
+  const [closedProducts, setClosedProducts] = useState<Set<number>>(
+    () => new Set(),
+  )
+  const [openStores, setOpenStores] = useState<Set<string>>(() => new Set())
+  const [closedStores, setClosedStores] = useState<Set<string>>(() => new Set())
+
+  const toggleProduct = (productId: number, defaultOpen: boolean) => {
+    const isOpen = openProducts.has(productId)
+      ? true
+      : closedProducts.has(productId)
+        ? false
+        : defaultOpen
+    if (isOpen) {
+      setClosedProducts((s) => new Set(s).add(productId))
+      setOpenProducts((s) => {
+        if (!s.has(productId)) return s
+        const next = new Set(s)
+        next.delete(productId)
+        return next
+      })
+    } else {
+      setOpenProducts((s) => new Set(s).add(productId))
+      setClosedProducts((s) => {
+        if (!s.has(productId)) return s
+        const next = new Set(s)
+        next.delete(productId)
+        return next
+      })
+    }
+  }
+
+  const toggleStore = (key: string, defaultOpen: boolean) => {
+    const isOpen = openStores.has(key)
+      ? true
+      : closedStores.has(key)
+        ? false
+        : defaultOpen
+    if (isOpen) {
+      setClosedStores((s) => new Set(s).add(key))
+      setOpenStores((s) => {
+        if (!s.has(key)) return s
+        const next = new Set(s)
+        next.delete(key)
+        return next
+      })
+    } else {
+      setOpenStores((s) => new Set(s).add(key))
+      setClosedStores((s) => {
+        if (!s.has(key)) return s
+        const next = new Set(s)
+        next.delete(key)
+        return next
+      })
+    }
+  }
+
+  const expandAll = () => {
+    setOpenProducts(new Set(filteredGroups.map((g) => g.productId)))
+    setClosedProducts(new Set())
+    setOpenStores(
+      new Set(
+        filteredGroups.flatMap((g) =>
+          g.stores.map((s) => storeKey(g.productId, s.storeId)),
+        ),
+      ),
+    )
+    setClosedStores(new Set())
+  }
+
+  const collapseAll = () => {
+    setOpenProducts(new Set())
+    setClosedProducts(new Set(filteredGroups.map((g) => g.productId)))
+    setOpenStores(new Set())
+    setClosedStores(
+      new Set(
+        filteredGroups.flatMap((g) =>
+          g.stores.map((s) => storeKey(g.productId, s.storeId)),
+        ),
+      ),
+    )
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -242,27 +339,49 @@ export function ActivityPage() {
               }
               icon={<ActivityIcon className="h-4 w-4" />}
               action={
-                <div className="relative w-full max-w-md">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search product, store, change, or stock"
-                    className="pl-9 pr-10"
-                    aria-label="Search activity"
-                  />
-                  {hasSearch ? (
+                <div className="flex w-full flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-end">
+                  <div className="relative w-full sm:max-w-md">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Search product, store, change, or stock"
+                      className="pl-9 pr-10"
+                      aria-label="Search activity"
+                    />
+                    {hasSearch ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 hover:translate-y-[-50%]"
+                        onClick={() => setSearch('')}
+                        aria-label="Clear activity search"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
                     <Button
                       type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 hover:translate-y-[-50%]"
-                      onClick={() => setSearch('')}
-                      aria-label="Clear activity search"
+                      variant="outline"
+                      size="sm"
+                      onClick={expandAll}
+                      disabled={filteredGroups.length === 0}
                     >
-                      <X className="h-3.5 w-3.5" />
+                      Expand all
                     </Button>
-                  ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={collapseAll}
+                      disabled={filteredGroups.length === 0}
+                    >
+                      Collapse all
+                    </Button>
+                  </div>
                 </div>
               }
             />
@@ -272,17 +391,37 @@ export function ActivityPage() {
               </div>
             ) : (
               <ul className="gbd-stagger mt-3 space-y-1.5">
-                {filteredGroups.map((group) => (
-                  <ActivityProductRow
-                    key={group.productId}
-                    group={group}
-                    symbol={symbol}
-                    displayMode={priceDisplayMode}
-                    locale={locale}
-                    localCurrency={localCurrency}
-                    exchangeRates={exchangeRates}
-                  />
-                ))}
+                {filteredGroups.map((group) => {
+                  const productOpen = openProducts.has(group.productId)
+                    ? true
+                    : closedProducts.has(group.productId)
+                      ? false
+                      : hasSearch
+                  return (
+                    <ActivityProductRow
+                      key={group.productId}
+                      group={group}
+                      open={productOpen}
+                      onToggle={() => toggleProduct(group.productId, hasSearch)}
+                      isStoreOpen={(storeId) => {
+                        const key = storeKey(group.productId, storeId)
+                        return openStores.has(key)
+                          ? true
+                          : closedStores.has(key)
+                            ? false
+                            : hasSearch
+                      }}
+                      onToggleStore={(storeId) =>
+                        toggleStore(storeKey(group.productId, storeId), hasSearch)
+                      }
+                      symbol={symbol}
+                      displayMode={priceDisplayMode}
+                      locale={locale}
+                      localCurrency={localCurrency}
+                      exchangeRates={exchangeRates}
+                    />
+                  )
+                })}
               </ul>
             )}
           </BentoTile>
@@ -294,6 +433,10 @@ export function ActivityPage() {
 
 interface ActivityProductRowProps {
   group: ActivityGroup
+  open: boolean
+  onToggle: () => void
+  isStoreOpen: (storeId: number) => boolean
+  onToggleStore: (storeId: number) => void
   symbol: string
   displayMode: PriceDisplayMode
   locale: string
@@ -303,6 +446,10 @@ interface ActivityProductRowProps {
 
 function ActivityProductRow({
   group,
+  open,
+  onToggle,
+  isStoreOpen,
+  onToggleStore,
   symbol,
   displayMode,
   locale,
@@ -310,36 +457,56 @@ function ActivityProductRow({
   exchangeRates,
 }: ActivityProductRowProps) {
   const live = useLiveTime(group.latestAt)
-  const timezone = useTimezone()
   const primaryChange = normalizeChangeType(group.entries[0]?.change_type ?? 'unknown')
   const changePresentation = CHANGE_PRESENTATION[primaryChange]
   const ChangeIcon = changePresentation.icon
   const changes = uniqueChanges(group.entries)
   const hasDrop = changes.includes('price_down')
   const hasRise = changes.includes('price_up')
+  const storeCount = group.stores.length
 
   return (
     <li
       className={cn(
-        'rounded-md border border-border bg-background/40 px-3 py-3 transition-colors hover:bg-accent/25',
+        'rounded-md border border-border bg-background/40 transition-colors hover:bg-accent/25',
         hasDrop && 'border-emerald-500/20',
         hasRise && 'border-destructive/20',
       )}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <Link
-            to={`/product/${group.productId}`}
-            className="line-clamp-1 text-sm font-medium hover:underline"
+      <div className="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-label={open ? 'Collapse product' : 'Expand product'}
+            className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
           >
-            {group.productName}
-          </Link>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <StoreIcon className="h-3 w-3" />
-              {group.entries.length} {group.entries.length === 1 ? 'change' : 'changes'}
-            </span>
-            <span>{live}</span>
+            {open ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </button>
+          <div className="min-w-0">
+            <Link
+              to={`/product/${group.productId}`}
+              className="line-clamp-1 text-sm font-medium hover:underline"
+            >
+              {group.productName}
+            </Link>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1">
+                <StoreIcon className="h-3 w-3" />
+                {storeCount} {storeCount === 1 ? 'store' : 'stores'}
+              </span>
+              <span>·</span>
+              <span>
+                {group.entries.length}{' '}
+                {group.entries.length === 1 ? 'change' : 'changes'}
+              </span>
+              <span>{live}</span>
+            </div>
           </div>
         </div>
 
@@ -373,22 +540,126 @@ function ActivityProductRow({
         </div>
       </div>
 
-      <div className="mt-3 divide-y divide-border/70 rounded-md border border-border/70 bg-card/40">
-        {group.entries.map((entry) => (
-          <ActivityChangeLine
-            key={entry.id}
-            entry={entry}
-            symbol={symbol}
-            timezone={timezone}
-            displayMode={displayMode}
-            locale={locale}
-            localCurrency={localCurrency}
-            exchangeRates={exchangeRates}
-          />
-        ))}
-      </div>
+      {open ? (
+        <div className="gbd-expand space-y-1.5 border-t border-dashed border-border/70 px-3 pb-3 pt-2 sm:px-4">
+          {group.stores.map((store) => (
+            <ActivityStoreRow
+              key={store.storeId}
+              store={store}
+              open={isStoreOpen(store.storeId)}
+              onToggle={() => onToggleStore(store.storeId)}
+              symbol={symbol}
+              displayMode={displayMode}
+              locale={locale}
+              localCurrency={localCurrency}
+              exchangeRates={exchangeRates}
+            />
+          ))}
+        </div>
+      ) : null}
     </li>
   )
+}
+
+interface ActivityStoreRowProps {
+  store: ActivityStoreGroup
+  open: boolean
+  onToggle: () => void
+  symbol: string
+  displayMode: PriceDisplayMode
+  locale: string
+  localCurrency: string
+  exchangeRates: Record<string, number>
+}
+
+function ActivityStoreRow({
+  store,
+  open,
+  onToggle,
+  symbol,
+  displayMode,
+  locale,
+  localCurrency,
+  exchangeRates,
+}: ActivityStoreRowProps) {
+  const timezone = useTimezone()
+  const live = useLiveTime(store.latestAt)
+  const primaryChange = normalizeChangeType(
+    store.entries[0]?.change_type ?? 'unknown',
+  )
+  const presentation = CHANGE_PRESENTATION[primaryChange]
+  const ChangeIcon = presentation.icon
+  const changes = uniqueChanges(store.entries)
+
+  return (
+    <div className="rounded-md border border-border/70 bg-card/40">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full flex-wrap items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-accent/30"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <StoreIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-sm font-medium">{store.storeName}</span>
+          <span className="text-[11px] text-muted-foreground">
+            · {store.entries.length}{' '}
+            {store.entries.length === 1 ? 'change' : 'changes'}
+          </span>
+          <span className="text-[11px] text-muted-foreground">{live}</span>
+        </div>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <Badge
+            variant={presentation.variant}
+            className="flex items-center gap-1.5 whitespace-nowrap text-[10px]"
+          >
+            <ChangeIcon className="h-3 w-3" />
+            {presentation.label}
+          </Badge>
+          {changes.slice(1, MAX_CHANGE_BADGES).map((change) => {
+            const p = CHANGE_PRESENTATION[change]
+            const Icon = p.icon
+            return (
+              <Badge
+                key={change}
+                variant={p.variant}
+                className="flex items-center gap-1.5 whitespace-nowrap text-[10px]"
+              >
+                <Icon className="h-3 w-3" />
+                {p.label}
+              </Badge>
+            )
+          })}
+        </div>
+      </button>
+
+      {open ? (
+        <div className="gbd-expand divide-y divide-border/70 border-t border-dashed border-border/70">
+          {store.entries.map((entry) => (
+            <ActivityChangeLine
+              key={entry.id}
+              entry={entry}
+              symbol={symbol}
+              timezone={timezone}
+              displayMode={displayMode}
+              locale={locale}
+              localCurrency={localCurrency}
+              exchangeRates={exchangeRates}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function storeKey(productId: number, storeId: number): string {
+  return `${productId}:${storeId}`
 }
 
 interface ActivityChangeLineProps {
@@ -606,6 +877,7 @@ function groupActivity(entries: ActivityEntry[]): ActivityGroup[] {
         productName: entry.product_name,
         latestAt: entry.scraped_at,
         entries: [entry],
+        stores: [],
       })
       continue
     }
@@ -619,9 +891,50 @@ function groupActivity(entries: ActivityEntry[]): ActivityGroup[] {
   }
 
   return Array.from(byProduct.values())
-    .map((group) => ({
-      ...group,
-      entries: [...group.entries].sort(
+    .map((group) => {
+      const sortedEntries = [...group.entries].sort(
+        (a, b) =>
+          (parseApiDate(b.scraped_at)?.getTime() ?? 0) -
+          (parseApiDate(a.scraped_at)?.getTime() ?? 0),
+      )
+      return {
+        ...group,
+        entries: sortedEntries,
+        stores: groupByStore(sortedEntries),
+      }
+    })
+    .sort(
+      (a, b) =>
+        (parseApiDate(b.latestAt)?.getTime() ?? 0) -
+        (parseApiDate(a.latestAt)?.getTime() ?? 0),
+    )
+}
+
+function groupByStore(entries: ActivityEntry[]): ActivityStoreGroup[] {
+  const byStore = new Map<number, ActivityStoreGroup>()
+  for (const entry of entries) {
+    const current = byStore.get(entry.store_id)
+    if (!current) {
+      byStore.set(entry.store_id, {
+        storeId: entry.store_id,
+        storeName: entry.store_name,
+        latestAt: entry.scraped_at,
+        entries: [entry],
+      })
+      continue
+    }
+    current.entries.push(entry)
+    const entryTime = parseApiDate(entry.scraped_at)?.getTime() ?? 0
+    const currentTime = parseApiDate(current.latestAt)?.getTime() ?? 0
+    if (entryTime > currentTime) {
+      current.latestAt = entry.scraped_at
+    }
+  }
+
+  return Array.from(byStore.values())
+    .map((store) => ({
+      ...store,
+      entries: [...store.entries].sort(
         (a, b) =>
           (parseApiDate(b.scraped_at)?.getTime() ?? 0) -
           (parseApiDate(a.scraped_at)?.getTime() ?? 0),

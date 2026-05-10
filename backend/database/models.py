@@ -264,6 +264,7 @@ class ActivityEntry(BaseModel):
     id: int
     product_id: int
     product_name: str
+    store_id: int
     store_name: str
     change_type: str
     price: Optional[float] = None
