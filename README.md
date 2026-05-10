@@ -5,9 +5,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/KenjakuSoft/Gabada?label=release&style=for-the-badge"></a>
-  <a href="https://github.com/KenjakuSoft/Gabada/actions/workflows/release.yml"><img alt="Release workflow" src="https://img.shields.io/github/actions/workflow/status/KenjakuSoft/Gabada/release.yml?branch=main&label=release&style=for-the-badge"></a>
-  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/github/license/KenjakuSoft/Gabada?style=for-the-badge"></a>
+  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v0.6.6-2F80ED?style=for-the-badge"></a>
+  <a href="https://github.com/KenjakuSoft/Gabada/actions/workflows/release.yml"><img alt="Release workflow" src="https://img.shields.io/badge/release%20workflow-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white&style=for-the-badge"></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-34A853?style=for-the-badge"></a>
 </p>
 
 <p align="center">
