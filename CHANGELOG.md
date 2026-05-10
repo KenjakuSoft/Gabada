@@ -11,37 +11,25 @@ Nothing yet.
 
 ## [0.6.5] — 2026-05-10
 
-### Changed
-- **Activity feed is now collapsible per product and per store.** Each product row defaults to a compact one-line header (product name, store count, change count, primary change badges, latest time) with a chevron toggle that mirrors the HomePage's Details pattern. Expanding a product reveals a list of per-store sub-rows that are themselves collapsible — clicking a store header reveals only that store's individual change lines. With many stores and many changes the previous always-expanded view was hard to scan; the new layout collapses to one line per product by default and lets the user drill in only where they care.
-- **Expand-all / Collapse-all controls** added to the feed header alongside the existing search input. Typing in the search box also auto-opens the matching products and stores so hits are visible without an extra click; manual toggles override the auto-expand and survive subsequent keystrokes.
-
-### Added
-- `ActivityEntry.store_id` is now returned by `/api/activity/` and exposed in the frontend `ActivityEntry` type so the UI can group by store without colliding on identical store names.
-
-### Changed
-- App version bumped to **0.6.5**.
-
-## [0.6.4] — 2026-05-10
-
-### Security
-- **Bumped `axios` to ^1.15.2** in `frontend-web/package.json` (was `^1.15.0`, lockfile resolved to 1.15.0). Closes 8 GitHub Dependabot alerts (2 high, 5 moderate, 1 low) covering header injection via prototype pollution, response/request hijacking, CRLF injection in multipart bodies, `no_proxy` SSRF bypass, JSON response tampering via `parseReviver`, `maxBodyLength` and `maxContentLength` bypasses on streamed adapters, and null-byte injection in `AxiosURLSearchParams`. `npm audit` now reports 0 vulnerabilities.
-
-### Changed
-- App version bumped to **0.6.4**.
-
-## [0.6.3] — 2026-05-10
+This release rolls up everything previously staged on `main` as 0.6.3 (security hardening) and 0.6.4 (axios bump) together with the new collapsible Activity feed. Versions 0.6.3 and 0.6.4 were never tagged separately — install 0.6.5 to receive all three sets of changes.
 
 ### Security
 - **Path-confinement on Playwright `storage_state` files.** `resolve_storage_state_path` now rejects absolute paths and `..` traversal that escape the Gabada sessions directory (or `backend/` in source checkouts). Previously a request to `/api/scraper/login-session` could write a `storage_state.json` to any path the process could touch, with parent directories auto-created — an arbitrary-file-write primitive. The save path is also validated upfront on the endpoint so misuse surfaces as a 400 instead of a mid-flow exception.
 - **DNS-rebinding defense on `/api/*`.** The local API guard now requires the `Host` header to point at a loopback interface on an allowed port. Without this, a rebound hostname (`evil.example` → `127.0.0.1`) could reach the API via clients that omit `Origin` and `Sec-Fetch-Site` (legacy browsers, some XHR shapes). `Sec-Fetch-Site` is now an allowlist (`same-origin` / `same-site` / `none`) instead of a single deny rule.
 - **Security headers on every response.** `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and a `Permissions-Policy` lockdown are applied through the API middleware, blocking clickjacking and tightening defaults across the SPA.
 - **URL scheme allowlist for scraper inputs.** `/api/scraper/probe`, `/selector-lab`, `/selector-lab/test`, and `/login-session` now reject anything that isn't `http://` or `https://`. Previously Playwright would happily load `file:///etc/passwd`, `javascript:`, or `data:` URLs supplied by a caller.
+- **Bumped `axios` to ^1.15.2** in `frontend-web/package.json` (was `^1.15.0`, lockfile resolved to 1.15.0). Closes 8 GitHub Dependabot alerts (2 high, 5 moderate, 1 low) covering header injection via prototype pollution, response/request hijacking, CRLF injection in multipart bodies, `no_proxy` SSRF bypass, JSON response tampering via `parseReviver`, `maxBodyLength` and `maxContentLength` bypasses on streamed adapters, and null-byte injection in `AxiosURLSearchParams`. `npm audit` now reports 0 vulnerabilities.
+
+### Changed
+- **Activity feed is now collapsible per product and per store.** Each product row defaults to a compact one-line header (product name, store count, change count, primary change badges, latest time) with a chevron toggle that mirrors the HomePage's Details pattern. Expanding a product reveals a list of per-store sub-rows that are themselves collapsible — clicking a store header reveals only that store's individual change lines. With many stores and many changes the previous always-expanded view was hard to scan; the new layout collapses to one line per product by default and lets the user drill in only where they care.
+- **Expand-all / Collapse-all controls** added to the feed header alongside the existing search input. Typing in the search box also auto-opens the matching products and stores so hits are visible without an extra click; manual toggles override the auto-expand and survive subsequent keystrokes.
+- App version bumped to **0.6.5**.
+
+### Added
+- `ActivityEntry.store_id` is now returned by `/api/activity/` and exposed in the frontend `ActivityEntry` type so the UI can group by store without colliding on identical store names.
 
 ### Tests
 - Added `backend/tests/test_security_hardening.py` (14 tests) covering path-traversal rejection, Host-header validation, security-header presence, cross-origin/cross-site rejection, and URL-scheme guards. Updated `test_stealth_fallback.py` for the new path-confinement and added an explicit traversal-rejection case. Full backend suite: 90 tests.
-
-### Changed
-- App version bumped to **0.6.3** for the security hardening release.
 
 ## [0.6.2] — 2026-05-07
 
