@@ -61,6 +61,7 @@ logger = logging.getLogger(__name__)
 API_PREFIX = "/api"
 
 _LOCAL_BROWSER_ORIGIN_PORTS = {5173, *range(8000, 8011)}
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
 def _build_allowed_browser_origins() -> list[str]:
@@ -78,6 +79,11 @@ def _build_allowed_browser_origins() -> list[str]:
 
 
 _ALLOWED_BROWSER_ORIGINS = _build_allowed_browser_origins()
+_EXTRA_ALLOWED_HOSTS: set[str] = set()
+for _origin in _ALLOWED_BROWSER_ORIGINS:
+    _parsed = urlparse(_origin)
+    if _parsed.hostname:
+        _EXTRA_ALLOWED_HOSTS.add(_parsed.hostname.lower())
 
 
 def _is_allowed_browser_origin(origin: str) -> bool:
@@ -89,6 +95,39 @@ def _is_allowed_browser_origin(origin: str) -> bool:
         and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
         and parsed.port in _LOCAL_BROWSER_ORIGIN_PORTS
     )
+
+
+def _is_allowed_host_header(host_header: str | None) -> bool:
+    """Validate ``Host`` so DNS-rebinding can't reach the API.
+
+    A page on ``http://evil.example`` whose DNS later resolves to ``127.0.0.1``
+    would send ``Host: evil.example``; that is rejected here even when no
+    ``Origin`` header is present. Empty/missing host is treated as untrusted.
+    """
+    if not host_header:
+        return False
+    raw = host_header.strip().lower()
+    # Strip user-info and trailing slashes (defensive, Host shouldn't carry them).
+    raw = raw.split("@", 1)[-1].rstrip("/")
+    if raw.startswith("["):
+        bracket_end = raw.find("]")
+        if bracket_end == -1:
+            return False
+        host = raw[1:bracket_end]
+        port_str = raw[bracket_end + 1 :].lstrip(":")
+    else:
+        host, _, port_str = raw.partition(":")
+    if host not in _LOCAL_HOSTS and host not in _EXTRA_ALLOWED_HOSTS:
+        return False
+    if not port_str:
+        return True
+    try:
+        port = int(port_str)
+    except ValueError:
+        return False
+    if host in _EXTRA_ALLOWED_HOSTS and host not in _LOCAL_HOSTS:
+        return True
+    return port in _LOCAL_BROWSER_ORIGIN_PORTS
 
 
 @asynccontextmanager
@@ -117,9 +156,41 @@ app.add_middleware(
 )
 
 
+_SECURITY_HEADERS = {
+    # Block this app from being framed by a third-party site so a hostile
+    # page cannot mount a clickjacking attack against the local UI.
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": "frame-ancestors 'none'",
+    # Don't sniff response types — the SPA serves its own MIME types.
+    "X-Content-Type-Options": "nosniff",
+    # Strip referrers so URLs the user is browsing locally don't leak to
+    # outbound resources the scraper happens to load.
+    "Referrer-Policy": "no-referrer",
+    # Lock down powerful APIs the local UI never needs.
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+
+
 @app.middleware("http")
 async def block_cross_origin_api_requests(request: Request, call_next):
     if request.url.path.startswith(API_PREFIX):
+        # 1) Host header must point at a local interface. Without this a
+        # rebound DNS name (evil.example -> 127.0.0.1) could reach the API
+        # using requests that omit Origin / Sec-Fetch-Site (e.g. legacy
+        # browsers, certain XHR shapes).
+        if not _is_allowed_host_header(request.headers.get("host")):
+            logger.warning(
+                "Blocked API request with untrusted Host header: %r",
+                request.headers.get("host"),
+            )
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Untrusted Host header"},
+            )
+
+        # 2) If Origin is present, it must be one of ours. Browsers always
+        # set Origin for cross-origin POST/PUT/DELETE requests, so this
+        # blocks classic CSRF.
         origin = request.headers.get("origin")
         if origin and not _is_allowed_browser_origin(origin):
             logger.warning("Blocked cross-origin API request from %s", origin)
@@ -128,14 +199,27 @@ async def block_cross_origin_api_requests(request: Request, call_next):
                 content={"detail": "Cross-origin API requests are not allowed"},
             )
 
-        if request.headers.get("sec-fetch-site") == "cross-site":
-            logger.warning("Blocked cross-site API request without trusted origin")
+        # 3) Sec-Fetch-Site is set by all modern browsers. Reject anything
+        # that isn't first-party. ``none`` is the user typing the URL or
+        # hitting it from a bookmark and is allowed.
+        sec_fetch_site = request.headers.get("sec-fetch-site")
+        if sec_fetch_site and sec_fetch_site not in (
+            "same-origin",
+            "same-site",
+            "none",
+        ):
+            logger.warning(
+                "Blocked cross-site API request: sec-fetch-site=%s", sec_fetch_site
+            )
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Cross-origin API requests are not allowed"},
             )
 
-    return await call_next(request)
+    response = await call_next(request)
+    for header, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    return response
 
 app.include_router(categories.router, prefix=API_PREFIX)
 app.include_router(products.router, prefix=API_PREFIX)

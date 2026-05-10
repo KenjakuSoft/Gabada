@@ -1,6 +1,7 @@
 import json
 import logging
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -38,6 +39,28 @@ _SELECTOR_FIELDS = (
     "stock_status",
     "image",
 )
+
+_ALLOWED_SCRAPE_SCHEMES = {"http", "https"}
+
+
+def _validate_scrape_url(url: str) -> str:
+    """Reject non-http(s) URLs (file://, javascript:, data:, ...).
+
+    The scraper hands ``url`` to Playwright. Without this guard, a request
+    with ``file:///etc/passwd`` would let a hostile caller exfiltrate local
+    files via the engine's response capture, and ``javascript:`` URLs would
+    execute in the launched page context.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="url is required")
+    parsed = urlparse(raw)
+    if parsed.scheme.lower() not in _ALLOWED_SCRAPE_SCHEMES or not parsed.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="url must be a fully qualified http:// or https:// URL",
+        )
+    return raw
 
 
 ScrapeRunSummary = dict[str, object]
@@ -390,6 +413,7 @@ async def probe_url(request: ProbeRequest) -> ProbeResponse:
     extracted right now. Use this to debug why a site scrapes incorrectly
     before wiring it up as a product_store.
     """
+    request.url = _validate_scrape_url(request.url)
     config, session_note = await _diagnostic_config(request)
     try:
         response = await probe(request.url, config)
@@ -514,6 +538,7 @@ async def _resolve_profile_hostname(
 @router.post("/selector-lab", response_model=SelectorLabResponse)
 async def selector_lab(request: SelectorLabRequest) -> SelectorLabResponse:
     """Inspect a product page and return selector candidates for manual mapping."""
+    request.url = _validate_scrape_url(request.url)
     try:
         config, session_note = await _diagnostic_config(request)
         response = await inspect_selectors(request.url, config)
@@ -535,6 +560,7 @@ async def selector_lab_test(request: SelectorLabTestRequest) -> ScrapeResult:
     values they expected, without having to commit them to the
     product_store row first.
     """
+    request.url = _validate_scrape_url(request.url)
     try:
         config, _ = await _diagnostic_config(
             request,
@@ -815,14 +841,27 @@ async def create_login_session(request: LoginSessionRequest) -> dict:
     `scrape_config.storage_state_path` at the saved file to scrape
     behind-login prices (e.g. dealer pricing).
     """
+    safe_url = _validate_scrape_url(request.url)
+    # ``resolve_storage_state_path`` (called inside ``save_login_state``) now
+    # rejects paths that escape the sessions directory. Surface that as a 400
+    # instead of waiting for the engine to throw mid-flow.
+    from app_paths import resolve_storage_state_path
+
+    try:
+        resolve_storage_state_path(request.save_path, for_write=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     try:
         result = await save_login_state(
-            url=request.url,
+            url=safe_url,
             save_path=request.save_path,
             headless=request.headless,
             wait_seconds=request.wait_seconds,
         )
         return {"status": "ok", **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
-        logger.error("login-session failed for %s: %s", request.url, exc)
+        logger.error("login-session failed for %s: %s", safe_url, exc)
         raise HTTPException(status_code=500, detail=f"Login session failed: {exc}")

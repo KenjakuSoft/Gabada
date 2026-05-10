@@ -88,19 +88,50 @@ def frontend_dist_dir() -> Path:
     return repo_root() / "frontend-web" / "dist"
 
 
+def _allowed_storage_state_bases() -> list[Path]:
+    """Allowed base dirs for Playwright storage_state files.
+
+    - ``sessions_dir()`` — preferred location in all modes; honors
+      ``GABADA_DATA_DIR`` overrides.
+    - ``backend_dir()`` in source checkouts — preserves backwards
+      compatibility with relative paths historically resolved against the
+      backend directory (e.g. ``"stores/store-1-login.json"``).
+    """
+    bases: list[Path] = [sessions_dir().resolve()]
+    if not is_frozen():
+        bases.append(backend_dir().resolve())
+    return bases
+
+
 def resolve_storage_state_path(value: str, *, for_write: bool = False) -> Path:
+    """Resolve a Playwright ``storage_state`` path safely.
+
+    Paths are confined to ``sessions_dir()`` (and, in source checkouts,
+    ``backend_dir()`` for backwards compatibility). Absolute paths and
+    ``..`` traversal that escape every allowed base are rejected so a
+    hostile request cannot use this primitive to read or overwrite
+    arbitrary files (e.g. SSH keys, system DLLs, the live DB).
+    """
     raw = (value or "").strip()
     if not raw:
         raise ValueError("Path is required")
 
     path = Path(raw).expanduser()
-    if not path.is_absolute():
-        base = sessions_dir() if is_frozen() else backend_dir()
-        path = base / path
-    resolved = path.resolve()
+    bases = _allowed_storage_state_bases()
+    primary_base = bases[0]
+    if path.is_absolute():
+        candidate = path.resolve()
+    else:
+        candidate = (primary_base / path).resolve()
+
+    if not any(candidate.is_relative_to(base) for base in bases):
+        raise ValueError(
+            "storage_state_path must stay inside the Gabada sessions directory"
+        )
+
     if for_write:
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-    return resolved
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+    return candidate
 
 
 def configure_runtime_environment() -> None:

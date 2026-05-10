@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.6.3] — 2026-05-10
+
+### Security
+- **Path-confinement on Playwright `storage_state` files.** `resolve_storage_state_path` now rejects absolute paths and `..` traversal that escape the Gabada sessions directory (or `backend/` in source checkouts). Previously a request to `/api/scraper/login-session` could write a `storage_state.json` to any path the process could touch, with parent directories auto-created — an arbitrary-file-write primitive. The save path is also validated upfront on the endpoint so misuse surfaces as a 400 instead of a mid-flow exception.
+- **DNS-rebinding defense on `/api/*`.** The local API guard now requires the `Host` header to point at a loopback interface on an allowed port. Without this, a rebound hostname (`evil.example` → `127.0.0.1`) could reach the API via clients that omit `Origin` and `Sec-Fetch-Site` (legacy browsers, some XHR shapes). `Sec-Fetch-Site` is now an allowlist (`same-origin` / `same-site` / `none`) instead of a single deny rule.
+- **Security headers on every response.** `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and a `Permissions-Policy` lockdown are applied through the API middleware, blocking clickjacking and tightening defaults across the SPA.
+- **URL scheme allowlist for scraper inputs.** `/api/scraper/probe`, `/selector-lab`, `/selector-lab/test`, and `/login-session` now reject anything that isn't `http://` or `https://`. Previously Playwright would happily load `file:///etc/passwd`, `javascript:`, or `data:` URLs supplied by a caller.
+
+### Tests
+- Added `backend/tests/test_security_hardening.py` (14 tests) covering path-traversal rejection, Host-header validation, security-header presence, cross-origin/cross-site rejection, and URL-scheme guards. Updated `test_stealth_fallback.py` for the new path-confinement and added an explicit traversal-rejection case. Full backend suite: 90 tests.
+
+### Changed
+- App version bumped to **0.6.3** for the security hardening release.
+
 ## [0.6.2] — 2026-05-07
 
 ### Added
