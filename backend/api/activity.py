@@ -10,6 +10,7 @@ _ACTIVITY_QUERY = """
         pl.id,
         p.id          AS product_id,
         p.canonical_name AS product_name,
+        s.id          AS store_id,
         s.name        AS store_name,
         pl.change_type,
         pl.price,

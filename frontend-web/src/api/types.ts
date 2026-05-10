@@ -151,6 +151,7 @@ export interface ActivityEntry {
   id: number
   product_id: number
   product_name: string
+  store_id: number
   store_name: string
   change_type: string
   price: number | null
