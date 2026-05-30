@@ -16,12 +16,10 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
-import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { StatTile } from '@/components/ui/stat-tile'
+import { MetricCard } from '@/components/ui/metric-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StockPill } from '@/components/products/StockPill'
 import { activityApi } from '@/api'
@@ -265,37 +263,41 @@ export function ActivityPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Activity"
-        description="Live feed of scrapes, stock shifts, and price changes."
-        actions={
-          <Badge
-            variant="outline"
-            className="flex items-center gap-1.5 font-normal"
-          >
-            <CircleDot className="h-3 w-3 text-emerald-500" />
-            Auto-refresh 30s
-          </Badge>
-        }
-      />
+      <div className="gbd-reveal flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="font-display text-3xl font-extrabold tracking-tight">
+            Activity
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Live feed of scrapes, stock shifts, and price changes.
+          </p>
+        </div>
+        <Badge variant="outline" className="flex items-center gap-1.5 font-normal">
+          <span className="relative inline-flex h-1.5 w-1.5">
+            <span className="absolute inset-0 rounded-full bg-primary gbd-pulse-ring" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+          </span>
+          Auto-refresh 30s
+        </Badge>
+      </div>
 
-      <BentoGrid cols={6}>
-        <StatTile
+      <div className="gbd-stagger grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <MetricCard
           label="Changes"
           value={stats.total}
           icon={<ActivityIcon className="h-4 w-4" />}
           hint="last 100"
-          tone="primary"
+          accent
           loading={activity.isLoading}
         />
-        <StatTile
+        <MetricCard
           label="Products"
           value={groups.length}
           icon={<StoreIcon className="h-4 w-4" />}
           hint="grouped rows"
           loading={activity.isLoading}
         />
-        <StatTile
+        <MetricCard
           label="Drops"
           value={stats.drops}
           icon={<TrendingDown className="h-4 w-4" />}
@@ -303,7 +305,7 @@ export function ActivityPage() {
           hint={stats.drops > 0 ? 'price drops' : 'none'}
           loading={activity.isLoading}
         />
-        <StatTile
+        <MetricCard
           label="Rises"
           value={stats.rises}
           icon={<TrendingUp className="h-4 w-4" />}
@@ -311,15 +313,15 @@ export function ActivityPage() {
           hint={stats.rises > 0 ? 'price rises' : 'none'}
           loading={activity.isLoading}
         />
-        <StatTile
+        <MetricCard
           label="Stock shifts"
           value={stats.stockShifts}
           icon={<Radio className="h-4 w-4" />}
-          tone="accent"
+          tone="primary"
           hint="in/out changes"
           loading={activity.isLoading}
         />
-      </BentoGrid>
+      </div>
 
       {activity.isLoading ? (
         <LoadingList />
@@ -328,69 +330,74 @@ export function ActivityPage() {
       ) : entries.length === 0 ? (
         <EmptyState text="No activity yet. Run a scrape to populate." />
       ) : (
-        <BentoGrid cols={6}>
-          <BentoTile colSpan={6}>
-            <TileHeader
-              eyebrow="Feed"
-              title={
-                hasSearch
-                  ? `${filteredGroups.length} matches, ${filteredEntriesCount} changes`
-                  : `${groups.length} products, ${entries.length} changes`
-              }
-              icon={<ActivityIcon className="h-4 w-4" />}
-              action={
-                <div className="flex w-full flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-end">
-                  <div className="relative w-full sm:max-w-md">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder="Search product, store, change, or stock"
-                      className="pl-9 pr-10"
-                      aria-label="Search activity"
-                    />
-                    {hasSearch ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 hover:translate-y-[-50%]"
-                        onClick={() => setSearch('')}
-                        aria-label="Clear activity search"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 gap-1.5">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={expandAll}
-                      disabled={filteredGroups.length === 0}
-                    >
-                      Expand all
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={collapseAll}
-                      disabled={filteredGroups.length === 0}
-                    >
-                      Collapse all
-                    </Button>
-                  </div>
+        <section className="gbd-glass overflow-hidden rounded-2xl border border-border/70 p-5">
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-7 w-7 place-items-center rounded-md border border-border/60 bg-card/70 text-primary">
+                <ActivityIcon className="h-4 w-4" />
+              </span>
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Feed
                 </div>
-              }
-            />
-            {filteredGroups.length === 0 ? (
-              <div className="mt-3 rounded-md border border-dashed border-border bg-card/35 p-8 text-center text-sm text-muted-foreground">
-                No activity matched <span className="font-medium text-foreground">{search.trim()}</span>.
+                <div className="font-display text-sm font-bold tracking-tight">
+                  {hasSearch
+                    ? `${filteredGroups.length} matches · ${filteredEntriesCount} changes`
+                    : `${groups.length} products · ${entries.length} changes`}
+                </div>
               </div>
-            ) : (
-              <ul className="gbd-stagger mt-3 space-y-1.5">
+            </div>
+            <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:flex-nowrap lg:justify-end">
+              <div className="relative w-full sm:max-w-md">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search product, store, change, or stock"
+                  className="pl-9 pr-10"
+                  aria-label="Search activity"
+                />
+                {hasSearch ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 hover:translate-y-[-50%]"
+                    onClick={() => setSearch('')}
+                    aria-label="Clear activity search"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={expandAll}
+                  disabled={filteredGroups.length === 0}
+                >
+                  Expand all
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={collapseAll}
+                  disabled={filteredGroups.length === 0}
+                >
+                  Collapse all
+                </Button>
+              </div>
+            </div>
+          </div>
+          {filteredGroups.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border/70 bg-card/35 p-8 text-center text-sm text-muted-foreground">
+              No activity matched <span className="font-medium text-foreground">{search.trim()}</span>.
+            </div>
+          ) : (
+            <ul className="gbd-stagger space-y-1.5">
                 {filteredGroups.map((group) => {
                   const productOpen = openProducts.has(group.productId)
                     ? true
@@ -422,10 +429,9 @@ export function ActivityPage() {
                     />
                   )
                 })}
-              </ul>
-            )}
-          </BentoTile>
-        </BentoGrid>
+            </ul>
+          )}
+        </section>
       )}
     </div>
   )
@@ -468,9 +474,9 @@ function ActivityProductRow({
   return (
     <li
       className={cn(
-        'rounded-md border border-border bg-background/40 transition-colors hover:bg-accent/25',
-        hasDrop && 'border-emerald-500/20',
-        hasRise && 'border-destructive/20',
+        'rounded-xl border border-border/70 bg-card/40 transition-colors hover:border-primary/25 hover:bg-accent/20',
+        hasDrop && 'border-success/30',
+        hasRise && 'border-destructive/30',
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
@@ -987,22 +993,20 @@ function matchesActivityGroup(group: ActivityGroup, terms: string[]): boolean {
 
 function LoadingList() {
   return (
-    <BentoGrid cols={6}>
-      <BentoTile colSpan={6}>
-        <Skeleton className="h-5 w-40" />
-        <div className="mt-3 space-y-2">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full" />
-          ))}
-        </div>
-      </BentoTile>
-    </BentoGrid>
+    <section className="gbd-glass rounded-2xl border border-border/70 p-5">
+      <Skeleton className="h-5 w-40" />
+      <div className="mt-4 space-y-2">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} className="h-12 w-full" />
+        ))}
+      </div>
+    </section>
   )
 }
 
 function EmptyState({ text }: { text: string }) {
   return (
-    <div className="rounded-md border border-dashed border-border bg-card/50 p-12 text-center text-sm text-muted-foreground">
+    <div className="rounded-2xl border border-dashed border-border/70 bg-card/40 p-12 text-center text-sm text-muted-foreground">
       {text}
     </div>
   )
