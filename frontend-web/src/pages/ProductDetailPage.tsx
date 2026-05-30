@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -14,13 +14,11 @@ import {
   Trash2,
   TrendingDown,
 } from 'lucide-react'
-import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { StatTile } from '@/components/ui/stat-tile'
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toast-store'
 import { StoreRow } from '@/components/products/StoreRow'
@@ -84,6 +82,7 @@ export function ProductDetailPage() {
     queryKey: ['product', productId],
     queryFn: () => productsApi.get(productId),
     enabled: Number.isFinite(productId) && productId > 0,
+    refetchInterval: 30_000,
   })
 
   const logs = useQuery<PriceLog[]>({
@@ -187,309 +186,389 @@ export function ProductDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate('/')}
-          className="-ml-2 mb-3 text-muted-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </Button>
-        <PageHeader
-          title={p.canonical_name}
-          description={
-            p.category_name ? `Category: ${p.category_name}` : 'Uncategorized'
-          }
-          actions={
-            <>
-              <Button
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => navigate('/')}
+        className="-ml-2 text-muted-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </Button>
+
+      {/* Hero */}
+      <div className="gbd-reveal flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-display text-3xl font-extrabold tracking-tight">
+            {p.canonical_name}
+          </h1>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            {p.category_name ? (
+              <Badge
                 variant="outline"
-                size="sm"
-                onClick={() => setEditing((v) => !v)}
+                style={
+                  p.category_color
+                    ? { borderColor: p.category_color, color: p.category_color }
+                    : undefined
+                }
               >
-                <Pencil className="h-4 w-4" />
-                {editing ? 'Close edit' : 'Edit'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => scrapeAll.mutate()}
-                disabled={scrapeAll.isPending || p.stores.length === 0}
-              >
-                <RefreshCw
-                  className={`h-4 w-4 ${scrapeAll.isPending ? 'animate-spin' : ''}`}
-                />
-                Scrape all
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  if (confirm(`Delete "${p.canonical_name}" and all its data?`)) {
-                    remove.mutate()
-                  }
-                }}
-                disabled={remove.isPending}
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete
-              </Button>
-            </>
-          }
-        />
+                {p.category_name}
+              </Badge>
+            ) : (
+              <span>Uncategorized</span>
+            )}
+            <span>·</span>
+            <span className="flex items-center gap-1">
+              <Clock className="h-3.5 w-3.5" />
+              <LiveTimeLine iso={recent} />
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setEditing((v) => !v)}>
+            <Pencil className="h-4 w-4" />
+            {editing ? 'Close edit' : 'Edit'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => scrapeAll.mutate()}
+            disabled={scrapeAll.isPending || p.stores.length === 0}
+          >
+            <RefreshCw className={cn('h-4 w-4', scrapeAll.isPending && 'animate-spin')} />
+            Scrape all
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => {
+              if (confirm(`Delete "${p.canonical_name}" and all its data?`)) {
+                remove.mutate()
+              }
+            }}
+            disabled={remove.isPending}
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </Button>
+        </div>
       </div>
 
       {editing ? (
         <EditProductCard product={p} onClose={() => setEditing(false)} />
       ) : null}
 
-      <BentoGrid cols={6}>
-        <BentoTile colSpan={2} rowSpan={2} padded={false} className="overflow-hidden">
-          <div className="flex h-full flex-col">
-            <div className="relative flex-1 min-h-[260px] bg-gradient-to-br from-muted/80 to-muted/30">
-              {p.image_url ? (
-                <img
-                  src={p.image_url}
-                  alt=""
-                  className="absolute inset-0 h-full w-full object-contain p-6"
-                />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <ImageOff className="h-12 w-12 text-muted-foreground/50" />
-                </div>
-              )}
-              <div className="absolute inset-x-0 bottom-0 space-y-1 bg-gradient-to-t from-black/70 via-black/30 to-transparent p-4">
-                <div className="line-clamp-2 text-sm font-semibold text-white">
-                  {p.canonical_name}
-                </div>
-                {p.category_name ? (
-                  <Badge
-                    variant="outline"
-                    className="border-white/40 bg-black/30 text-white"
-                    style={
-                      p.category_color
-                        ? { borderColor: p.category_color, color: p.category_color }
-                        : undefined
-                    }
-                  >
-                    {p.category_name}
-                  </Badge>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </BentoTile>
-
-        <StatTile
-          label="Lowest price"
-          value={lowestPriceText}
-          icon={<Tag className="h-4 w-4" />}
-          hint={stats.lowStore ? `at ${stats.lowStore.store_name}` : undefined}
-          tone="primary"
-        />
-        <StatTile
-          label="Stores"
-          value={p.stores.length}
-          icon={<Boxes className="h-4 w-4" />}
-          hint={`${stats.inStockStores} in stock`}
-        />
-        <StatTile
-          label="Logs"
-          value={logs.data?.length ?? 0}
-          icon={<LineChartIcon className="h-4 w-4" />}
-          loading={logs.isLoading}
-          hint="price snapshots"
-        />
-        <StatTile
-          label="Latest drop"
-          value={latestDropText}
-          icon={<TrendingDown className="h-4 w-4" />}
-          tone="success"
-          hint={stats.bestDrop != null ? 'vs previous' : 'no drops'}
-        />
-
-        <BentoTile colSpan={4}>
-          <TileHeader
-            eyebrow="Last activity"
-            icon={<Clock className="h-4 w-4" />}
-            title={<LiveTimeLine iso={recent} />}
-          />
-          <p className="mt-2 text-xs text-muted-foreground">
-            Created {formatApiDate(p.created_at, timezone)} · #{p.id}
-          </p>
-        </BentoTile>
-      </BentoGrid>
-
-      <BentoGrid cols={6}>
-        <BentoTile colSpan={6}>
-          <TileHeader
-            eyebrow="Stores"
-            title={`${p.stores.length} linked`}
-          />
-          <div className="mt-3 space-y-1.5">
-            {p.stores.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                No stores linked yet.
-              </div>
-            ) : (
-              p.stores.map((s) => (
-                <StoreRow
-                  key={s.id}
-                  store={s}
-                  symbol={symbol}
-                  displayMode={priceDisplayMode}
-                  locale={locale}
-                  localCurrency={localCurrency}
-                  exchangeRates={exchangeRates}
-                  productId={p.id}
-                />
-              ))
-            )}
-            <div className="pt-2">
-              <AddStoreCard productId={p.id} />
-            </div>
-          </div>
-        </BentoTile>
-
-        <BentoTile colSpan={6}>
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <TileHeader
-                eyebrow="History controls"
-                title={`${historyScope} - ${historyRangeLabel}`}
-                icon={<CalendarDays className="h-4 w-4" />}
+      {/* Image + KPIs */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="gbd-glow-card relative overflow-hidden rounded-2xl border border-border/70">
+          <span aria-hidden className="gbd-glow-card-before" />
+          <div className="relative aspect-[4/3] bg-gradient-to-br from-muted/60 to-muted/20">
+            {p.image_url ? (
+              <img
+                src={p.image_url}
+                alt=""
+                className="absolute inset-0 h-full w-full object-contain p-6"
               />
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant="muted">{historyLogs.length} logs</Badge>
-                {logs.isFetching ? <Badge variant="info">Refreshing</Badge> : null}
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <ImageOff className="h-12 w-12 text-muted-foreground/40" />
               </div>
-            </div>
-
-            <div className="grid gap-3 lg:grid-cols-[minmax(180px,260px)_1fr]">
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Store
-                </span>
-                <Select
-                  value={historyStoreId}
-                  onChange={(event) => setHistoryStoreId(event.target.value)}
-                >
-                  <option value="all">All stores</option>
-                  {p.stores.map((store) => (
-                    <option key={store.id} value={store.id}>
-                      {store.store_name}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-
-              <div className="space-y-2">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Date selection
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {HISTORY_RANGES.map((range) => (
-                    <Button
-                      key={range.value}
-                      type="button"
-                      variant={historyRange === range.value ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setHistoryRange(range.value)}
-                    >
-                      {range.label}
-                    </Button>
-                  ))}
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <label className="space-y-1">
-                    <span className="text-[11px] text-muted-foreground">From</span>
-                    <Input
-                      type="date"
-                      value={customFrom}
-                      max={customTo || undefined}
-                      onChange={(event) => {
-                        setCustomFrom(event.target.value)
-                        setHistoryRange('custom')
-                      }}
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-[11px] text-muted-foreground">To</span>
-                    <Input
-                      type="date"
-                      value={customTo}
-                      min={customFrom || undefined}
-                      onChange={(event) => {
-                        setCustomTo(event.target.value)
-                        setHistoryRange('custom')
-                      }}
-                    />
-                  </label>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
-        </BentoTile>
+        </div>
 
-        <BentoTile colSpan={6}>
-          <TileHeader
-            eyebrow="Price graph"
-            title={historyScope}
+        <div className="grid grid-cols-2 gap-4 lg:col-span-2">
+          <NumeralStat
+            label="Lowest price"
+            icon={<Tag className="h-4 w-4" />}
+            text={lowestPriceText ?? '—'}
+            hint={stats.lowStore ? `at ${stats.lowStore.store_name}` : undefined}
+            gold
+          />
+          <NumeralStat
+            label="Latest drop"
+            icon={<TrendingDown className="h-4 w-4" />}
+            text={latestDropText ? `−${latestDropText}` : '—'}
+            hint={stats.bestDrop != null ? 'vs previous' : 'no drops'}
+            tone="success"
+          />
+          <NumeralStat
+            label="Stores"
+            icon={<Boxes className="h-4 w-4" />}
+            value={p.stores.length}
+            hint={`${stats.inStockStores} in stock`}
+          />
+          <NumeralStat
+            label="Price logs"
             icon={<LineChartIcon className="h-4 w-4" />}
+            value={logs.data?.length ?? 0}
+            loading={logs.isLoading}
+            hint="snapshots"
           />
-          <div className="mt-3">
-            {logs.isLoading ? (
-              <Skeleton className="h-80 w-full" />
-            ) : (
-              <PriceChart
-                logs={historyLogs}
-                stores={historyStores}
-                symbol={symbol}
-                displayMode={priceDisplayMode}
-                locale={locale}
-              />
-            )}
-          </div>
-        </BentoTile>
+        </div>
+      </div>
 
-        <BentoTile colSpan={6}>
-          <TileHeader
-            eyebrow="Previous logs"
-            title={`${historyLogs.length} entries`}
-          />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Logs below follow the selected store and date range above.
-          </p>
-          <div className="mt-3">
-            {logs.isLoading ? (
-              <Skeleton className="h-52 w-full" />
-            ) : historyStoreId === 'all' ? (
-              <StoreLogSections
-                groups={historyLogGroups}
-                stores={p.stores}
+      {/* Stores */}
+      <Section eyebrow="Stores" title={`${p.stores.length} linked`}>
+        <div className="space-y-1.5">
+          {p.stores.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
+              No stores linked yet.
+            </div>
+          ) : (
+            p.stores.map((s) => (
+              <StoreRow
+                key={s.id}
+                store={s}
                 symbol={symbol}
                 displayMode={priceDisplayMode}
                 locale={locale}
                 localCurrency={localCurrency}
                 exchangeRates={exchangeRates}
+                productId={p.id}
               />
-            ) : (
-              <LogsTable
-                logs={historyLogs}
-                stores={p.stores}
-                symbol={symbol}
-                displayMode={priceDisplayMode}
-                locale={locale}
-                localCurrency={localCurrency}
-                exchangeRates={exchangeRates}
-                showStoreColumn={false}
-              />
-            )}
+            ))
+          )}
+          <div className="pt-2">
+            <AddStoreCard productId={p.id} />
           </div>
-        </BentoTile>
-      </BentoGrid>
+        </div>
+      </Section>
+
+      {/* History controls */}
+      <Section
+        eyebrow="History"
+        title={`${historyScope} · ${historyRangeLabel}`}
+        icon={<CalendarDays className="h-4 w-4" />}
+        action={
+          <div className="flex items-center gap-2 text-xs">
+            <Badge variant="muted">{historyLogs.length} logs</Badge>
+            {logs.isFetching ? <Badge variant="info">Refreshing</Badge> : null}
+          </div>
+        }
+      >
+        <div className="grid gap-3 lg:grid-cols-[minmax(180px,240px)_1fr]">
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Store
+            </span>
+            <Select
+              value={historyStoreId}
+              onChange={(event) => setHistoryStoreId(event.target.value)}
+            >
+              <option value="all">All stores</option>
+              {p.stores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {store.store_name}
+                </option>
+              ))}
+            </Select>
+          </label>
+
+          <div className="space-y-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Date range
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {HISTORY_RANGES.map((range) => (
+                <Button
+                  key={range.value}
+                  type="button"
+                  variant={historyRange === range.value ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setHistoryRange(range.value)}
+                >
+                  {range.label}
+                </Button>
+              ))}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-[11px] text-muted-foreground">From</span>
+                <Input
+                  type="date"
+                  value={customFrom}
+                  max={customTo || undefined}
+                  onChange={(event) => {
+                    setCustomFrom(event.target.value)
+                    setHistoryRange('custom')
+                  }}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-[11px] text-muted-foreground">To</span>
+                <Input
+                  type="date"
+                  value={customTo}
+                  min={customFrom || undefined}
+                  onChange={(event) => {
+                    setCustomTo(event.target.value)
+                    setHistoryRange('custom')
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+      </Section>
+
+      {/* Price graph */}
+      <Section
+        eyebrow="Price history"
+        title={historyScope}
+        icon={<LineChartIcon className="h-4 w-4" />}
+      >
+        {logs.isLoading ? (
+          <Skeleton className="h-80 w-full" />
+        ) : (
+          <PriceChart
+            logs={historyLogs}
+            stores={historyStores}
+            symbol={symbol}
+            displayMode={priceDisplayMode}
+            locale={locale}
+          />
+        )}
+      </Section>
+
+      {/* Logs */}
+      <Section
+        eyebrow="Previous logs"
+        title={`${historyLogs.length} entries`}
+        hint="Follows the selected store and date range above."
+      >
+        {logs.isLoading ? (
+          <Skeleton className="h-52 w-full" />
+        ) : historyStoreId === 'all' ? (
+          <StoreLogSections
+            groups={historyLogGroups}
+            stores={p.stores}
+            symbol={symbol}
+            displayMode={priceDisplayMode}
+            locale={locale}
+            localCurrency={localCurrency}
+            exchangeRates={exchangeRates}
+          />
+        ) : (
+          <LogsTable
+            logs={historyLogs}
+            stores={p.stores}
+            symbol={symbol}
+            displayMode={priceDisplayMode}
+            locale={locale}
+            localCurrency={localCurrency}
+            exchangeRates={exchangeRates}
+            showStoreColumn={false}
+          />
+        )}
+      </Section>
+
+      <p className="text-center text-xs text-muted-foreground">
+        Created {formatApiDate(p.created_at, timezone)} · product #{p.id}
+      </p>
+    </div>
+  )
+}
+
+/* ── Presentational helpers ────────────────────────────────────────────── */
+
+function Section({
+  eyebrow,
+  title,
+  icon,
+  action,
+  hint,
+  children,
+}: {
+  eyebrow: string
+  title: ReactNode
+  icon?: ReactNode
+  action?: ReactNode
+  hint?: string
+  children: ReactNode
+}) {
+  return (
+    <section className="gbd-glass overflow-hidden rounded-2xl border border-border/70 p-5">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5">
+          {icon ? (
+            <span className="mt-0.5 grid h-7 w-7 place-items-center rounded-md border border-border/60 bg-card/70 text-primary">
+              {icon}
+            </span>
+          ) : null}
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              {eyebrow}
+            </div>
+            <div className="font-display text-sm font-bold tracking-tight">
+              {title}
+            </div>
+          </div>
+        </div>
+        {action}
+      </div>
+      {hint ? <p className="-mt-2 mb-3 text-xs text-muted-foreground">{hint}</p> : null}
+      {children}
+    </section>
+  )
+}
+
+function NumeralStat({
+  label,
+  icon,
+  value,
+  text,
+  hint,
+  loading,
+  gold = false,
+  tone = 'default',
+}: {
+  label: string
+  icon: ReactNode
+  value?: number
+  text?: string
+  hint?: string
+  loading?: boolean
+  gold?: boolean
+  tone?: 'default' | 'success'
+}) {
+  return (
+    <div className="gbd-spotlight gbd-hover-lift relative overflow-hidden rounded-2xl border border-border/70 p-5 hover:border-primary/25 hover:shadow-[var(--shadow-elevated)]">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          {label}
+        </span>
+        <span
+          className={cn(
+            'grid h-7 w-7 place-items-center rounded-md border border-border/60 bg-card/70',
+            tone === 'success' ? 'text-success' : 'text-muted-foreground',
+          )}
+        >
+          {icon}
+        </span>
+      </div>
+      <div className="mt-3">
+        {loading ? (
+          <Skeleton className="h-9 w-24" />
+        ) : text != null ? (
+          <span
+            className={cn(
+              'gbd-numeral block truncate text-2xl font-extrabold',
+              gold && 'gbd-gold-text',
+              tone === 'success' && 'text-success',
+            )}
+          >
+            {text}
+          </span>
+        ) : (
+          <AnimatedNumber
+            value={value ?? null}
+            gold={gold}
+            className="text-3xl font-extrabold"
+          />
+        )}
+      </div>
+      {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   )
 }
@@ -730,26 +809,22 @@ function DetailSkeleton() {
   return (
     <div className="space-y-6">
       <Skeleton className="h-8 w-64" />
-      <BentoGrid cols={6}>
-        <BentoTile colSpan={2} rowSpan={2} padded={false}>
-          <Skeleton className="h-full w-full min-h-[220px] rounded-none" />
-        </BentoTile>
-        {Array.from({ length: 4 }).map((_, i) => (
-          <BentoTile key={i}>
-            <Skeleton className="h-4 w-24" />
-            <Skeleton className="mt-4 h-8 w-32" />
-          </BentoTile>
-        ))}
-      </BentoGrid>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Skeleton className="aspect-[4/3] w-full rounded-2xl" />
+        <div className="grid grid-cols-2 gap-4 lg:col-span-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-28 w-full rounded-2xl" />
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
 
 function ErrorState({ text }: { text: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
+    <div className="rounded-2xl border border-dashed border-border/70 p-10 text-center text-sm text-muted-foreground">
       {text}
     </div>
   )
 }
-
