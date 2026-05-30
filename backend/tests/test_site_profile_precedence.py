@@ -78,6 +78,23 @@ def test_site_profile_preserves_true_per_link_selector(
     assert merged.selectors.price == ".per-link-price"
 
 
+def test_shipped_redacted-store_profile_pins_single_product_price() -> None:
+    """The bundled redacted-store profile must scope to the single-product
+    ``p.price`` block, not the JetWooBuilder related-products carousel
+    (``span.price``) that the generic Woo default bleeds into."""
+    profile = site_profiles.find_profile(
+        "https://redacted-store/product/some-game-playstation-5/"
+    )
+    assert profile is not None
+    assert profile.hostname == "redacted-store"
+    assert profile.selectors.get("price", "").startswith("p.price")
+    assert profile.selectors.get("discounted_price") == (
+        "p.price ins .woocommerce-Price-amount"
+    )
+    # display:none on the native price means a visibility-gated wait_for hangs.
+    assert profile.wait_for == "h1"
+
+
 def test_auto_detect_config_keeps_saved_site_profile_selectors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

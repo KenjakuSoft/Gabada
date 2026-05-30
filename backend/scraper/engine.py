@@ -82,7 +82,7 @@ _INSTALLMENT_RE = re.compile(
     r"\b(emi|easy[\s-]?pay|flexi[\s-]?pay|instalment|installment|"
     r"monthly|per[\s-]?month|per[\s-]?week|weekly|"
     r"interest[\s-]?free|payment[\s-]?plan|hire[\s-]?purchase|"
-    r"credit[\s-]?card[\s-]?price|card[\s-]?price|"
+    r"credit[\s-]?card[\s-]?price|koko|mintpay|"
     r"visa[\s-]?offer|master[\s-]?offer)\b"
     r"|[×x]\s*\d+\s*(?:month|week|year|mo\b)"
     r"|/\s*(?:month|week|mo|yr)\b",
