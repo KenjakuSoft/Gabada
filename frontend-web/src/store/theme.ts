@@ -13,7 +13,8 @@ const LS_KEY = 'gabada.theme'
 function readInitial(): Theme {
   const v = localStorage.getItem(LS_KEY)
   if (v === 'light' || v === 'dark' || v === 'system') return v
-  return 'system'
+  // Dark Luxury is the intended showcase experience.
+  return 'dark'
 }
 
 export const useThemeStore = create<ThemeState>((set) => ({
