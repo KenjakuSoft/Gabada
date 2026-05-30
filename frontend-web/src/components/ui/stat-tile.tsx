@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
-import { useCountUp } from '@/hooks/useCountUp'
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import { cn } from '@/lib/utils'
-import { BentoTile, TileHeader } from './bento'
 import { Skeleton } from './skeleton'
 
 interface StatTileProps {
@@ -18,6 +17,27 @@ interface StatTileProps {
   accent?: ReactNode
 }
 
+const TONE_RING: Record<NonNullable<StatTileProps['tone']>, string> = {
+  default: 'text-muted-foreground',
+  primary: 'text-primary',
+  success: 'text-success',
+  warning: 'text-warning',
+  accent: 'text-primary',
+  destructive: 'text-destructive',
+}
+
+const COL_SPAN: Record<NonNullable<StatTileProps['colSpan']>, string> = {
+  1: 'col-span-1',
+  2: 'col-span-2',
+  3: 'col-span-2 md:col-span-3',
+}
+
+/**
+ * KPI tile. Shares the `MetricCard` surface (spotlight + hover lift + big
+ * count-up numeral) so every page renders a consistent metric, while keeping
+ * the richer API (string values, prefix/decimals, colSpan, accent slot) that
+ * the import and Selector Lab flows rely on.
+ */
 export function StatTile({
   label,
   value,
@@ -31,48 +51,55 @@ export function StatTile({
   colSpan = 1,
   accent,
 }: StatTileProps) {
-  const isNumericValue = typeof value === 'number'
-  const animated = useCountUp(isNumericValue ? value : null, { decimals })
-  const shown =
-    typeof value === 'string'
-      ? value
-      : animated == null
-        ? 'n/a'
-        : animated.toLocaleString(undefined, {
-            minimumFractionDigits: decimals,
-            maximumFractionDigits: decimals,
-          })
-
+  const isNumeric = typeof value === 'number'
   return (
-    <BentoTile tone={tone} colSpan={colSpan} className="gbd-spotlight">
-      <TileHeader eyebrow={label} icon={icon} action={accent} />
-      <div className="mt-4 flex items-baseline gap-1">
-        {loading ? (
-          <Skeleton className="h-9 w-24" />
-        ) : (
-          <>
-            {prefix ? (
-              <span className="text-lg font-medium text-muted-foreground">
-                {prefix}
-              </span>
-            ) : null}
+    <div
+      className={cn(
+        'gbd-spotlight gbd-hover-lift relative overflow-hidden rounded-2xl border border-border/70 p-5 hover:border-primary/25 hover:shadow-[var(--shadow-elevated)]',
+        COL_SPAN[colSpan],
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          {label}
+        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          {accent}
+          {icon ? (
             <span
               className={cn(
-                'text-3xl font-black tabular-nums tracking-tight',
-                value == null && 'text-muted-foreground',
+                'grid h-7 w-7 place-items-center rounded-md border border-border/60 bg-card/70',
+                TONE_RING[tone],
               )}
             >
-              {shown}
+              {icon}
             </span>
-            {suffix ? (
-              <span className="text-sm text-muted-foreground">{suffix}</span>
-            ) : null}
-          </>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-4">
+        {loading ? (
+          <Skeleton className="h-10 w-24" />
+        ) : isNumeric ? (
+          <AnimatedNumber
+            value={value as number}
+            decimals={decimals}
+            prefix={prefix}
+            suffix={suffix}
+            className="text-4xl font-extrabold"
+          />
+        ) : (
+          <span
+            className={cn(
+              'gbd-numeral block truncate text-2xl font-extrabold',
+              value == null && 'text-muted-foreground',
+            )}
+          >
+            {value == null ? 'n/a' : value}
+          </span>
         )}
       </div>
-      {hint ? (
-        <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
-      ) : null}
-    </BentoTile>
+      {hint ? <div className="mt-1 text-xs text-muted-foreground">{hint}</div> : null}
+    </div>
   )
 }
