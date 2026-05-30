@@ -3,37 +3,37 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ──────────────────────────────────────────────────────────────────────────
-   Gabada — "Dark Luxury" design system
-   Deep charcoal surfaces · warm gold accent · big numerals · generous space.
+   Gabada — "Crimson Noir" design system
+   Near-black surfaces · vivid red accent · big numerals · generous space.
    Token names are stable so every page re-skins from here.
    ────────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Refined warm-light variant (luxury light). */
-  --background: oklch(96.5% 0.006 85);
-  --foreground: oklch(22% 0.012 75);
-  --muted: oklch(92% 0.006 85);
-  --muted-foreground: oklch(48% 0.014 75);
-  --card: oklch(99.2% 0.004 85);
-  --card-foreground: oklch(22% 0.012 75);
-  --border: oklch(86% 0.008 80);
-  --input: oklch(90% 0.006 82);
-  --ring: oklch(66% 0.11 80);
-  --primary: oklch(60% 0.1 78);
-  --primary-foreground: oklch(99% 0.01 90);
-  --accent: oklch(90% 0.03 82);
-  --accent-foreground: oklch(34% 0.06 75);
-  --destructive: oklch(57% 0.22 25);
+  /* Refined light variant (red on warm white). */
+  --background: oklch(97% 0.004 25);
+  --foreground: oklch(20% 0.012 25);
+  --muted: oklch(92.5% 0.005 25);
+  --muted-foreground: oklch(47% 0.014 25);
+  --card: oklch(99.4% 0.003 25);
+  --card-foreground: oklch(20% 0.012 25);
+  --border: oklch(86% 0.008 25);
+  --input: oklch(90% 0.006 25);
+  --ring: oklch(55% 0.2 26);
+  --primary: oklch(53% 0.21 26);
+  --primary-foreground: oklch(99% 0.01 25);
+  --accent: oklch(91% 0.04 25);
+  --accent-foreground: oklch(38% 0.13 26);
+  --destructive: oklch(55% 0.22 28);
   --destructive-foreground: oklch(99% 0 0);
-  --success: oklch(58% 0.15 150);
-  --warning: oklch(70% 0.15 75);
+  --success: oklch(56% 0.15 150);
+  --warning: oklch(68% 0.15 70);
 
-  /* Gold accent family + ambient glows. */
-  --gold: oklch(72% 0.13 82);
-  --gold-soft: oklch(80% 0.1 85);
-  --glow-a: oklch(80% 0.11 85);
-  --glow-b: oklch(72% 0.09 70);
-  --glow-c: oklch(66% 0.08 50);
+  /* Brand accent family + ambient glows (crimson). */
+  --brand: oklch(56% 0.22 26);
+  --brand-soft: oklch(66% 0.2 26);
+  --glow-a: oklch(58% 0.22 26);
+  --glow-b: oklch(50% 0.18 15);
+  --glow-c: oklch(44% 0.14 8);
 
   --shadow-elevated: 0 18px 48px -32px color-mix(in oklch, var(--foreground) 50%, transparent);
   --shadow-soft: 0 10px 28px -24px color-mix(in oklch, var(--foreground) 38%, transparent);
@@ -45,33 +45,33 @@
 }
 
 .dark {
-  /* The showcase: deep charcoal with subtle warmth. */
-  --background: oklch(15.5% 0.006 70);
-  --foreground: oklch(93% 0.01 85);
-  --muted: oklch(23% 0.006 72);
-  --muted-foreground: oklch(66% 0.012 82);
-  --card: oklch(19.5% 0.0065 72);
-  --card-foreground: oklch(93% 0.01 85);
-  --border: oklch(30% 0.008 75);
-  --input: oklch(25% 0.007 72);
-  --ring: oklch(82% 0.12 86);
-  --primary: oklch(82% 0.12 86);
-  --primary-foreground: oklch(21% 0.03 80);
-  --accent: oklch(27% 0.025 82);
-  --accent-foreground: oklch(90% 0.05 86);
-  --destructive: oklch(64% 0.2 25);
+  /* The showcase: near-black with a faint warm/red undertone. */
+  --background: oklch(13.5% 0.008 25);
+  --foreground: oklch(93% 0.008 30);
+  --muted: oklch(21% 0.01 25);
+  --muted-foreground: oklch(64% 0.014 30);
+  --card: oklch(17% 0.011 25);
+  --card-foreground: oklch(93% 0.008 30);
+  --border: oklch(28% 0.014 25);
+  --input: oklch(23% 0.012 25);
+  --ring: oklch(64% 0.23 26);
+  --primary: oklch(62% 0.23 26);
+  --primary-foreground: oklch(98% 0.01 25);
+  --accent: oklch(26% 0.05 25);
+  --accent-foreground: oklch(90% 0.05 26);
+  --destructive: oklch(62% 0.22 30);
   --destructive-foreground: oklch(99% 0 0);
   --success: oklch(74% 0.15 152);
-  --warning: oklch(82% 0.13 82);
+  --warning: oklch(80% 0.13 78);
 
-  --gold: oklch(82% 0.12 86);
-  --gold-soft: oklch(88% 0.09 88);
-  --glow-a: oklch(82% 0.13 86);
-  --glow-b: oklch(70% 0.11 60);
-  --glow-c: oklch(60% 0.1 40);
+  --brand: oklch(64% 0.23 26);
+  --brand-soft: oklch(74% 0.19 26);
+  --glow-a: oklch(60% 0.24 26);
+  --glow-b: oklch(50% 0.2 14);
+  --glow-c: oklch(40% 0.16 6);
 
-  --shadow-elevated: 0 22px 60px -34px color-mix(in oklch, black 82%, transparent);
-  --shadow-soft: 0 12px 34px -26px color-mix(in oklch, black 72%, transparent);
+  --shadow-elevated: 0 22px 60px -34px color-mix(in oklch, black 84%, transparent);
+  --shadow-soft: 0 12px 34px -26px color-mix(in oklch, black 74%, transparent);
 }
 
 @theme inline {
@@ -92,7 +92,7 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
-  --color-gold: var(--gold);
+  --color-brand: var(--brand);
   --font-display: var(--font-display);
   --font-mono: var(--font-mono);
   --radius-lg: var(--radius);
@@ -114,7 +114,7 @@
     background:
       radial-gradient(ellipse 60rem 32rem at 10% -10%, color-mix(in oklch, var(--glow-a) 16%, transparent) 0, transparent 70%),
       radial-gradient(ellipse 50rem 30rem at 92% 0%, color-mix(in oklch, var(--glow-b) 12%, transparent) 0, transparent 66%),
-      linear-gradient(165deg, color-mix(in oklch, var(--background) 92%, var(--glow-c)) 0%, var(--background) 46%, color-mix(in oklch, var(--background) 96%, black) 100%);
+      linear-gradient(165deg, color-mix(in oklch, var(--background) 92%, var(--glow-c)) 0%, var(--background) 46%, color-mix(in oklch, var(--background) 97%, black) 100%);
     background-attachment: fixed;
     color: var(--foreground);
     font-family: var(--font-sans);
@@ -136,12 +136,12 @@
     mask-image: radial-gradient(circle at 50% -8%, black, transparent 78%);
   }
   ::selection {
-    background: color-mix(in oklch, var(--gold) 32%, transparent);
+    background: color-mix(in oklch, var(--brand) 34%, transparent);
     color: var(--foreground);
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklch, var(--gold) 40%, var(--muted)) transparent;
+    scrollbar-color: color-mix(in oklch, var(--brand) 42%, var(--muted)) transparent;
   }
   h1, h2, h3 {
     font-family: var(--font-display);
@@ -164,12 +164,12 @@
   100% { transform: scale(1); }
 }
 @keyframes gbd-pulse-ring {
-  0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--gold) 55%, transparent); }
-  70%  { box-shadow: 0 0 0 9px color-mix(in oklch, var(--gold) 0%, transparent); }
-  100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--gold) 0%, transparent); }
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--brand) 60%, transparent); }
+  70%  { box-shadow: 0 0 0 9px color-mix(in oklch, var(--brand) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--brand) 0%, transparent); }
 }
 @keyframes gbd-flash {
-  0%   { background-color: color-mix(in oklch, var(--gold) 26%, transparent); }
+  0%   { background-color: color-mix(in oklch, var(--brand) 26%, transparent); }
   100% { background-color: transparent; }
 }
 @keyframes gbd-toast-in {
@@ -244,7 +244,7 @@
   z-index: -1;
   border-radius: inherit;
   opacity: 0;
-  background: linear-gradient(135deg, color-mix(in oklch, var(--glow-a) 38%, transparent), color-mix(in oklch, var(--glow-b) 30%, transparent), color-mix(in oklch, var(--glow-c) 22%, transparent));
+  background: linear-gradient(135deg, color-mix(in oklch, var(--glow-a) 40%, transparent), color-mix(in oklch, var(--glow-b) 32%, transparent), color-mix(in oklch, var(--glow-c) 24%, transparent));
   transition: opacity 240ms ease;
 }
 @utility gbd-hover-lift {
@@ -256,19 +256,19 @@
 }
 @utility gbd-spotlight {
   background:
-    radial-gradient(circle at var(--x, 20%) var(--y, 0%), color-mix(in oklch, var(--gold) 13%, transparent), transparent 36%),
+    radial-gradient(circle at var(--x, 20%) var(--y, 0%), color-mix(in oklch, var(--brand) 14%, transparent), transparent 36%),
     linear-gradient(150deg, color-mix(in oklch, var(--card) 92%, transparent), color-mix(in oklch, var(--card) 72%, transparent));
 }
 
-/* Gold text + hairline + sheen accents (use semantically: prices, KPIs, CTAs). */
-@utility gbd-gold-text {
-  background: linear-gradient(100deg, var(--gold-soft), var(--gold) 55%, color-mix(in oklch, var(--gold) 70%, var(--glow-c)));
+/* Brand (red) accents — use semantically: prices, KPIs, CTAs. */
+@utility gbd-brand-text {
+  background: linear-gradient(100deg, var(--brand-soft), var(--brand) 55%, color-mix(in oklch, var(--brand) 72%, var(--glow-c)));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 @utility gbd-hairline {
-  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--gold) 60%, transparent), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--brand) 62%, transparent), transparent);
 }
 @utility gbd-sheen {
   position: relative;

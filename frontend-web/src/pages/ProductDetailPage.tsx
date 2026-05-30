@@ -283,7 +283,7 @@ export function ProductDetailPage() {
             icon={<Tag className="h-4 w-4" />}
             text={lowestPriceText ?? '—'}
             hint={stats.lowStore ? `at ${stats.lowStore.store_name}` : undefined}
-            gold
+            accent
           />
           <NumeralStat
             label="Latest drop"
@@ -520,7 +520,7 @@ function NumeralStat({
   text,
   hint,
   loading,
-  gold = false,
+  accent = false,
   tone = 'default',
 }: {
   label: string
@@ -529,7 +529,7 @@ function NumeralStat({
   text?: string
   hint?: string
   loading?: boolean
-  gold?: boolean
+  accent?: boolean
   tone?: 'default' | 'success'
 }) {
   return (
@@ -554,7 +554,7 @@ function NumeralStat({
           <span
             className={cn(
               'gbd-numeral block truncate text-2xl font-extrabold',
-              gold && 'gbd-gold-text',
+              accent && 'gbd-brand-text',
               tone === 'success' && 'text-success',
             )}
           >
@@ -563,7 +563,7 @@ function NumeralStat({
         ) : (
           <AnimatedNumber
             value={value ?? null}
-            gold={gold}
+            accent={accent}
             className="text-3xl font-extrabold"
           />
         )}

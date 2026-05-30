@@ -132,7 +132,7 @@ export function HomePage() {
           icon={<Layers className="h-4 w-4" />}
           hint="products in catalog"
           loading={products.isLoading}
-          gold
+          accent
         />
         <KpiCard
           label="Store links"
@@ -279,7 +279,7 @@ function Hero({
         className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full opacity-60 blur-3xl"
         style={{
           background:
-            'radial-gradient(circle, color-mix(in oklch, var(--gold) 26%, transparent), transparent 70%)',
+            'radial-gradient(circle, color-mix(in oklch, var(--brand) 26%, transparent), transparent 70%)',
         }}
       />
       <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
@@ -308,7 +308,7 @@ function Hero({
             {live ? 'Live' : 'Paused'}
           </button>
           <h1 className="font-display text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl">
-            Your market, <span className="gbd-gold-text">in real time</span>.
+            Your market, <span className="gbd-brand-text">in real time</span>.
           </h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground">
             Price and stock across every store you track — refreshed automatically,
@@ -348,7 +348,7 @@ function KpiCard({
   hint,
   suffix,
   loading,
-  gold = false,
+  accent = false,
   tone = 'default',
 }: {
   label: string
@@ -357,7 +357,7 @@ function KpiCard({
   hint?: string
   suffix?: string
   loading?: boolean
-  gold?: boolean
+  accent?: boolean
   tone?: 'default' | 'primary' | 'success'
 }) {
   const toneRing =
@@ -387,7 +387,7 @@ function KpiCard({
         ) : (
           <AnimatedNumber
             value={value}
-            gold={gold}
+            accent={accent}
             suffix={suffix}
             className="text-4xl font-extrabold"
           />

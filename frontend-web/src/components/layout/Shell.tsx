@@ -63,7 +63,7 @@ export function Shell() {
     <div className="relative flex h-full min-h-screen overflow-hidden text-foreground">
       <aside className="gbd-glass relative z-10 hidden w-64 shrink-0 border-r border-border/60 md:flex md:flex-col">
         <div className="flex h-16 items-center gap-3 px-5">
-          <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary/30 bg-gradient-to-br from-[color-mix(in_oklch,var(--gold)_30%,var(--card))] to-card shadow-[0_8px_24px_-14px_var(--gold)]">
+          <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary/30 bg-gradient-to-br from-[color-mix(in_oklch,var(--brand)_30%,var(--card))] to-card shadow-[0_8px_24px_-14px_var(--brand)]">
             <img src="/gabada-mark.svg" alt="" className="h-6 w-6" />
           </div>
           <div>
@@ -81,7 +81,7 @@ export function Shell() {
           {pill ? (
             <span
               aria-hidden
-              className="pointer-events-none absolute left-3 right-3 z-0 rounded-xl border border-primary/20 bg-gradient-to-r from-accent to-[color-mix(in_oklch,var(--accent)_55%,var(--gold))] shadow-[0_10px_26px_-22px_var(--gold)] transition-[top,height] duration-200 ease-out"
+              className="pointer-events-none absolute left-3 right-3 z-0 rounded-xl border border-primary/20 bg-gradient-to-r from-accent to-[color-mix(in_oklch,var(--accent)_50%,var(--brand))] shadow-[0_10px_26px_-22px_var(--brand)] transition-[top,height] duration-200 ease-out"
               style={{ top: pill.top, height: pill.height }}
             />
           ) : null}

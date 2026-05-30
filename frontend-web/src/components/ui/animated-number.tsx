@@ -6,8 +6,8 @@ interface AnimatedNumberProps {
   decimals?: number
   prefix?: string
   suffix?: string
-  /** Apply the gold gradient treatment (reserve for hero / headline metrics). */
-  gold?: boolean
+  /** Apply the brand (red) gradient treatment (reserve for headline metrics). */
+  accent?: boolean
   className?: string
   /** Localized grouping (1,234). Defaults to true. */
   group?: boolean
@@ -22,7 +22,7 @@ export function AnimatedNumber({
   decimals = 0,
   prefix,
   suffix,
-  gold = false,
+  accent = false,
   className,
   group = true,
 }: AnimatedNumberProps) {
@@ -42,7 +42,7 @@ export function AnimatedNumber({
           {prefix}
         </span>
       ) : null}
-      <span className={cn(gold && 'gbd-gold-text', animated == null && 'opacity-40')}>
+      <span className={cn(accent && 'gbd-brand-text', animated == null && 'opacity-40')}>
         {shown}
       </span>
       {suffix ? (

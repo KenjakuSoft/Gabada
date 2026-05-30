@@ -26,11 +26,11 @@ interface PriceChartProps {
   locale?: string
 }
 
-// Dark-luxury palette: gold leads, then muted jewel tones.
+// Crimson-noir palette: brand red leads, then muted jewel tones.
 const COLORS = [
-  'oklch(82% 0.12 86)', // gold
+  'oklch(64% 0.23 26)', // brand red
   'oklch(72% 0.11 200)', // teal
-  'oklch(70% 0.13 30)', // copper
+  'oklch(78% 0.13 80)', // amber
   'oklch(72% 0.1 280)', // slate-violet
   'oklch(74% 0.12 150)', // sage
   'oklch(72% 0.12 350)', // rose
@@ -159,7 +159,7 @@ export function PriceChart({
             }
           />
           <Tooltip
-            cursor={{ stroke: 'var(--gold)', strokeWidth: 1, strokeDasharray: '4 4' }}
+            cursor={{ stroke: 'var(--brand)', strokeWidth: 1, strokeDasharray: '4 4' }}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null
               const full = (payload[0]?.payload as Point | undefined)?.full ?? label
