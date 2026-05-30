@@ -8,9 +8,9 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
   return (
-    <div className="gbd-reveal flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="gbd-reveal flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <h1 className="bg-gradient-to-r from-foreground via-[color-mix(in_oklch,var(--foreground)_78%,var(--primary))] to-primary bg-clip-text text-2xl font-black tracking-tight text-transparent">
+        <h1 className="font-display text-3xl font-extrabold tracking-tight">
           {title}
         </h1>
         {description ? (

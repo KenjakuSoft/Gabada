@@ -15,14 +15,13 @@ import {
   Trash2,
   TrendingDown,
 } from 'lucide-react'
-import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
-import { StatTile } from '@/components/ui/stat-tile'
+import { MetricCard } from '@/components/ui/metric-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toast-store'
 import { storesApi, productsApi } from '@/api'
@@ -273,34 +272,38 @@ export function StoresPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Stores"
-        description="Shops you track. Per-store health and coverage at a glance."
-        actions={
-          <Button size="sm" onClick={() => setAdding((v) => !v)}>
-            <Plus className="h-4 w-4" />
-            {adding ? 'Close' : 'Add store'}
-          </Button>
-        }
-      />
+      <div className="gbd-reveal flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="font-display text-3xl font-extrabold tracking-tight">
+            Stores
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Shops you track. Per-store health and coverage at a glance.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setAdding((v) => !v)}>
+          <Plus className="h-4 w-4" />
+          {adding ? 'Close' : 'Add store'}
+        </Button>
+      </div>
 
-      <BentoGrid cols={6}>
-        <StatTile
+      <div className="gbd-stagger grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <MetricCard
           label="Stores"
           value={aggregates.length}
           icon={<StoreIcon className="h-4 w-4" />}
           hint="tracked shops"
           loading={stores.isLoading}
-          tone="primary"
+          accent
         />
-        <StatTile
+        <MetricCard
           label="Product links"
           value={totals.productLinks}
           icon={<Boxes className="h-4 w-4" />}
           hint="across all stores"
           loading={products.isLoading}
         />
-        <StatTile
+        <MetricCard
           label="In stock"
           value={totals.inStock}
           icon={<CheckCircle2 className="h-4 w-4" />}
@@ -308,16 +311,18 @@ export function StoresPage() {
           tone="success"
           loading={products.isLoading}
         />
-        <StatTile
+        <MetricCard
           label="Scraped today"
           value={totals.recentlyScraped}
           icon={<Clock className="h-4 w-4" />}
           hint="last 24h"
-          tone="accent"
+          tone="primary"
           loading={products.isLoading}
         />
+      </div>
 
-        {adding ? (
+      {adding ? (
+        <BentoGrid cols={6}>
           <BentoTile colSpan={6} tone="primary">
             <TileHeader
               eyebrow="New source"
@@ -473,8 +478,8 @@ export function StoresPage() {
               </div>
             ) : null}
           </BentoTile>
-        ) : null}
-      </BentoGrid>
+        </BentoGrid>
+      ) : null}
 
       {stores.isLoading ? (
         <LoadingGrid />
