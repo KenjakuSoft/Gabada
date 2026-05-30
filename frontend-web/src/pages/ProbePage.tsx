@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
-import { StatTile } from '@/components/ui/stat-tile'
+import { MetricCard } from '@/components/ui/metric-card'
 import { toast } from '@/components/ui/toast-store'
 import {
   ScrapeReviewNotice,
@@ -120,14 +120,14 @@ export function ProbePage() {
           </div>
         </BentoTile>
 
-        <StatTile
+        <MetricCard
           label="Platform"
-          value={result?.platform ?? 'n/a'}
+          text={result?.platform ?? 'n/a'}
           icon={<Sparkles className="h-4 w-4" />}
           hint={result ? 'detected' : 'run probe first'}
-          tone={result ? 'primary' : 'default'}
+          accent={!!result}
         />
-        <StatTile
+        <MetricCard
           label="Candidates"
           value={result?.candidates.length ?? 0}
           icon={<Eye className="h-4 w-4" />}
@@ -138,7 +138,7 @@ export function ProbePage() {
                 ? 'inspected DOM'
                 : 'standby'
           }
-          tone={result && result.candidates.length > 0 ? 'accent' : 'default'}
+          tone={result && result.candidates.length > 0 ? 'primary' : 'default'}
         />
       </BentoGrid>
 

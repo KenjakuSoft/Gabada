@@ -5,12 +5,15 @@ import { cn } from '@/lib/utils'
 
 interface MetricCardProps {
   label: string
-  value: number
+  /** Numeric metric — animated count-up. Ignored when `text` is provided. */
+  value?: number
+  /** Non-numeric metric (e.g. a name) rendered in the numeral style. */
+  text?: string
   icon: ReactNode
   hint?: string
   suffix?: string
   loading?: boolean
-  /** Crimson brand treatment on the numeral (reserve for the headline metric). */
+  /** Brand-accent treatment on the numeral (reserve for the headline metric). */
   accent?: boolean
   tone?: 'default' | 'primary' | 'success' | 'warning'
 }
@@ -26,6 +29,7 @@ const TONE_RING: Record<NonNullable<MetricCardProps['tone']>, string> = {
 export function MetricCard({
   label,
   value,
+  text,
   icon,
   hint,
   suffix,
@@ -51,9 +55,18 @@ export function MetricCard({
       <div className="mt-4">
         {loading ? (
           <Skeleton className="h-10 w-24" />
+        ) : text != null ? (
+          <span
+            className={cn(
+              'gbd-numeral block truncate text-2xl font-extrabold',
+              accent && 'gbd-brand-text',
+            )}
+          >
+            {text}
+          </span>
         ) : (
           <AnimatedNumber
-            value={value}
+            value={value ?? null}
             accent={accent}
             suffix={suffix}
             className="text-4xl font-extrabold"

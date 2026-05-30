@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
-import { StatTile } from '@/components/ui/stat-tile'
+import { MetricCard } from '@/components/ui/metric-card'
 import { toast } from '@/components/ui/toast-store'
 import { categoriesApi, productsApi, storesApi } from '@/api'
 import type { Category, QuickAddResult, Store } from '@/api'
@@ -172,14 +172,14 @@ export function AddProductPage() {
           </div>
         </BentoTile>
 
-        <StatTile
+        <MetricCard
           label="URLs ready"
           value={validCount}
           icon={<Hash className="h-4 w-4" />}
           hint={invalidCount > 0 ? `${invalidCount} skipped` : 'all valid'}
           tone={validCount > 0 ? 'success' : 'default'}
         />
-        <StatTile
+        <MetricCard
           label={results ? 'Added' : 'Ready'}
           value={results ? okCount : 0}
           icon={<CheckCircle2 className="h-4 w-4" />}

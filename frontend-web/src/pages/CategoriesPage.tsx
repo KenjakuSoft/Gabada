@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { BentoGrid, BentoTile, TileHeader } from '@/components/ui/bento'
-import { StatTile } from '@/components/ui/stat-tile'
+import { MetricCard } from '@/components/ui/metric-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toast-store'
 import { cn } from '@/lib/utils'
@@ -128,23 +128,23 @@ export function CategoriesPage() {
         }
       />
 
-      <BentoGrid cols={6}>
-        <StatTile
+      <div className="gbd-stagger grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <MetricCard
           label="Categories"
           value={summaries.length}
           icon={<Tag className="h-4 w-4" />}
           hint="available labels"
           loading={loading}
-          tone="primary"
+          accent
         />
-        <StatTile
+        <MetricCard
           label="Categorized"
           value={stats.categorizedProducts}
           icon={<Layers className="h-4 w-4" />}
           hint={`${stats.totalProducts} total products`}
           loading={loading}
         />
-        <StatTile
+        <MetricCard
           label="Uncategorized"
           value={stats.uncategorizedProducts}
           icon={<Tag className="h-4 w-4" />}
@@ -152,16 +152,17 @@ export function CategoriesPage() {
           loading={loading}
           tone={stats.uncategorizedProducts > 0 ? 'warning' : 'success'}
         />
-        <StatTile
+        <MetricCard
           label="Largest"
-          value={stats.largestCategoryLabel}
+          text={stats.largestCategoryLabel}
           icon={<Palette className="h-4 w-4" />}
           hint={stats.largestCategoryCount > 0 ? `${stats.largestCategoryCount} products` : 'no assignments yet'}
           loading={loading}
-          tone="accent"
         />
+      </div>
 
-        {adding ? (
+      {adding ? (
+        <BentoGrid cols={6}>
           <BentoTile colSpan={6} tone="primary">
             <TileHeader
               eyebrow="New category"
@@ -216,8 +217,8 @@ export function CategoriesPage() {
               </div>
             </div>
           </BentoTile>
-        ) : null}
-      </BentoGrid>
+        </BentoGrid>
+      ) : null}
 
       {loading ? (
         <LoadingGrid />
