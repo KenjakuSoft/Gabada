@@ -45,33 +45,34 @@
 }
 
 .dark {
-  /* The showcase: near-black with a faint warm/red undertone. */
-  --background: oklch(13.5% 0.008 25);
-  --foreground: oklch(93% 0.008 30);
-  --muted: oklch(21% 0.01 25);
-  --muted-foreground: oklch(64% 0.014 30);
-  --card: oklch(17% 0.011 25);
-  --card-foreground: oklch(93% 0.008 30);
-  --border: oklch(28% 0.014 25);
-  --input: oklch(23% 0.012 25);
-  --ring: oklch(64% 0.23 26);
-  --primary: oklch(62% 0.23 26);
-  --primary-foreground: oklch(98% 0.01 25);
-  --accent: oklch(26% 0.05 25);
-  --accent-foreground: oklch(90% 0.05 26);
-  --destructive: oklch(62% 0.22 30);
+  /* The showcase — "Hollow Getsuga": near-pure black, glowing blood-crimson
+     energy, stark Hollow-white contrast. */
+  --background: oklch(10.5% 0.012 22);
+  --foreground: oklch(97% 0.004 30);
+  --muted: oklch(18% 0.013 24);
+  --muted-foreground: oklch(66% 0.016 30);
+  --card: oklch(14% 0.014 23);
+  --card-foreground: oklch(97% 0.004 30);
+  --border: oklch(27% 0.022 24);
+  --input: oklch(21% 0.015 24);
+  --ring: oklch(63% 0.27 27);
+  --primary: oklch(60% 0.27 27);
+  --primary-foreground: oklch(99% 0.01 25);
+  --accent: oklch(25% 0.07 25);
+  --accent-foreground: oklch(93% 0.06 27);
+  --destructive: oklch(61% 0.25 32);
   --destructive-foreground: oklch(99% 0 0);
   --success: oklch(74% 0.15 152);
   --warning: oklch(80% 0.13 78);
 
-  --brand: oklch(64% 0.23 26);
-  --brand-soft: oklch(74% 0.19 26);
-  --glow-a: oklch(60% 0.24 26);
-  --glow-b: oklch(50% 0.2 14);
-  --glow-c: oklch(40% 0.16 6);
+  --brand: oklch(62% 0.27 27);
+  --brand-soft: oklch(72% 0.23 27);
+  --glow-a: oklch(58% 0.3 27);
+  --glow-b: oklch(48% 0.26 18);
+  --glow-c: oklch(34% 0.2 8);
 
-  --shadow-elevated: 0 22px 60px -34px color-mix(in oklch, black 84%, transparent);
-  --shadow-soft: 0 12px 34px -26px color-mix(in oklch, black 74%, transparent);
+  --shadow-elevated: 0 22px 64px -32px color-mix(in oklch, black 88%, transparent);
+  --shadow-soft: 0 12px 36px -26px color-mix(in oklch, black 80%, transparent);
 }
 
 @theme inline {
@@ -112,9 +113,10 @@
   body {
     margin: 0;
     background:
-      radial-gradient(ellipse 60rem 32rem at 10% -10%, color-mix(in oklch, var(--glow-a) 16%, transparent) 0, transparent 70%),
-      radial-gradient(ellipse 50rem 30rem at 92% 0%, color-mix(in oklch, var(--glow-b) 12%, transparent) 0, transparent 66%),
-      linear-gradient(165deg, color-mix(in oklch, var(--background) 92%, var(--glow-c)) 0%, var(--background) 46%, color-mix(in oklch, var(--background) 97%, black) 100%);
+      radial-gradient(ellipse 48rem 26rem at 50% -14%, color-mix(in oklch, var(--glow-a) 22%, transparent) 0, transparent 72%),
+      radial-gradient(ellipse 60rem 32rem at 8% -10%, color-mix(in oklch, var(--glow-a) 18%, transparent) 0, transparent 70%),
+      radial-gradient(ellipse 50rem 30rem at 94% 2%, color-mix(in oklch, var(--glow-b) 14%, transparent) 0, transparent 66%),
+      linear-gradient(165deg, color-mix(in oklch, var(--background) 90%, var(--glow-c)) 0%, var(--background) 44%, color-mix(in oklch, var(--background) 98%, black) 100%);
     background-attachment: fixed;
     color: var(--foreground);
     font-family: var(--font-sans);
@@ -234,7 +236,11 @@
 @utility gbd-glow-card {
   position: relative;
   isolation: isolate;
-  box-shadow: var(--shadow-soft);
+  /* Persistent crimson energy edge — the Getsuga aura. */
+  box-shadow:
+    var(--shadow-soft),
+    0 0 0 1px color-mix(in oklch, var(--brand) 12%, transparent),
+    0 24px 70px -44px color-mix(in oklch, var(--brand) 60%, transparent);
 }
 @utility gbd-glow-card-before {
   content: "";
@@ -260,12 +266,19 @@
     linear-gradient(150deg, color-mix(in oklch, var(--card) 92%, transparent), color-mix(in oklch, var(--card) 72%, transparent));
 }
 
-/* Brand (red) accents — use semantically: prices, KPIs, CTAs. */
+/* Brand (red) accents — use semantically: prices, KPIs, CTAs. The drop-shadow
+   gives the crimson glyphs a faint energy glow like the Getsuga edge. */
 @utility gbd-brand-text {
-  background: linear-gradient(100deg, var(--brand-soft), var(--brand) 55%, color-mix(in oklch, var(--brand) 72%, var(--glow-c)));
+  background: linear-gradient(100deg, var(--brand-soft), var(--brand) 52%, color-mix(in oklch, var(--brand) 64%, var(--glow-c)));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  filter: drop-shadow(0 0 16px color-mix(in oklch, var(--brand) 42%, transparent));
+}
+@utility gbd-energy {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--brand) 22%, transparent),
+    0 0 28px -6px color-mix(in oklch, var(--brand) 45%, transparent);
 }
 @utility gbd-hairline {
   background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--brand) 62%, transparent), transparent);

@@ -276,10 +276,18 @@ function Hero({
       <span aria-hidden className="gbd-glow-card-before" />
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full opacity-60 blur-3xl"
+        className="pointer-events-none absolute -right-20 -top-28 h-80 w-80 rounded-full opacity-80 blur-3xl"
         style={{
           background:
-            'radial-gradient(circle, color-mix(in oklch, var(--brand) 26%, transparent), transparent 70%)',
+            'radial-gradient(circle, color-mix(in oklch, var(--brand) 42%, transparent), transparent 68%)',
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-32 left-1/4 h-64 w-64 rounded-full opacity-50 blur-3xl"
+        style={{
+          background:
+            'radial-gradient(circle, color-mix(in oklch, var(--glow-b) 36%, transparent), transparent 70%)',
         }}
       />
       <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
