@@ -14,7 +14,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          'bg-gradient-to-br from-primary to-[color-mix(in_oklch,var(--primary)_78%,var(--glow-b))] text-primary-foreground shadow-[0_6px_20px_-10px_var(--brand)] hover:border-primary/40 hover:shadow-[0_10px_28px_-10px_var(--brand)]',
+          'bg-gradient-to-br from-primary to-[color-mix(in_oklch,var(--primary)_78%,var(--glow-b))] text-primary-foreground shadow-sm hover:border-primary/40',
         secondary:
           'bg-accent text-accent-foreground shadow-sm hover:bg-accent/80',
         outline:

@@ -26,16 +26,16 @@ interface PriceChartProps {
   locale?: string
 }
 
-// Crimson-noir palette: brand red leads, then muted jewel tones.
+// Multi-store series palette (brand blue leads).
 const COLORS = [
-  'oklch(64% 0.23 26)', // brand red
-  'oklch(72% 0.11 200)', // teal
-  'oklch(78% 0.13 80)', // amber
-  'oklch(72% 0.1 280)', // slate-violet
-  'oklch(74% 0.12 150)', // sage
-  'oklch(72% 0.12 350)', // rose
-  'oklch(75% 0.12 240)', // sky
-  'oklch(76% 0.12 110)', // lime
+  '#6366f1',
+  '#ec4899',
+  '#14b8a6',
+  '#f59e0b',
+  '#8b5cf6',
+  '#ef4444',
+  '#22c55e',
+  '#0ea5e9',
 ]
 
 interface Point {

@@ -3,76 +3,73 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ──────────────────────────────────────────────────────────────────────────
-   Gabada — "Crimson Noir" design system
-   Near-black surfaces · vivid red accent · big numerals · generous space.
-   Token names are stable so every page re-skins from here.
+   Gabada design system — original blue/teal palette.
+   Token names are stable so every page re-skins from here. The --brand family
+   is the accent used by headline numerals and gradient text.
    ────────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Refined light variant (red on warm white). */
-  --background: oklch(97% 0.004 25);
-  --foreground: oklch(20% 0.012 25);
-  --muted: oklch(92.5% 0.005 25);
-  --muted-foreground: oklch(47% 0.014 25);
-  --card: oklch(99.4% 0.003 25);
-  --card-foreground: oklch(20% 0.012 25);
-  --border: oklch(86% 0.008 25);
-  --input: oklch(90% 0.006 25);
-  --ring: oklch(55% 0.2 26);
-  --primary: oklch(53% 0.21 26);
-  --primary-foreground: oklch(99% 0.01 25);
-  --accent: oklch(91% 0.04 25);
-  --accent-foreground: oklch(38% 0.13 26);
-  --destructive: oklch(55% 0.22 28);
+  --background: oklch(98.5% 0.006 232);
+  --foreground: oklch(18% 0.02 260);
+  --muted: oklch(94% 0.006 250);
+  --muted-foreground: oklch(50% 0.02 260);
+  --card: oklch(100% 0.002 250);
+  --card-foreground: oklch(18% 0.02 260);
+  --border: oklch(88% 0.012 245);
+  --input: oklch(92% 0.008 250);
+  --ring: oklch(62% 0.2 265);
+  --primary: oklch(56% 0.19 248);
+  --primary-foreground: oklch(99% 0 0);
+  --accent: oklch(93% 0.035 210);
+  --accent-foreground: oklch(28% 0.09 230);
+  --destructive: oklch(58% 0.23 25);
   --destructive-foreground: oklch(99% 0 0);
-  --success: oklch(56% 0.15 150);
-  --warning: oklch(68% 0.15 70);
+  --success: oklch(62% 0.17 150);
+  --warning: oklch(72% 0.17 70);
 
-  /* Brand accent family + ambient glows (crimson). */
-  --brand: oklch(56% 0.22 26);
-  --brand-soft: oklch(66% 0.2 26);
-  --glow-a: oklch(58% 0.22 26);
-  --glow-b: oklch(50% 0.18 15);
-  --glow-c: oklch(44% 0.14 8);
+  /* Brand accent (blue) + ambient glows. */
+  --brand: oklch(56% 0.19 248);
+  --brand-soft: oklch(66% 0.16 246);
+  --glow-a: oklch(72% 0.16 210);
+  --glow-b: oklch(78% 0.16 155);
+  --glow-c: oklch(76% 0.16 65);
 
-  --shadow-elevated: 0 18px 48px -32px color-mix(in oklch, var(--foreground) 50%, transparent);
-  --shadow-soft: 0 10px 28px -24px color-mix(in oklch, var(--foreground) 38%, transparent);
-  --radius: 0.9rem;
+  --shadow-elevated: 0 12px 34px -28px color-mix(in oklch, var(--foreground) 45%, transparent);
+  --shadow-soft: 0 8px 22px -20px color-mix(in oklch, var(--foreground) 34%, transparent);
+  --radius: 0.75rem;
 
   --font-display: "Sora", "Space Grotesk", "Segoe UI", system-ui, sans-serif;
-  --font-sans: "Inter", "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Aptos", "Plus Jakarta Sans", "Manrope", "Segoe UI", sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", "SF Mono", ui-monospace, monospace;
 }
 
 .dark {
-  /* The showcase — "Hollow Getsuga": near-pure black, glowing blood-crimson
-     energy, stark Hollow-white contrast. */
-  --background: oklch(10.5% 0.012 22);
-  --foreground: oklch(97% 0.004 30);
-  --muted: oklch(18% 0.013 24);
-  --muted-foreground: oklch(66% 0.016 30);
-  --card: oklch(14% 0.014 23);
-  --card-foreground: oklch(97% 0.004 30);
-  --border: oklch(27% 0.022 24);
-  --input: oklch(21% 0.015 24);
-  --ring: oklch(63% 0.27 27);
-  --primary: oklch(60% 0.27 27);
-  --primary-foreground: oklch(99% 0.01 25);
-  --accent: oklch(25% 0.07 25);
-  --accent-foreground: oklch(93% 0.06 27);
-  --destructive: oklch(61% 0.25 32);
+  --background: oklch(11.5% 0.018 250);
+  --foreground: oklch(96% 0.005 250);
+  --muted: oklch(20% 0.015 260);
+  --muted-foreground: oklch(68% 0.015 250);
+  --card: oklch(16% 0.018 250);
+  --card-foreground: oklch(96% 0.005 250);
+  --border: oklch(28% 0.018 250);
+  --input: oklch(24% 0.015 260);
+  --ring: oklch(72% 0.17 220);
+  --primary: oklch(72% 0.17 220);
+  --primary-foreground: oklch(12% 0.025 245);
+  --accent: oklch(25% 0.05 220);
+  --accent-foreground: oklch(96% 0.005 250);
+  --destructive: oklch(65% 0.23 25);
   --destructive-foreground: oklch(99% 0 0);
-  --success: oklch(74% 0.15 152);
-  --warning: oklch(80% 0.13 78);
+  --success: oklch(68% 0.17 150);
+  --warning: oklch(76% 0.17 70);
 
-  --brand: oklch(62% 0.27 27);
-  --brand-soft: oklch(72% 0.23 27);
-  --glow-a: oklch(58% 0.3 27);
-  --glow-b: oklch(48% 0.26 18);
-  --glow-c: oklch(34% 0.2 8);
+  --brand: oklch(72% 0.17 220);
+  --brand-soft: oklch(80% 0.14 218);
+  --glow-a: oklch(63% 0.18 220);
+  --glow-b: oklch(67% 0.17 155);
+  --glow-c: oklch(74% 0.16 65);
 
-  --shadow-elevated: 0 22px 64px -32px color-mix(in oklch, black 88%, transparent);
-  --shadow-soft: 0 12px 36px -26px color-mix(in oklch, black 80%, transparent);
+  --shadow-elevated: 0 14px 38px -30px color-mix(in oklch, black 78%, transparent);
+  --shadow-soft: 0 9px 26px -22px color-mix(in oklch, black 70%, transparent);
 }
 
 @theme inline {
@@ -97,8 +94,8 @@
   --font-display: var(--font-display);
   --font-mono: var(--font-mono);
   --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 4px);
-  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
 }
 
 @layer base {
@@ -113,37 +110,33 @@
   body {
     margin: 0;
     background:
-      radial-gradient(ellipse 48rem 26rem at 50% -14%, color-mix(in oklch, var(--glow-a) 22%, transparent) 0, transparent 72%),
-      radial-gradient(ellipse 60rem 32rem at 8% -10%, color-mix(in oklch, var(--glow-a) 18%, transparent) 0, transparent 70%),
-      radial-gradient(ellipse 50rem 30rem at 94% 2%, color-mix(in oklch, var(--glow-b) 14%, transparent) 0, transparent 66%),
-      linear-gradient(165deg, color-mix(in oklch, var(--background) 90%, var(--glow-c)) 0%, var(--background) 44%, color-mix(in oklch, var(--background) 98%, black) 100%);
-    background-attachment: fixed;
+      radial-gradient(circle at 12% -12%, color-mix(in oklch, var(--glow-a) 28%, transparent) 0, transparent 34rem),
+      radial-gradient(circle at 88% 4%, color-mix(in oklch, var(--glow-b) 20%, transparent) 0, transparent 30rem),
+      linear-gradient(135deg, color-mix(in oklch, var(--background) 96%, var(--glow-a)) 0%, var(--background) 48%, color-mix(in oklch, var(--background) 92%, var(--glow-c)) 100%);
     color: var(--foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
-  /* Fine grain + faint ruled grid for depth (masked, non-interactive). */
   body::before {
     content: "";
     pointer-events: none;
     position: fixed;
     inset: 0;
     z-index: -1;
-    opacity: 0.5;
+    opacity: 0.22;
     background-image:
-      linear-gradient(color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
-      linear-gradient(90deg, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px);
-    background-size: 56px 56px;
-    mask-image: radial-gradient(circle at 50% -8%, black, transparent 78%);
+      linear-gradient(color-mix(in oklch, var(--foreground) 6%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in oklch, var(--foreground) 6%, transparent) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(circle at 50% 0%, black, transparent 72%);
   }
   ::selection {
-    background: color-mix(in oklch, var(--brand) 34%, transparent);
-    color: var(--foreground);
+    background: color-mix(in oklch, var(--primary) 28%, transparent);
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklch, var(--brand) 42%, var(--muted)) transparent;
+    scrollbar-color: color-mix(in oklch, var(--primary) 42%, var(--muted)) transparent;
   }
   h1, h2, h3 {
     font-family: var(--font-display);
@@ -166,12 +159,12 @@
   100% { transform: scale(1); }
 }
 @keyframes gbd-pulse-ring {
-  0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--brand) 60%, transparent); }
-  70%  { box-shadow: 0 0 0 9px color-mix(in oklch, var(--brand) 0%, transparent); }
-  100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--brand) 0%, transparent); }
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 50%, transparent); }
+  70%  { box-shadow: 0 0 0 9px color-mix(in oklch, var(--primary) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 0%, transparent); }
 }
 @keyframes gbd-flash {
-  0%   { background-color: color-mix(in oklch, var(--brand) 26%, transparent); }
+  0%   { background-color: color-mix(in oklch, var(--accent) 80%, transparent); }
   100% { background-color: transparent; }
 }
 @keyframes gbd-toast-in {
@@ -185,10 +178,6 @@
 @keyframes gbd-sheen {
   0%   { transform: translateX(-130%) skewX(-18deg); }
   100% { transform: translateX(230%) skewX(-18deg); }
-}
-@keyframes gbd-marquee {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-50%); }
 }
 @keyframes gbd-ticker-up {
   from { opacity: 0; transform: translateY(60%); }
@@ -229,18 +218,13 @@
 }
 @utility gbd-glass {
   background:
-    linear-gradient(150deg, color-mix(in oklch, var(--card) 92%, transparent), color-mix(in oklch, var(--card) 74%, transparent));
-  backdrop-filter: blur(14px) saturate(1.1);
+    linear-gradient(150deg, color-mix(in oklch, var(--card) 94%, transparent), color-mix(in oklch, var(--card) 80%, transparent));
   box-shadow: var(--shadow-soft);
 }
 @utility gbd-glow-card {
   position: relative;
   isolation: isolate;
-  /* Persistent crimson energy edge — the Getsuga aura. */
-  box-shadow:
-    var(--shadow-soft),
-    0 0 0 1px color-mix(in oklch, var(--brand) 12%, transparent),
-    0 24px 70px -44px color-mix(in oklch, var(--brand) 60%, transparent);
+  box-shadow: var(--shadow-soft);
 }
 @utility gbd-glow-card-before {
   content: "";
@@ -250,7 +234,7 @@
   z-index: -1;
   border-radius: inherit;
   opacity: 0;
-  background: linear-gradient(135deg, color-mix(in oklch, var(--glow-a) 40%, transparent), color-mix(in oklch, var(--glow-b) 32%, transparent), color-mix(in oklch, var(--glow-c) 24%, transparent));
+  background: linear-gradient(135deg, color-mix(in oklch, var(--glow-a) 36%, transparent), color-mix(in oklch, var(--glow-b) 30%, transparent), color-mix(in oklch, var(--glow-c) 24%, transparent));
   transition: opacity 240ms ease;
 }
 @utility gbd-hover-lift {
@@ -262,26 +246,19 @@
 }
 @utility gbd-spotlight {
   background:
-    radial-gradient(circle at var(--x, 20%) var(--y, 0%), color-mix(in oklch, var(--brand) 14%, transparent), transparent 36%),
-    linear-gradient(150deg, color-mix(in oklch, var(--card) 92%, transparent), color-mix(in oklch, var(--card) 72%, transparent));
+    radial-gradient(circle at var(--x, 20%) var(--y, 0%), color-mix(in oklch, var(--primary) 12%, transparent), transparent 32%),
+    linear-gradient(150deg, color-mix(in oklch, var(--card) 94%, transparent), color-mix(in oklch, var(--card) 78%, transparent));
 }
 
-/* Brand (red) accents — use semantically: prices, KPIs, CTAs. The drop-shadow
-   gives the crimson glyphs a faint energy glow like the Getsuga edge. */
+/* Brand accent text — gradient fill, used for headline numerals. */
 @utility gbd-brand-text {
-  background: linear-gradient(100deg, var(--brand-soft), var(--brand) 52%, color-mix(in oklch, var(--brand) 64%, var(--glow-c)));
+  background: linear-gradient(100deg, var(--brand-soft), var(--brand) 60%, color-mix(in oklch, var(--brand) 78%, var(--glow-b)));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 0 16px color-mix(in oklch, var(--brand) 42%, transparent));
-}
-@utility gbd-energy {
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--brand) 22%, transparent),
-    0 0 28px -6px color-mix(in oklch, var(--brand) 45%, transparent);
 }
 @utility gbd-hairline {
-  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--brand) 62%, transparent), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary) 55%, transparent), transparent);
 }
 @utility gbd-sheen {
   position: relative;
