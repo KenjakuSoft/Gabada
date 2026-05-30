@@ -54,3 +54,6 @@ packaging/windows/output/
 
 # Local scratch scripts (one-off smoke tests, not part of the app)
 backend/scratch_*.py
+
+# Saved scraped pages used for one-off debugging (e.g. _redacted-store.html)
+/_*.html
