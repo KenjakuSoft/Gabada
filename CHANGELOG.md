@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.7.1] - 2026-07-06
+
 ### Security
 - **All 17 open Dependabot alerts fixed** by upgrading frontend dependencies: axios 1.16.0 (six high — proxy-credential leaks, ReDoS, prototype-pollution MITM), react-router-dom 7.15.1 (turbo-stream deserialization RCE, `__manifest` DoS, CSRF), vite 8.0.16 (`server.fs.deny` bypass, NTLMv2 hash disclosure via launch-editor), form-data 4.0.6 (CRLF injection), plus @babel/core, brace-expansion, and js-yaml patch bumps. `npm audit` now reports 0 vulnerabilities.
 - **Stored links can no longer smuggle non-web URL schemes.** Every URL field on client payloads (products, stores, product-store links, quick-add, file-import rows, Woo/API import requests) rejects explicit schemes other than http/https — including control-character-smuggled forms like `jav\tascript:` — and catalog-sourced permalinks/image URLs from WooCommerce and custom JSON feeds are neutralized at the service layer before persisting (the internal `api://catalog/...` sentinel is preserved). A malicious imported URL previously rendered as a clickable `<a href>` inside the app origin, where a click would have executed with full local-API access. Store reads tolerate legacy rows so existing libraries keep loading.
@@ -322,7 +326,9 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
-[Unreleased]: https://github.com/KenjakuSoft/Gabada/compare/v0.6.7...HEAD
+[Unreleased]: https://github.com/KenjakuSoft/Gabada/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.7.1
+[0.7.0]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.7.0
 [0.6.7]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.6.7
 [0.6.6]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.6.6
 [0.6.5]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.6.5
