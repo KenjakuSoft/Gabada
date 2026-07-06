@@ -619,6 +619,10 @@ class SelectorLabResponse(BaseModel):
     final_url: Optional[str] = None
     hostname: Optional[str] = None
     platform: str = "generic"
+    # True when the page's buy area carries installment / pay-later amounts
+    # (KOKO, Mintpay, ...) near the real price — the UI defaults its
+    # candidate list to "helpful only" on such pages.
+    noisy_price_context: bool = False
     root_selector: Optional[str] = None
     extracted: ScrapeResult = ScrapeResult()
     current_profile: Optional[SelectorLabProfile] = None

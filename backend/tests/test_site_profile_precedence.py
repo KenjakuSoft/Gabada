@@ -78,15 +78,38 @@ def test_site_profile_preserves_true_per_link_selector(
     assert merged.selectors.price == ".per-link-price"
 
 
-def test_shipped_redacted-store_profile_pins_single_product_price() -> None:
-    """The bundled redacted-store profile must scope to the single-product
-    ``p.price`` block, not the JetWooBuilder related-products carousel
-    (``span.price``) that the generic Woo default bleeds into."""
+def test_saved_profile_with_scoped_price_selectors_parses_fully(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A saved profile that scopes price to the single-product ``p.price``
+    block (avoiding related-product carousels that use ``span.price``) must
+    round-trip through the TOML loader with selectors and wait_for intact."""
+    profiles_path = tmp_path / "sites.toml"
+    profiles_path.write_text(
+        "\n".join(
+            [
+                '["shop-a.example"]',
+                'platform = "woocommerce"',
+                'wait_for = "h1"',
+                "",
+                '["shop-a.example".selectors]',
+                'price = "p.price del .woocommerce-Price-amount, p.price > .woocommerce-Price-amount"',
+                'discounted_price = "p.price ins .woocommerce-Price-amount"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(site_profiles, "SITES_TOML_PATH", str(profiles_path))
+    monkeypatch.setattr(site_profiles, "_cache", {})
+    monkeypatch.setattr(site_profiles, "_cache_mtime", 0.0)
+
     profile = site_profiles.find_profile(
-        "https://redacted-store/product/some-game-playstation-5/"
+        "https://shop-a.example/product/some-game-playstation-5/"
     )
     assert profile is not None
-    assert profile.hostname == "redacted-store"
+    assert profile.hostname == "shop-a.example"
     assert profile.selectors.get("price", "").startswith("p.price")
     assert profile.selectors.get("discounted_price") == (
         "p.price ins .woocommerce-Price-amount"

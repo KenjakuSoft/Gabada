@@ -93,10 +93,6 @@ function hostnameFromUrl(value: string | null | undefined): string | null {
   }
 }
 
-function isNoisyHost(hostname: string | null | undefined): boolean {
-  return hostname?.endsWith('redacted-store.example') ?? false
-}
-
 function findStoreId(stores: Store[], host: string | null): string {
   if (!host) return ''
   const match = stores.find(
@@ -371,7 +367,7 @@ export function SelectorLabPage() {
       }),
     onSuccess: (data) => {
       setDraft(buildDraft(data, stores.data ?? []))
-      setHelpfulOnly(isNoisyHost(data.hostname))
+      setHelpfulOnly(Boolean(data.noisy_price_context))
       test.reset()
       toast.success('Selector scan complete', data.hostname ?? data.platform)
     },
@@ -434,7 +430,7 @@ export function SelectorLabPage() {
   const displayed = test.data ?? result?.extracted ?? null
   const showDisplayedDiscount = hasDistinctDiscount(displayed)
   const host = result?.hostname ?? hostnameFromUrl(result?.final_url ?? url)
-  const noisyHost = isNoisyHost(host)
+  const noisyHost = Boolean(result?.noisy_price_context)
   const saveTarget = draft?.targetStoreId
     ? stores.data?.find((store) => String(store.id) === draft.targetStoreId)?.name ??
       host ??
@@ -644,8 +640,8 @@ export function SelectorLabPage() {
                 )}
                 {noisyHost ? (
                   <div className="rounded-md border border-amber-500/25 bg-amber-500/10 p-3 text-amber-800 dark:text-amber-200">
-                    redacted-store pages often include KOKO installment numbers and related-product prices.
-                    Pick the main `LKR` value near the top product block, then test on a few products
+                    This page includes installment (KOKO/Mintpay) numbers and related-product prices.
+                    Pick the main price near the top product block, then test on a few products
                     before saving the store profile.
                   </div>
                 ) : null}

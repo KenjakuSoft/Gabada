@@ -375,6 +375,7 @@ export interface SelectorLabResponse {
   final_url: string | null
   hostname: string | null
   platform: string
+  noisy_price_context: boolean
   root_selector: string | null
   extracted: ScrapeResult
   current_profile: SelectorLabProfile | null

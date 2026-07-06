@@ -63,7 +63,7 @@ async def _stop_driver(driver: Any) -> None:
 async def _try_solve_captcha(driver: Any, tab: Any = None) -> bool:
     """Best-effort: click the Cloudflare Turnstile checkbox via SeleniumBase.
 
-    redacted-store and similar stores serve interactive Turnstile, not just the
+    Some protected stores serve interactive Turnstile, not just the
     auto-clearing JS challenge.
 
     Modern SeleniumBase (4.50+) puts the CDP-mode solver on the Tab object

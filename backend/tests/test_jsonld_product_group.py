@@ -1,6 +1,6 @@
 """Tests for JSON-LD ``ProductGroup`` / ``hasVariant`` aggregation.
 
-Background: Shopify storefronts (e.g. redacted-store) emit a single
+Background: some Shopify storefronts emit a single
 ``@type: ProductGroup`` block whose actual ``Offer`` records — including
 ``availability`` — live one level down inside ``hasVariant[].offers``.
 The previous parser only inspected the top-level ``offers`` field. For
@@ -180,8 +180,8 @@ def test_product_group_with_no_variants_falls_back_to_unknown():
     assert result.stock_status == "unknown"
 
 
-def test_real_redacted-store_payload_yields_out_of_stock():
-    """Replays the actual /products/sony-playstation-dualsense ProductGroup.
+def test_real_shopify_variant_payload_yields_out_of_stock():
+    """Replays a real store's /products/sony-playstation-dualsense ProductGroup.
 
     Trimmed to two of the four variants — the structure is identical
     across the others.

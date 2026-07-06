@@ -1353,6 +1353,12 @@ _RAW_PRICE_HINT_RE = re.compile(
     r"special\s*price|offer\s*price|regular\s*price|unit\s*price|per\s*unit|amount)\b",
     re.IGNORECASE,
 )
+# Installment / pay-later providers whose per-month amounts crowd the buy
+# area on some stores. Used to flag noisy price context in the Selector Lab.
+_INSTALLMENT_CONTEXT_RE = re.compile(
+    r"\b(?:koko|mintpay|payhere|webxpay)\b",
+    re.IGNORECASE,
+)
 _RAW_PRICE_SPEC_RE = re.compile(
     r"\b(weight|item\s*code|model|warranty|stock|availability|sku|serial|"
     r"memory\s*type|form\s*factor|capacity|speeds?|latencies?|temperature|"
@@ -2271,10 +2277,10 @@ _PRICE_SELECTORS = [
     # WooCommerce
     ".price ins .amount",
     ".price .amount",
-    # CS-Cart (redacted-store, redacted-store.example, and similar B2B-enabled stores)
+    # CS-Cart (B2B-enabled electronics stores and similar)
     # Scoped to the main product block first so we don't pick up variant-option,
     # "you may also like", cart-sidebar, or payment-method variant prices.
-    # Newer CS-Cart templates (redacted-store 2026+) put the price as raw text directly
+    # Newer CS-Cart templates (2026+) put the price as raw text directly
     # inside `.ty-price-now`, with no `.ty-price-num` child — selectors here
     # cover both layouts.
     ".ty-productPage-price .ty-price-now .ty-price-num",
@@ -2337,11 +2343,11 @@ _DEALER_PRICE_SELECTORS = [
 ]
 
 _STOCK_SELECTORS = [
-    # CS-Cart (redacted-store, redacted-store.example)
+    # CS-Cart
     ".ty-special-msg",
     ".ty-qty-in-stock",
     ".ty-qty-out-of-stock",
-    # Custom PHP (redacted-store)
+    # Custom PHP storefronts
     ".ProInfo dd",
     # Amazon / generic
     "#availability span",
@@ -4525,10 +4531,19 @@ async def _populate_selector_lab(
         if response.current_profile.matched_hostname != response.current_profile.hostname:
             note += f" for {response.current_profile.hostname}"
         response.notes.append(note)
-    if response.hostname and response.hostname.endswith("redacted-store.example"):
+    # Pages whose buy area carries installment / pay-later amounts drown the
+    # real price in near-duplicates; flag them so the UI can default to the
+    # "helpful only" candidate view regardless of which store this is.
+    installment_texts = (
+        [c.text or "" for c in response.candidates]
+        + [c.sample or "" for c in response.candidates]
+        + [item.text or "" for item in response.buy_area]
+    )
+    if any(_INSTALLMENT_CONTEXT_RE.search(text) for text in installment_texts):
+        response.noisy_price_context = True
         response.notes.append(
-            "redacted-store product pages include KOKO/installment and related-product prices. "
-            "Prefer the main LKR amount in the top product block, then test on a few products before saving."
+            "This page shows installment / pay-later amounts (KOKO, Mintpay, ...) near the real price. "
+            "Prefer the main amount in the top product block, then test on a few products before saving."
         )
     if response.root_selector:
         response.notes.append(f"Detected product root: {response.root_selector}")
@@ -4926,8 +4941,8 @@ async def _open_context(config: ScrapeConfig) -> BrowserContext:
     # Note: keep `extra_http_headers` minimal. Chromium already sends correct
     # `Accept`, `Upgrade-Insecure-Requests`, `sec-ch-ua*` etc. based on its
     # real UA. Overriding those values (or adding them when Chromium already
-    # sent them) causes a mismatch that some CDNs / WAFs (redacted-store and
-    # similar CS-Cart B2B stores) read as bot, responding with a stripped
+    # sent them) causes a mismatch that some CDNs / WAFs (CS-Cart B2B
+    # stores among others) read as bot, responding with a stripped
     # page that's missing the product block. Only `Accept-Language` — paired
     # with locale — is safe to set explicitly.
     options: dict = dict(

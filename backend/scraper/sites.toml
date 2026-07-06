@@ -1,33 +1,23 @@
 # Per-site scrape profiles. See scraper/site_profiles.py for the format and
 # matching rules. Edit + save — profiles hot-reload on mtime change.
-
-# redacted-store (WooCommerce + Elementor / JetWooBuilder). The page renders the
-# main product price as a single-product <p class="price"> block, but also
-# renders a "related products" carousel whose cards use <span class="price">.
-# The generic Woo default (.price > .amount) bleeds into that carousel and
-# tracks a neighbouring product's price. Pin extraction to the single-product
-# <p class="price"> (the Cash/Card price the store actually charges); the
-# direct-child fallback covers non-sale products with no <del>/<ins> wrapper.
 #
-# Note: the native <p class="price"> is rendered display:none (Elementor draws
-# the visible price via its own widget), so it is present in the DOM but never
-# "visible" — a visibility-gated wait_for on it hangs for the full timeout.
-# Anchor wait_for on the always-visible <h1> title instead; extraction reads
-# the hidden <p class="price"> via textContent, which does not need visibility.
-["redacted-store"]
-platform = "woocommerce"
-wait_for = "h1"
-
-["redacted-store".selectors]
-price = "p.price del .woocommerce-Price-amount, p.price > .woocommerce-Price-amount"
-discounted_price = "p.price ins .woocommerce-Price-amount"
-
-# redacted-store — Next.js (App Router) storefront on Vercel. Product data is
-# client-rendered after a fetch: no JSON-LD and no product OpenGraph tags in
-# the HTML shell. Anchor wait_for on the <h1> title (it renders together with
-# the price data), then the engine's generic currency-text poll catches the
-# "LKR ..." price block. The store hides prices entirely on out-of-stock
-# products, so expect a stock_status without a price on those pages.
-["redacted-store"]
-platform = "generic"
-wait_for = "h1"
+# This file ships empty. Add one block per store domain; subdomains of a
+# saved hostname match automatically. Known platforms: cs-cart, woocommerce,
+# shopify, magento, prestashop, opencart, bigcommerce, wix, squarespace,
+# generic, facebook-marketplace.
+#
+# Example — pin a platform and wait_for:
+#
+#   ["big-store.example"]
+#   platform = "cs-cart"
+#   wait_for = "h1"
+#
+# Example — pin explicit selectors (Selector Lab writes this shape):
+#
+#   ["myshop.example"]
+#   platform = "woocommerce"
+#   wait_for = "h1"
+#
+#   ["myshop.example".selectors]
+#   price = "p.price del .woocommerce-Price-amount, p.price > .woocommerce-Price-amount"
+#   discounted_price = "p.price ins .woocommerce-Price-amount"

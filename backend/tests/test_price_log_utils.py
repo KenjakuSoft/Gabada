@@ -23,7 +23,7 @@ def test_numeric_raw_falls_back_to_local_currency() -> None:
 
 
 def test_plain_word_per_is_not_treated_as_currency() -> None:
-    # Regression: redacted-store prices like "Rs. 12,500.00 PER ITEM" previously
+    # Regression: store prices like "Rs. 12,500.00 PER ITEM" previously
     # matched the word "PER" as a currency code.
     assert (
         infer_currency_code(

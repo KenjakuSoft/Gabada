@@ -8,7 +8,7 @@ whenever its mtime changes — edit it in Notepad, save, done.
 File format (TOML):
 
     # ``sites.toml``
-    ["redacted-store"]
+    ["big-store.example"]
     platform = "cs-cart"
 
     ["example.com"]
@@ -444,7 +444,7 @@ _DEFAULT_BODY = """# Gabada site profiles
 #
 # Examples:
 #
-#   [\"redacted-store\"]
+#   [\"big-store.example\"]
 #   platform = \"cs-cart\"
 #
 #   [\"myshop.com\"]
