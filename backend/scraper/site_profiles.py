@@ -64,6 +64,10 @@ PLATFORM_WAIT_FOR: dict[str, str] = {
     "shopify":     ".price, [data-product-price]",
     "magento":     "[data-price-type='finalPrice'] .price, .price-box .price",
     "prestashop":  "#our_price_display, .current-price",
+    "opencart":    "#product, .product-info",
+    "bigcommerce": ".productView-price, [data-product-price-without-tax]",
+    "wix":         "[data-hook='formatted-primary-price'], [data-hook='product-price']",
+    "squarespace": ".product-price, .ProductItem-details",
     "generic":     "",
     "facebook-marketplace": "div[role='main']",
 }
@@ -133,6 +137,42 @@ PLATFORM_SELECTORS: dict[str, dict[str, Optional[str]]] = {
         "discounted_price": "#our_price_display, .current-price",
         "dealer_price": None,
         "stock_status": "#stock_availability, .availability",
+    },
+    "opencart": {
+        # Default OpenCart themes render the price as a bare <h2> in the
+        # product column; sale layouts add .price-old / .price-new.
+        "title": "#content h1, .product-info h1, h1.product-title",
+        "price": ".price-old, #content ul.list-unstyled h2, .product-price",
+        "discounted_price": ".price-new",
+        "dealer_price": None,
+        "stock_status": ".product-info .stock, [class*='stock']",
+    },
+    "bigcommerce": {
+        # Stencil themes: .price--rrp is the struck original and
+        # .price--withoutTax the live price. Without a sale both selector
+        # lists resolve to the same value and the engine clears the discount.
+        "title": ".productView-title",
+        "price": ".price--rrp, [data-product-rrp-price-without-tax], .price--withoutTax",
+        "discounted_price": ".price--withoutTax, [data-product-price-without-tax]",
+        "dealer_price": None,
+        "stock_status": "[data-product-stock], .productView-info-value--stock",
+    },
+    "wix": {
+        # Wix Stores exposes stable data-hook attributes across themes.
+        # formatted-secondary-price only exists during a sale (the struck
+        # original); otherwise price falls through to the primary price.
+        "title": "[data-hook='product-title']",
+        "price": "[data-hook='formatted-secondary-price'], [data-hook='formatted-primary-price']",
+        "discounted_price": "[data-hook='formatted-primary-price']",
+        "dealer_price": None,
+        "stock_status": "[data-hook='product-inventory-status']",
+    },
+    "squarespace": {
+        "title": ".ProductItem-details-title",
+        "price": ".product-price .original-price, .product-price",
+        "discounted_price": ".product-price .sale-price",
+        "dealer_price": None,
+        "stock_status": ".product-mark.sold-out, .product-scarcity",
     },
     "generic": {
         "title": None,
@@ -399,7 +439,8 @@ _DEFAULT_BODY = """# Gabada site profiles
 # Edit this file with any text editor (Notepad works). Save and the scraper
 # reloads automatically — no server restart needed.
 #
-# Known platforms: cs-cart, woocommerce, shopify, magento, prestashop, generic, facebook-marketplace
+# Known platforms: cs-cart, woocommerce, shopify, magento, prestashop,
+# opencart, bigcommerce, wix, squarespace, generic, facebook-marketplace
 #
 # Examples:
 #

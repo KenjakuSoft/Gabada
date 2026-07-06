@@ -14,4 +14,6 @@ xlrd>=2.0.1
 # Stealth-Chrome fallback for Cloudflare / DataDome bot challenges.
 # The scraper boots without it (the import is gated in scraper/stealth.py),
 # but protected stores will fail without it installed.
-seleniumbase>=4.30.0
+# 4.50+ moves the CDP captcha solver onto the Tab object (tab.solve_captcha),
+# which scraper/stealth.py targets first.
+seleniumbase>=4.50.5

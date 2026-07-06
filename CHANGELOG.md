@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.7.0] - 2026-07-06
+
+### Added
+- **redacted-store support.** Next.js (App Router) storefront on Vercel with fully client-rendered product data — no JSON-LD and no product OpenGraph tags in the HTML shell. A new `sites.toml` profile anchors `wait_for` on the product `<h1>`, and the extraction fixes below make the rendered "LKR …" buy area parse correctly. This store hides the price entirely on out-of-stock products, so those pages report a stock status without a price.
+- **Meta-tag extraction strategy.** The waterfall now reads OpenGraph / Twitter product meta tags (`product:price:amount`, `og:price:amount`, `product:sale_price:amount`, `product:price:currency`, `og:availability`, and `twitter:label1`/`twitter:data1` price pairs) after JSON-LD and microdata. Shopify and many custom storefronts expose these even when richer structured data is absent.
+- **Four new platform fingerprints with default selectors:** OpenCart (`#button-cart`), BigCommerce (`.productView-*`), Wix Stores (`data-hook` attributes), and Squarespace (`.ProductItem-*`). Wired into platform auto-detect, probe suggestions, and `sites.toml` profiles.
+
+### Fixed
+- **React/Next storefronts no longer lose their price to text-node splitting.** Frameworks render `{currency} {value}` as sibling DOM text nodes ("LKR" + "168,000.00"); the smart scan judged each text node alone, so the number node carried no currency signal and was discarded on utility-class (Tailwind) sites whose class names contain no price hints. The scan now judges each element's combined own text, once per element.
+- **Long "free …" prose can no longer become a 0.00 price.** A warranty paragraph ("Provides free technical support …") matched the free-price signal and beat the real price on candidate score. Free-price candidates are now limited to short, label-like text (≤ 80 chars).
+- **Buy-area items no longer classify model numbers as prices.** "B1503", "NS100", and "256GB" produced bogus price items (values 1503 / 100 / 256); digits glued to letters are now rejected as spec/model text. Currency codes glued to a price-formatted number ("LKR35,500") are still recognized as prices — only unformatted letter+digit runs ("RS1000") count as model text.
+
+### Changed
+- **SeleniumBase floor raised to 4.50.5** (was 4.30.0), and the stealth captcha clicker now targets the modern CDP API — `tab.solve_captcha()` on the Tab returned by `driver.get()` — with the legacy `uc_gui_*` names kept as fallbacks. On recent SeleniumBase releases the old names never existed on the cdp_driver Browser, so the Turnstile auto-clicker was silently a no-op. Verified live against redacted-store's interactive Turnstile (price, sale price, and stock extracted through the stealth path).
+- **Currency recognition broadened from 9 to ~48 currencies** (ISO codes plus the ₺ ₩ ₫ ₴ ₦ ₱ ₪ symbols) consistently across the smart scan, Selector Lab, buy-area classifier, and raw-price signal scoring.
+- **Rendered-price polling is theme-agnostic.** The post-navigation poll now also accepts any visible currency-prefixed number, so client-rendered SPAs without WooCommerce-style class names extract as soon as the data fetch lands instead of paying the full poll timeout.
+- App version bumped to **0.7.0**.
+
+### Tests
+- Added `backend/tests/test_meta_tag_extraction.py` (9 tests) and captcha-solver resolution-order coverage in `test_stealth_fallback.py` (4 tests). Full backend suite: 123 tests.
+
 ## [0.6.7] - 2026-05-10
 
 ### Fixed

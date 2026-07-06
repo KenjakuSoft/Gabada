@@ -60,18 +60,35 @@ async def _stop_driver(driver: Any) -> None:
     )
 
 
-async def _try_solve_captcha(driver: Any) -> bool:
+async def _try_solve_captcha(driver: Any, tab: Any = None) -> bool:
     """Best-effort: click the Cloudflare Turnstile checkbox via SeleniumBase.
 
     redacted-store and similar stores serve interactive Turnstile, not just the
-    auto-clearing JS challenge. SeleniumBase exposes an OS-level mouse
-    helper (pyautogui under the hood) that finds and clicks the checkbox.
+    auto-clearing JS challenge.
 
-    Different SeleniumBase releases name this differently — try each in
-    turn and stop at the first one that runs without raising. Returns
-    True if a method ran, False if nothing usable was found.
+    Modern SeleniumBase (4.50+) puts the CDP-mode solver on the Tab object
+    (``await tab.solve_captcha()``) — the ``uc_gui_*`` names only exist on
+    UC-mode WebDriver instances, never on the cdp_driver Browser. Try the
+    Tab first, then fall back to the legacy driver-level names so older
+    installs keep whatever behaviour they had. Returns True if a method
+    ran without raising, False if nothing usable was found.
     """
+    if tab is None:
+        tab = getattr(driver, "main_tab", None)
+    if tab is not None:
+        method = getattr(tab, "solve_captcha", None)
+        if callable(method):
+            try:
+                result = method()
+                if asyncio.iscoroutine(result):
+                    await result
+                logger.info("Stealth: tab.solve_captcha() invoked")
+                return True
+            except Exception as exc:
+                logger.warning("Stealth: tab.solve_captcha() failed: %s", exc)
+
     for method_name in (
+        "solve_captcha",
         "uc_gui_click_captcha",
         "uc_gui_handle_captcha",
         "uc_gui_handle_cf",
@@ -174,15 +191,16 @@ async def stealth_navigate(
         # Navigate via SeleniumBase BEFORE attaching Playwright so the
         # anti-bot warmup actually runs. Doing it from a Playwright page
         # after attach skips that warmup and CF blocks again.
+        tab = None
         try:
-            await driver.get(url)
+            tab = await driver.get(url)
         except Exception as exc:
             logger.warning("Stealth: driver.get(%s) failed: %s", url, exc)
 
         # Give the Cloudflare Turnstile iframe a moment to render before
         # we try to click its checkbox.
         await asyncio.sleep(3.0)
-        await _try_solve_captcha(driver)
+        await _try_solve_captcha(driver, tab)
 
         # Settle so verification (auto-click or manual fallback) can finish.
         await asyncio.sleep(max(0.0, settle_seconds))

@@ -80,3 +80,62 @@ def test_storage_state_cookies_rejects_path_traversal(
     )
     config = ScrapeConfig(storage_state_path=str(outside))
     assert stealth._storage_state_cookies(config) == []
+
+
+class _RecordingTab:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls = 0
+        self._fail = fail
+
+    async def solve_captcha(self) -> bool:
+        self.calls += 1
+        if self._fail:
+            raise RuntimeError("no captcha widget")
+        return True
+
+
+class _LegacyDriver:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def uc_gui_click_captcha(self) -> None:
+        self.calls += 1
+
+
+def test_try_solve_captcha_prefers_tab_solver() -> None:
+    """SeleniumBase 4.50+ exposes solve_captcha on the Tab — use it first."""
+    tab = _RecordingTab()
+    driver = _LegacyDriver()
+    ran = asyncio.run(stealth._try_solve_captcha(driver, tab))
+    assert ran is True
+    assert tab.calls == 1
+    assert driver.calls == 0
+
+
+def test_try_solve_captcha_uses_main_tab_when_no_tab_passed() -> None:
+    tab = _RecordingTab()
+
+    class Driver:
+        main_tab = tab
+
+    ran = asyncio.run(stealth._try_solve_captcha(Driver()))
+    assert ran is True
+    assert tab.calls == 1
+
+
+def test_try_solve_captcha_falls_back_to_legacy_driver_methods() -> None:
+    """A failing tab solver must not stop the legacy driver-level names."""
+    tab = _RecordingTab(fail=True)
+    driver = _LegacyDriver()
+    ran = asyncio.run(stealth._try_solve_captcha(driver, tab))
+    assert ran is True
+    assert tab.calls == 1
+    assert driver.calls == 1
+
+
+def test_try_solve_captcha_returns_false_when_nothing_available() -> None:
+    class BareDriver:
+        pass
+
+    ran = asyncio.run(stealth._try_solve_captcha(BareDriver()))
+    assert ran is False

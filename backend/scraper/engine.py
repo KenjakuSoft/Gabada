@@ -782,7 +782,7 @@ _BUY_AREA_DUMP_JS = r"""() => {
     }
 
     // ── Classifiers ──
-    const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|aed|sgd|myr|inr|php|bdt|eur|gbp|jpy|aud|cad)\b|රු|\/=|\$|€|£|¥|฿|₹|₽)/i;
+    const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|eur|gbp|aed|sgd|myr|inr|php|bdt|npr|pkr|thb|idr|vnd|krw|cny|jpy|twd|hkd|nzd|aud|cad|chf|sek|nok|dkk|pln|czk|huf|ron|zar|ngn|kes|ghs|egp|sar|qar|kwd|bhd|omr|jod|ils|mxn|brl|ars|clp)\b|රු|\/=|[$€£¥฿₹₽₺₩₫₴₦₱₪])/i;
     const PRICE_NUMERIC = /\d[\d,]*(?:\.\d{1,2})?/;
     const FREE_PHRASE = /\b(free|gratis|complimentary|no\s+charge)\b/i;
     const TRIAL_PHRASE = /\b(game\s+trial|trial\s+available|free\s+trial|trial)\b/i;
@@ -848,9 +848,26 @@ _BUY_AREA_DUMP_JS = r"""() => {
         // Numeric price.
         const m = text.match(PRICE_NUMERIC);
         if (m && text.length <= 80) {
-            const hasCurrency = CURRENCY_SIGNAL.test(text);
+            // Digits glued to letters ("B1503", "NS100", "256GB") are model
+            // numbers or spec values, never prices.
+            const mIdx = m.index || 0;
+            const mEnd = mIdx + m[0].length;
+            const mPrev = mIdx > 0 ? text[mIdx - 1] : '';
+            const mNext = mEnd < text.length ? text[mEnd] : '';
+            // A currency code glued to the number ("LKR35,500") loses its
+            // \b word boundary, so also test with the number excised — but
+            // only for numbers carrying price formatting (',' or '.'), so
+            // bare model numbers ("RS1000") are not mistaken for rupees.
+            const gluedCurrency = /[,.]/.test(m[0])
+                && CURRENCY_SIGNAL.test(text.slice(0, mIdx) + ' ' + text.slice(mEnd));
+            const hasCurrency = CURRENCY_SIGNAL.test(text) || gluedCurrency;
+            // A leading letter only means "model number" when there is no
+            // currency in the text. A trailing letter ("256GB") is always
+            // spec text.
+            const embedded = (/[A-Za-z]/.test(mPrev) && !hasCurrency)
+                || /[A-Za-z]/.test(mNext);
             const value = parseFloat(m[0].replace(/,/g, ''));
-            if (!isNaN(value) && value > 0 && value < 50_000_000) {
+            if (!embedded && !isNaN(value) && value > 0 && value < 50_000_000) {
                 // Exclude bare percentages and small standalone integers
                 // when there is no currency context.
                 if (!hasCurrency && /^\d{1,2}\s*%/.test(text)) return null;
@@ -1325,7 +1342,10 @@ def _normalize_scrape_result(result: ScrapeResult) -> ScrapeResult:
 
 
 _RAW_PRICE_CURRENCY_RE = re.compile(
-    r"(?:\b(?:rs\.?|lkr|usd|aed|sgd|myr|inr|php|bdt)\b|රු|\/=|\$|€|£|¥|฿|₹|₽)",
+    r"(?:\b(?:rs\.?|lkr|usd|eur|gbp|aed|sgd|myr|inr|php|bdt|npr|pkr|thb|idr|"
+    r"vnd|krw|cny|jpy|twd|hkd|nzd|aud|cad|chf|sek|nok|dkk|pln|czk|huf|ron|"
+    r"zar|ngn|kes|ghs|egp|sar|qar|kwd|bhd|omr|jod|ils|mxn|brl|ars|clp)\b"
+    r"|රු|\/=|[$€£¥฿₹₽₺₩₫₴₦₱₪])",
     re.IGNORECASE,
 )
 _RAW_PRICE_HINT_RE = re.compile(
@@ -2136,6 +2156,106 @@ async def _try_microdata(page: Page) -> ScrapeResult:
     return result
 
 
+# ── Strategy: social/meta-tag product data ───────────────────────────────────
+#
+# Shopify, custom Next.js shops, and several site builders emit OpenGraph
+# product tags even when JSON-LD and microdata are absent:
+#
+#   <meta property="product:price:amount" content="168000.00">
+#   <meta property="product:price:currency" content="LKR">
+#   <meta property="og:availability" content="instock">
+#
+# Runs after JSON-LD / microdata in the waterfall and, like them, is only
+# consulted while no stronger structured price exists.
+
+_META_TAG_HARVEST_JS = r"""() => {
+    const out = [];
+    for (const el of document.querySelectorAll('meta[property], meta[name], meta[itemprop]')) {
+        const key = (el.getAttribute('property') || el.getAttribute('name')
+            || el.getAttribute('itemprop') || '').trim().toLowerCase();
+        const value = (el.getAttribute('content') || '').trim();
+        if (!key || !value) continue;
+        out.push([key, value]);
+    }
+    return out;
+}"""
+
+_META_PRICE_LABELS = {"price", "prix", "preis", "precio"}
+
+
+def _meta_tags_result(pairs: list[tuple[str, str]]) -> ScrapeResult:
+    """Build a ``ScrapeResult`` from harvested ``<meta>`` key/content pairs.
+
+    Pure so it can be unit-tested without a browser. The first occurrence of
+    a key wins, matching how crawlers treat duplicated OpenGraph tags.
+    """
+    result = ScrapeResult()
+    meta: dict[str, str] = {}
+    for key, value in pairs:
+        key = str(key).strip().lower()
+        value = str(value).strip()
+        if key and value:
+            meta.setdefault(key, value)
+
+    def first(*keys: str) -> Optional[str]:
+        for key in keys:
+            value = meta.get(key)
+            if value:
+                return value
+        return None
+
+    regular_raw = first("product:price:amount", "og:price:amount")
+    sale_raw = first("product:sale_price:amount", "og:sale_price:amount")
+    if not regular_raw:
+        label = (meta.get("twitter:label1") or "").strip().lower()
+        if label in _META_PRICE_LABELS:
+            regular_raw = meta.get("twitter:data1")
+
+    currency = first("product:price:currency", "og:price:currency")
+
+    def with_currency(raw: Optional[str]) -> Optional[str]:
+        if not raw:
+            return None
+        if currency and not _RAW_PRICE_CURRENCY_RE.search(raw):
+            return f"{currency} {raw}"
+        return raw
+
+    regular = _parse_price(regular_raw) if regular_raw else None
+    sale = _parse_price(sale_raw) if sale_raw else None
+    # A "0.00" amount means "unset" in practice — never a real price here.
+    if regular is not None and regular > 0:
+        result.price = regular
+        result.raw_price = with_currency(regular_raw)
+    if sale is not None and sale > 0:
+        result.discounted_price = sale
+        result.raw_discounted = with_currency(sale_raw)
+
+    avail = first("product:availability", "og:availability")
+    if avail:
+        status = _stock_from_schema_url(avail)
+        if status == "unknown":
+            status = _parse_stock(avail)
+        result.stock_status = status
+    return _normalize_scrape_result(result)
+
+
+async def _try_meta_tags(page: Page) -> ScrapeResult:
+    try:
+        pairs = await page.evaluate(_META_TAG_HARVEST_JS)
+    except Exception as e:
+        logger.debug("Meta-tag harvest error: %s", e)
+        return ScrapeResult()
+    clean: list[tuple[str, str]] = []
+    if isinstance(pairs, list):
+        for item in pairs:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                clean.append((str(item[0]), str(item[1])))
+    result = _meta_tags_result(clean)
+    if result.price is not None:
+        logger.info("Meta-tag hit: price=%s", result.price)
+    return result
+
+
 # ── Strategy 3: Common CSS patterns ──────────────────────────────────────────
 
 _PRICE_SELECTORS = [
@@ -2801,7 +2921,7 @@ _SMART_SCAN_JS = r"""() => {
     const SALE_SIGNAL = /\b(save|was|regular|originally|compare|rrp|mrp|msrp|list[\s-]?price|retail[\s-]?price|you[\s-]?save|off)\b|\d+\s*%\s*off|−\s*\d|-\s*\d+\s*%/i;
     const FREE_PRICE_SIGNAL = /\b(?:gratis|complimentary|no\s+charge|free(?!\s+(?:trial|demo|version|shipping|delivery|download|software|utility|tool|support|updates?|upgrades?)))\b/i;
     const FREE_PRICE_EXCLUSION = /\btrial\b/i;
-    const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|aed|sgd|myr|inr|php|bdt)\b|රු|\/=|\$|€|£|¥|฿|₹|₽)/i;
+    const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|eur|gbp|aed|sgd|myr|inr|php|bdt|npr|pkr|thb|idr|vnd|krw|cny|jpy|twd|hkd|nzd|aud|cad|chf|sek|nok|dkk|pln|czk|huf|ron|zar|ngn|kes|ghs|egp|sar|qar|kwd|bhd|omr|jod|ils|mxn|brl|ars|clp)\b|රු|\/=|[$€£¥฿₹₽₺₩₫₴₦₱₪])/i;
     const INLINE_PRICE_SIGNAL = /\b(?:price|list[\s-]?price|our[\s-]?price|selling[\s-]?price|special[\s-]?price|sale[\s-]?price|offer[\s-]?price|regular[\s-]?price|unit[\s-]?price|per[\s-]?unit|amount)\b/i;
     const INLINE_SPEC_SIGNAL = /\b(?:weight|item[\s-]?code|model|warranty|stock|availability|sku|serial|memory[\s-]?type|form[\s-]?factor|capacity|speeds?|latencies?|temperature|voltage|dimensions?|length|width|height|depth|size|color|colour|days?|years?|weeks?|months?|specification|specifications)\b/i;
     const MEASURE_UNIT = /\b(?:gm|kg|mg|cm|mm|inch(?:es)?|gb|tb|mb|mhz|ghz|mt\/s|mah|hz|w|v|°c)\b/i;
@@ -3300,14 +3420,27 @@ _SMART_SCAN_JS = r"""() => {
 
     function collectCandidates(root) {
         const out = [];
+        const processedEls = new Set();
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         let node;
         while ((node = walker.nextNode())) {
-            const text = (node.textContent || '').trim();
-            if (!text) continue;
+            const nodeText = (node.textContent || '').trim();
+            if (!nodeText) continue;
             const el = node.parentElement;
             if (!el || !visible(el)) continue;
+            // React / Vue / Next render `{currency} {value}` as SIBLING text
+            // nodes of one element ("LKR" + "168,000.00"), so judging each
+            // text node alone loses the currency signal on the number node.
+            // Judge the element's combined own-text instead, and process each
+            // element once no matter how many text-node children it has.
+            if (processedEls.has(el)) continue;
+            processedEls.add(el);
             if (inBadContext(el)) continue;
+            let text = '';
+            for (const child of el.childNodes) {
+                if (child.nodeType === 3) text += child.textContent;
+            }
+            text = text.trim() || nodeText;
 
             let fontSize = 14, fontWeight = 400;
             try {
@@ -3322,8 +3455,12 @@ _SMART_SCAN_JS = r"""() => {
             const textLooksSpec = INLINE_SPEC_SIGNAL.test(normalizedText);
             const titleLike = looksTitleLike(el, normalizedText);
             if (PHONE_LIKE.test(normalizedText) && !textHasCurrency && !textHasPriceSignal) continue;
+            // Real "Free" price labels are short ("Free", "Free with PS
+            // Plus"). Long prose mentioning "free" ("Provides free technical
+            // support ...") is description text, never the displayed price.
             const freePrice = (
-                FREE_PRICE_SIGNAL.test(normalizedText)
+                normalizedText.length <= 80
+                && FREE_PRICE_SIGNAL.test(normalizedText)
                 && !FREE_PRICE_EXCLUSION.test(normalizedText)
             );
             if (freePrice) {
@@ -3527,6 +3664,14 @@ _SMART_SCAN_JS = r"""() => {
             platform = 'magento';
         } else if (document.querySelector('#product_page_product_name, body[id="product"], body.product-page')) {
             platform = 'prestashop';
+        } else if (document.querySelector('#button-cart, input#button-cart')) {
+            platform = 'opencart';
+        } else if (document.querySelector('.productView-price, .productView-title, [data-product-view]')) {
+            platform = 'bigcommerce';
+        } else if (document.querySelector('[data-hook="product-title"], [data-hook="formatted-primary-price"], [data-hook="product-page"]')) {
+            platform = 'wix';
+        } else if (document.querySelector('.ProductItem-details, .sqs-layout .product-price, meta[content*="Squarespace"]')) {
+            platform = 'squarespace';
         }
     } catch (_) {}
 
@@ -3690,7 +3835,7 @@ _SELECTOR_LAB_JS = r"""() => {
     const BAD = /cart|basket|checkout|order-summary|order-total|mini-cart|related|similar|recommend|upsell|cross[\s-]?sell|recently[\s-]?viewed|featured|bundle|combo|accessories|meta|nav|menu|header|footer|breadcrumb|review|rating|contact|whatsapp|call|delivery|follow|support|social|topbar|banner|modal|popup|drawer|payment|koko|mintpay|payhere|webxpay|hidden|fixed/i;
     const BAD_TEXT = /\b(related\s+products?|you\s+might\s+also\s+be\s+interested|call\s+us\s+anytime|quick\s+response\s+available|island\s+wide\s+express\s+delivery|contact\s+us|product\s+inquiry|expert\s+support|frequently\s+bought\s+together|customers\s+also\s+bought)\b/i;
     const PRICE_FRAGMENT_RE = /(?:rs\.?|lkr|\u0dbb\u0dd4|\/=|\$|€|£|¥|฿|₹|₽)?\s*\d[\d,]*(?:\.\d{1,2})?(?:\s*(?:\/=|rs\.?|lkr))?/ig;
-    const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|aed|sgd|myr|inr|php|bdt)\b|\u0dbb\u0dd4|\/=|\$|€|£|¥|฿|₹|₽)/i;
+    const CURRENCY_SIGNAL = /(?:\b(?:rs\.?|lkr|usd|eur|gbp|aed|sgd|myr|inr|php|bdt|npr|pkr|thb|idr|vnd|krw|cny|jpy|twd|hkd|nzd|aud|cad|chf|sek|nok|dkk|pln|czk|huf|ron|zar|ngn|kes|ghs|egp|sar|qar|kwd|bhd|omr|jod|ils|mxn|brl|ars|clp)\b|රු|\/=|[$€£¥฿₹₽₺₩₫₴₦₱₪])/i;
     const PRICE_HINT = /\b(?:price|amount|cost|now|current|selling|our[\s-]?price|unit[\s-]?price|per[\s-]?unit|offer)\b/i;
     const OLD_PRICE_HINT = /\b(?:old|regular|retail|list|was|compare|original|mrp|rrp|msrp)\b/i;
     const SALE_HINT = /\b(?:sale|special|offer|discount|save|final|deal)\b/i;
@@ -3764,6 +3909,14 @@ _SELECTOR_LAB_JS = r"""() => {
             platform = 'magento';
         } else if (document.querySelector('#product_page_product_name, body[id="product"], body.product-page')) {
             platform = 'prestashop';
+        } else if (document.querySelector('#button-cart, input#button-cart')) {
+            platform = 'opencart';
+        } else if (document.querySelector('.productView-price, .productView-title, [data-product-view]')) {
+            platform = 'bigcommerce';
+        } else if (document.querySelector('[data-hook="product-title"], [data-hook="formatted-primary-price"], [data-hook="product-page"]')) {
+            platform = 'wix';
+        } else if (document.querySelector('.ProductItem-details, .sqs-layout .product-price, meta[content*="Squarespace"]')) {
+            platform = 'squarespace';
         }
     } catch (_) {}
 
@@ -5017,7 +5170,13 @@ async def _wait_for_price_text(page: Page, *, timeout_ms: int = 4000) -> bool:
                             return true;
                         }
                     }
-                    return false;
+                    // Theme-agnostic fallback: any visible currency-prefixed
+                    // number counts as rendered price text. Client-rendered
+                    // SPAs (Next.js / React storefronts) rarely use the class
+                    // names above, but their buy areas still say "LKR 168,000".
+                    const CURRENCY_PRICE = /(?:\\b(?:rs|lkr|usd|eur|gbp|aed|sgd|myr|inr|php|bdt|npr|pkr|thb|idr|vnd|krw|cny|jpy|twd|hkd|nzd|aud|cad|chf|sek|nok|dkk|pln|czk|huf|ron|zar|ngn|kes|ghs|egp|sar|qar|kwd|bhd|omr|jod|ils|mxn|brl|ars|clp)\\b\\.?|රු|[$€£¥฿₹₽₺₩₫₴₦₱₪])\\s*\\d/i;
+                    const bodyText = document.body ? (document.body.innerText || '') : '';
+                    return CURRENCY_PRICE.test(bodyText);
                 }"""
             )
             if has_text:
@@ -5386,6 +5545,13 @@ async def scrape_with_open_page(
     result, used_variant_offers = await _try_json_ld_with_variant_flag(page)
     if result.price is None:
         result = await _try_microdata(page)
+    if result.price is None:
+        meta_result = await _try_meta_tags(page)
+        if meta_result.price is not None:
+            meta_result.title = result.title or meta_result.title
+            if meta_result.stock_status in (None, "unknown"):
+                meta_result.stock_status = result.stock_status
+            result = meta_result
     structured_price_locked = result.price is not None
     structured_variant_stock_locked = (
         used_variant_offers and result.stock_status not in (None, "unknown")
