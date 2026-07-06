@@ -284,7 +284,7 @@ def test_detector_null_does_not_fall_back_to_unvalidated_root() -> None:
 def test_in_buy_box_smart_scan_can_still_correct_clearly_wrong_extracted() -> None:
     """When smart scan stayed inside the buy-box (no body fallback), it
     still has authority to correct wildly mis-extracted prices — this is
-    the real-sale path that redacted-store / redacted-store rely on."""
+    the real-sale path that WooCommerce stores like redacted-store rely on."""
     result = ScrapeResult(price=1000.0, raw_price="1000")
     smart = ScrapeResult(price=500.0, raw_price="Rs 500.00")
     smart_data = _smart_data(
@@ -331,7 +331,7 @@ def test_smart_scan_matching_extracted_regular_does_not_surface_alternative() ->
     reviewer must not surface the regular as a "switch to" alternative —
     that would make the UI offer a switch to a price the user already has.
     """
-    # Mirrors the redacted-store / redacted-store sale-page output: regular + sale both
+    # Mirrors redacted-store-style WooCommerce sale-page output: regular + sale both
     # extracted via Woo defaults, smart scan returns only the regular.
     result = ScrapeResult(
         price=275000.0,

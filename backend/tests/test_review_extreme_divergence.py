@@ -1,6 +1,6 @@
 """Test the extreme-divergence guardrail in _review_result_with_smart_scan.
 
-Simulates the redacted-store bug: JSON-LD reports Rs 54,000 but smart-scan latches
+Simulates a real store's bug: JSON-LD reports Rs 54,000 but smart-scan latches
 onto a stray "rs 4" fragment (e.g. inside a product description). Before the
 fix, the review logic adopted Rs 4. After the fix, the structured-data price
 is preserved when the divergence is implausibly large (>=50x).
