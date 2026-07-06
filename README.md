@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v0.6.7-2F80ED?style=for-the-badge"></a>
+  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v0.7.0-2F80ED?style=for-the-badge"></a>
   <a href="https://github.com/KenjakuSoft/Gabada/actions/workflows/release.yml"><img alt="Release workflow" src="https://img.shields.io/badge/release%20workflow-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white&style=for-the-badge"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-34A853?style=for-the-badge"></a>
 </p>
@@ -45,15 +45,16 @@ when a site layout changes.
 
 ## Current Release
 
-Latest stable release: `v0.6.7`
+Latest stable release: `v0.7.0`
 
 Recent highlights:
 
-- **Variant JSON-LD stock is protected end-to-end.** Product pages that publish `ProductGroup.hasVariant[].offers` now aggregate variant prices and availability correctly, and broad platform-default stock selectors can no longer overwrite authoritative variant stock. This fixes sold-out Shopify variant groups such as the redacted-store DualSense page being misread as `in_stock`.
-- **Activity feed is collapsible per product and per store.** Each product now defaults to a one-line header with chevron toggle (matching the HomePage Details pattern). Expanding a product reveals collapsible per-store sub-rows so you can drill into one store's changes without seeing every other store's history. Expand-all / Collapse-all buttons sit next to the search box, and typing in search auto-opens matching rows.
-- **Security hardening** — Playwright `storage_state` paths are now confined to the sessions directory (no absolute escapes, no `..` traversal); `/api/*` enforces a loopback `Host` header to defeat DNS rebinding; every response carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `nosniff`, `Referrer-Policy`, and a `Permissions-Policy` lockdown; scraper inputs reject anything that isn't `http://` or `https://` (no more `file://` or `javascript:` URLs reaching Playwright). 14 new regression tests cover these defenses.
-- **`axios` bumped to 1.15.2**, closing 8 GitHub Dependabot alerts (2 high, 5 moderate, 1 low) on the 1.x line. `npm audit` reports 0 vulnerabilities.
-- Earlier in the 0.6.x line: Epic Games Store buy-box scoping; "Call for price" / `Availability: No` precedence; Product URL change clears stale logs; anchor-based buy-box detector for themes without `.summary.entry-summary` hooks; structured-data prices no longer overridden by smart-scan; SeleniumBase Cloudflare stealth fallback; API catalog imports (Steam / Apple App Store / GOG / Custom JSON); per-row currency tagging; saved Selector Lab profiles winning over stale platform defaults.
+- **Client-rendered React/Next storefronts extract correctly.** Frameworks that render `{currency} {value}` as sibling DOM text nodes ("LKR" + "168,000.00") no longer lose the price in the smart scan, and the post-navigation rendered-price poll accepts any visible currency-prefixed number instead of only WooCommerce-style class names — SPAs extract as soon as their data fetch lands. redacted-store (Next.js App Router on Vercel) ships as a saved profile.
+- **Meta-tag extraction strategy.** The waterfall now reads OpenGraph / Twitter product meta tags (`product:price:amount`, `og:price:amount`, sale price, currency, `og:availability`, `twitter:label1`/`twitter:data1` price pairs) after JSON-LD and microdata. Shopify and many custom storefronts expose these even when richer structured data is absent.
+- **Four new platform fingerprints with default selectors:** OpenCart, BigCommerce, Wix Stores, and Squarespace — wired into platform auto-detect, Probe suggestions, and `sites.toml` profiles.
+- **The Turnstile auto-clicker works on modern SeleniumBase again.** The stealth path now targets `tab.solve_captcha()` (SeleniumBase 4.50+; dependency floor raised to 4.50.5) with the legacy `uc_gui_*` names kept as fallbacks — on recent releases the old names never existed in CDP mode, so the auto-clicker was silently a no-op. Verified live against redacted-store's interactive Turnstile.
+- **Currency recognition broadened from 9 to ~48 currencies** (ISO codes plus the ₺ ₩ ₫ ₴ ₦ ₱ ₪ symbols) across the smart scan, Selector Lab, buy-area classifier, and raw-price scoring — plus new guards so model numbers ("B1503", "256GB") and long "free …" prose can no longer become bogus prices.
+- Earlier in the 0.6.x line: variant JSON-LD stock protected end-to-end; collapsible Activity feed with per-store drill-down; local API hardening (DNS-rebinding defense, security headers, session-path confinement, URL scheme allowlist); Epic Games Store buy-box scoping; SeleniumBase Cloudflare stealth fallback; API catalog imports (Steam / Apple App Store / GOG / Custom JSON); per-row currency tagging; saved Selector Lab profiles winning over stale platform defaults.
 
 See [CHANGELOG.md](./CHANGELOG.md) for full release notes.
 
@@ -228,8 +229,13 @@ The scraper uses layered extraction:
 1. Facebook Marketplace fast path for Marketplace item URLs.
 2. JSON-LD structured product data.
 3. Schema.org microdata.
-4. Deterministic smart page scan with installment and payment-method filters.
-5. Common selectors and saved per-domain profiles.
+4. OpenGraph / Twitter product meta tags.
+5. Deterministic smart page scan with installment and payment-method filters.
+6. Common selectors and saved per-domain profiles.
+
+Platform auto-detect recognizes CS-Cart, WooCommerce, Shopify, Magento,
+PrestaShop, OpenCart, BigCommerce, Wix Stores, and Squarespace, and applies
+sensible default selectors for each.
 
 Structured-data hits are treated as strong signals. The review step can surface
 an alternative candidate when smart scan disagrees, but extreme mismatches are
@@ -245,9 +251,11 @@ When the shared headless Chromium hits a Cloudflare interstitial,
 DataDome challenge, or Turnstile checkbox that does not auto-clear,
 Gabada retries the same scrape once through a SeleniumBase-launched
 stealth Chrome via Playwright's `connect_over_cdp()`. SeleniumBase
-navigates first so its anti-bot warmup runs, then `uc_gui_click_captcha()`
-clicks the Turnstile checkbox at the OS mouse level via pyautogui.
-Playwright then attaches and reads the already-cleared page.
+navigates first so its anti-bot warmup runs, then the captcha
+auto-clicker solves the Turnstile checkbox — `tab.solve_captcha()` on
+SeleniumBase 4.50+, with the legacy `uc_gui_*` pyautogui helpers kept
+as fallbacks for older installs. Playwright then attaches and reads
+the already-cleared page.
 
 A visible Chrome window flashes for ~10 seconds during the bypass —
 required, because UC mode's stealth degrades in headless. The fallback
@@ -501,7 +509,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./packaging/build_release.sh --app-version 0.6.7
+./packaging/build_release.sh --app-version 0.7.0
 ```
 
 Pushing a `v*` tag or publishing a GitHub Release triggers
@@ -563,10 +571,12 @@ price when it exists.
 ### A scrape opens a Chrome window and the cursor moves on its own
 
 That is the SeleniumBase stealth fallback clicking through a Cloudflare /
-Turnstile bot challenge via pyautogui. It runs only when the headless
+Turnstile bot challenge — `tab.solve_captcha()` on SeleniumBase 4.50+,
+or pyautogui on older releases. It runs only when the headless
 Chromium scrape fails. Don't move the mouse during the click window or
 the Turnstile checkbox can be missed. If the challenge is consistently
-not bypassed, install or update the seleniumbase dependency:
+not bypassed, install or update the seleniumbase dependency (Gabada
+targets 4.50.5 or newer):
 
 ```powershell
 .\backend\.venv\Scripts\python.exe -m pip install --upgrade seleniumbase
