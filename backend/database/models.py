@@ -1,6 +1,70 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Any
+import re
+
+from pydantic import BaseModel, BeforeValidator, Field
+from typing import Annotated, Optional, Any
 from datetime import datetime
+
+
+# ── URL scheme guard ──────────────────────────────────────────────────────────
+#
+# Product/store URLs are stored verbatim and later rendered as <a href> links
+# by the web UI, so an imported "javascript:" URL would execute in the app
+# origin when clicked. Browsers strip tab/CR/LF anywhere in a URL and trim C0
+# controls/spaces at the ends before parsing, so "jav\tascript:x" is a working
+# javascript: URL in an href — mirror that cleanup before reading the scheme.
+
+_URL_TAB_NL_RE = re.compile(r"[\t\r\n]")
+_URL_SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):")
+_C0_AND_SPACE = "".join(map(chr, range(0x21)))
+_WEB_URL_SCHEMES = frozenset({"http", "https"})
+
+
+def _url_scheme(value: str) -> Optional[str]:
+    cleaned = _URL_TAB_NL_RE.sub("", value.strip(_C0_AND_SPACE))
+    match = _URL_SCHEME_RE.match(cleaned)
+    return match.group(1).lower() if match else None
+
+
+def ensure_web_url(value: Any) -> Any:
+    """Reject strings that carry an explicit non-web scheme.
+
+    Scheme-less values ("www.store.lk/item") pass through — they render as
+    harmless relative links and file imports legitimately produce them.
+    None and empty strings pass through untouched.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return value
+    scheme = _url_scheme(value)
+    if scheme is not None and scheme not in _WEB_URL_SCHEMES:
+        raise ValueError(
+            f"URL scheme '{scheme}:' is not allowed — use http:// or https://"
+        )
+    return value
+
+
+def neutralize_web_url(
+    value: Optional[str], *, allow_api_scheme: bool = False
+) -> Optional[str]:
+    """Drop-don't-raise variant for URLs that arrive from external systems.
+
+    WooCommerce catalogs and custom JSON feeds supply permalinks and image
+    URLs the user never typed; one hostile value must not fail a whole
+    import, so unsafe URLs become None instead of raising.
+    ``allow_api_scheme`` keeps the internal ``api://catalog/...`` sentinel
+    used for API-only products that have no web page.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    scheme = _url_scheme(value)
+    if scheme is None or scheme in _WEB_URL_SCHEMES:
+        return value
+    if allow_api_scheme and scheme == "api":
+        return value
+    return None
+
+
+WebUrl = Annotated[str, BeforeValidator(ensure_web_url)]
+"""A str field that rejects explicit non-http(s) schemes at validation time."""
 
 
 # ── Categories ────────────────────────────────────────────────────────────────
@@ -19,17 +83,17 @@ class Category(CategoryCreate):
 
 class StoreCreate(BaseModel):
     name: str
-    base_url: str = ""
+    base_url: WebUrl = ""
     manual_only: bool = False
-    login_url: Optional[str] = None
+    login_url: Optional[WebUrl] = None
     woo_enabled: bool = False
-    woo_site_url: Optional[str] = None
+    woo_site_url: Optional[WebUrl] = None
     woo_consumer_key: Optional[str] = None
     woo_consumer_secret: Optional[str] = None
     woo_auto_import_new: bool = False
     api_enabled: bool = False
     api_platform: Optional[str] = None
-    api_base_url: Optional[str] = None
+    api_base_url: Optional[WebUrl] = None
     api_key: Optional[str] = None
     api_config: dict[str, Any] = Field(default_factory=dict)
     api_auto_import_new: bool = False
@@ -37,24 +101,30 @@ class StoreCreate(BaseModel):
 
 class StoreUpdate(BaseModel):
     name: Optional[str] = None
-    base_url: Optional[str] = None
+    base_url: Optional[WebUrl] = None
     manual_only: Optional[bool] = None
-    login_url: Optional[str] = None
+    login_url: Optional[WebUrl] = None
     storage_state_path: Optional[str] = None
     woo_enabled: Optional[bool] = None
-    woo_site_url: Optional[str] = None
+    woo_site_url: Optional[WebUrl] = None
     woo_consumer_key: Optional[str] = None
     woo_consumer_secret: Optional[str] = None
     woo_auto_import_new: Optional[bool] = None
     api_enabled: Optional[bool] = None
     api_platform: Optional[str] = None
-    api_base_url: Optional[str] = None
+    api_base_url: Optional[WebUrl] = None
     api_key: Optional[str] = None
     api_config: Optional[dict[str, Any]] = None
     api_auto_import_new: Optional[bool] = None
 
 class Store(StoreCreate):
     id: int
+    # Output model: rows written before the WebUrl guard existed may hold
+    # values the validator would reject — never fail a read over stored data.
+    base_url: str = ""
+    login_url: Optional[str] = None
+    woo_site_url: Optional[str] = None
+    api_base_url: Optional[str] = None
     storage_state_path: Optional[str] = None
     session_updated_at: Optional[datetime] = None
     created_at: datetime
@@ -177,19 +247,19 @@ class ProductStoreOverride(ProductStoreOverrideUpsert):
 
 class ProductCreate(BaseModel):
     canonical_name: str
-    image_url: Optional[str] = None
+    image_url: Optional[WebUrl] = None
     category_id: Optional[int] = None
 
 class ProductStoreCreate(BaseModel):
     store_id: int
-    product_url: Optional[str] = None
+    product_url: Optional[WebUrl] = None
     scrape_config: ScrapeConfig = ScrapeConfig()
     # Probe the URL and auto-fill wait_for + selectors based on detected
     # platform. Any fields already set in scrape_config are preserved.
     auto_detect: bool = True
 
 class ProductStoreUpdate(BaseModel):
-    product_url: Optional[str] = None
+    product_url: Optional[WebUrl] = None
     clear_logs_on_url_change: bool = False
     manual_price: Optional[float] = None
     manual_stock_status: Optional[str] = None
@@ -307,7 +377,7 @@ class ScrapeResult(BaseModel):
 # ── WooCommerce import ────────────────────────────────────────────────────────
 
 class WooCredentials(BaseModel):
-    site_url: str
+    site_url: WebUrl
     consumer_key: str
     consumer_secret: str
 
@@ -357,7 +427,7 @@ class ApiPreviewRequest(BaseModel):
     country_code: Optional[str] = "US"
     language: Optional[str] = "english"
     limit: int = 25
-    base_url: Optional[str] = None
+    base_url: Optional[WebUrl] = None
     api_key: Optional[str] = None
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -368,7 +438,7 @@ class ApiImportRequest(BaseModel):
     external_ids: list[str]
     country_code: Optional[str] = "US"
     language: Optional[str] = "english"
-    base_url: Optional[str] = None
+    base_url: Optional[WebUrl] = None
     api_key: Optional[str] = None
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -388,8 +458,8 @@ class FileImportRow(BaseModel):
     source_index: Optional[int] = None
     product_id: Optional[int] = None
     product_store_id: Optional[int] = None
-    url: Optional[str] = None
-    image_url: Optional[str] = None
+    url: Optional[WebUrl] = None
+    image_url: Optional[WebUrl] = None
     price: Optional[str | float] = None
     discounted_price: Optional[str | float] = None
     dealer_price: Optional[str | float] = None
@@ -418,7 +488,7 @@ class FileImportCommitResponse(BaseModel):
 # ── Quick-add (paste URLs → tracked products) ────────────────────────────────
 
 class QuickAddRequest(BaseModel):
-    urls: list[str]
+    urls: list[WebUrl]
     category_id: Optional[int] = None
     store_id: Optional[int] = None
 

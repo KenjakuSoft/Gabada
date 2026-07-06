@@ -594,7 +594,7 @@ function StoreTile({
             </div>
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{store.name}</div>
-              {store.manual_only ? (
+              {store.manual_only || !/^https?:\/\//i.test(store.base_url) ? (
                 <div className="text-[11px] text-muted-foreground">{agg.hostname}</div>
               ) : (
                 <a

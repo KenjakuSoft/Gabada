@@ -29,6 +29,11 @@ BACKUP_METADATA_NAME = "metadata.json"
 REQUIRED_BACKUP_TABLES = frozenset(
     {"products", "stores", "product_stores", "price_logs", "settings"}
 )
+# Decompression ceilings for untrusted bundles (a restored snapshot may come
+# from a shared file or a compromised Drive account). A tiny zip can declare
+# or decompress to many GB — cap what we are willing to inflate.
+MAX_DB_MEMBER_BYTES = 2 * 1024**3  # 2 GiB
+MAX_PROFILES_MEMBER_BYTES = 10 * 1024**2  # 10 MiB
 
 
 def read_database_counts(conn: sqlite3.Connection) -> DatabaseCounts:
@@ -105,6 +110,36 @@ def create_backup_bundle(
         archive.writestr(BACKUP_METADATA_NAME, json.dumps(metadata, indent=2))
 
 
+def _extract_member_capped(
+    archive: zipfile.ZipFile,
+    member: str,
+    target: Path,
+    *,
+    max_bytes: int,
+) -> None:
+    """Stream one member to ``target``, refusing to inflate past ``max_bytes``.
+
+    The declared size is checked first for a fast, friendly error; the
+    streaming cap holds even if the zip header lies about ``file_size``.
+    """
+    info = archive.getinfo(member)
+    if info.file_size > max_bytes:
+        raise ValueError(
+            f"Backup member '{member}' is too large "
+            f"({info.file_size} bytes; limit {max_bytes})"
+        )
+    remaining = max_bytes
+    with archive.open(member) as src, target.open("wb") as dst:
+        while chunk := src.read(1024 * 1024):
+            remaining -= len(chunk)
+            if remaining < 0:
+                raise ValueError(
+                    f"Backup member '{member}' decompressed past its limit "
+                    f"({max_bytes} bytes)"
+                )
+            dst.write(chunk)
+
+
 def extract_backup_bundle(
     bundle_path: Path,
     stage_dir: Path,
@@ -127,7 +162,9 @@ def extract_backup_bundle(
         )
         if db_member is None:
             raise ValueError("Backup archive does not contain a SQLite database")
-        extracted_db.write_bytes(archive.read(db_member))
+        _extract_member_capped(
+            archive, db_member, extracted_db, max_bytes=MAX_DB_MEMBER_BYTES
+        )
 
         profiles_member = next(
             (name for name in members if Path(name).name == BACKUP_SITE_PROFILES_NAME),
@@ -135,7 +172,12 @@ def extract_backup_bundle(
         )
         if profiles_member is not None:
             extracted_profiles = stage_dir / BACKUP_SITE_PROFILES_NAME
-            extracted_profiles.write_bytes(archive.read(profiles_member))
+            _extract_member_capped(
+                archive,
+                profiles_member,
+                extracted_profiles,
+                max_bytes=MAX_PROFILES_MEMBER_BYTES,
+            )
 
     return extracted_db, extracted_profiles
 

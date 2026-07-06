@@ -19,6 +19,7 @@ from database.models import (
     ScrapeConfig,
     ScrapeResult,
     Store,
+    neutralize_web_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -1415,6 +1416,13 @@ async def _merge_api_catalog_item(
     existing_by_name: dict[str, dict],
     create_if_missing: bool,
 ) -> tuple[str, Optional[int]]:
+    # Permalinks/images come from the remote catalog feed, not the user —
+    # drop non-web schemes instead of persisting them into <a href> data.
+    # api:// is the internal sentinel for products with no web page.
+    item = item.model_copy(update={
+        "permalink": neutralize_web_url(item.permalink, allow_api_scheme=True) or "",
+        "image_url": neutralize_web_url(item.image_url),
+    })
     normalized_url = _normalize_store_product_url(item.permalink)
     normalized_name = _normalize_store_product_name(item.name)
     match = existing_by_url.get(normalized_url) or existing_by_name.get(normalized_name)

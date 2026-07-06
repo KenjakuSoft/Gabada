@@ -12,6 +12,7 @@ from database.models import (
     QuickAddResult,
     ScrapeConfig,
     ScrapeSelectors,
+    neutralize_web_url,
 )
 from api.price_log_utils import get_settings_currency, infer_currency_code
 from scraper.engine import probe as probe_url
@@ -115,6 +116,9 @@ async def create_product_record(
     image_url: Optional[str],
     category_id: Optional[int],
 ) -> int:
+    # Safety net for catalog-sourced values that bypass the request models
+    # (Woo sync, API imports): never persist a non-web URL scheme.
+    image_url = neutralize_web_url(image_url)
     cur = await db.execute(
         "INSERT INTO products (canonical_name, image_url, category_id) VALUES (?, ?, ?)",
         (canonical_name, image_url, category_id),
@@ -131,6 +135,9 @@ async def create_store_link(
     scrape_config_json: Optional[str] = None,
     is_active: bool = True,
 ) -> int:
+    # Same safety net as create_product_record. api:// is the internal
+    # sentinel for API-only products that have no web page.
+    product_url = neutralize_web_url(product_url, allow_api_scheme=True) or ""
     if scrape_config_json is None:
         cur = await db.execute(
             """INSERT INTO product_stores

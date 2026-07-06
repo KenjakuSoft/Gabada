@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Security
+- **All 17 open Dependabot alerts fixed** by upgrading frontend dependencies: axios 1.16.0 (six high — proxy-credential leaks, ReDoS, prototype-pollution MITM), react-router-dom 7.15.1 (turbo-stream deserialization RCE, `__manifest` DoS, CSRF), vite 8.0.16 (`server.fs.deny` bypass, NTLMv2 hash disclosure via launch-editor), form-data 4.0.6 (CRLF injection), plus @babel/core, brace-expansion, and js-yaml patch bumps. `npm audit` now reports 0 vulnerabilities.
+- **Stored links can no longer smuggle non-web URL schemes.** Every URL field on client payloads (products, stores, product-store links, quick-add, file-import rows, Woo/API import requests) rejects explicit schemes other than http/https — including control-character-smuggled forms like `jav\tascript:` — and catalog-sourced permalinks/image URLs from WooCommerce and custom JSON feeds are neutralized at the service layer before persisting (the internal `api://catalog/...` sentinel is preserved). A malicious imported URL previously rendered as a clickable `<a href>` inside the app origin, where a click would have executed with full local-API access. Store reads tolerate legacy rows so existing libraries keep loading.
+- **Backup restore is zip-bomb resistant.** Bundle members are streamed to disk with hard decompression ceilings (2 GiB database, 10 MiB `sites.toml`) instead of being read whole into memory, so a tiny crafted archive can no longer exhaust RAM.
+- **Drive OAuth secrets are now gitignored** (`backend/drive-credentials.json`, `backend/drive-tokens.json`, `backend/drive-last-push.json`) — in dev mode they live in `backend/`, where a `git add backend/` could previously have staged them.
+- The Stores page no longer renders a store's base URL as a link unless it is http(s), matching the existing product-link guards.
+
+### Tests
+- Added `test_url_scheme_guard.py` (11 tests) and `test_backup_bundle_caps.py` (3 tests). Full backend suite: 137 tests.
 
 ## [0.7.0] - 2026-07-06
 

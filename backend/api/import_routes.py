@@ -32,6 +32,7 @@ from database.models import (
     WooProductPreview,
     WooPreviewRequest,
     WooSyncResult,
+    neutralize_web_url,
 )
 from services.api_catalog import (
     fetch_api_preview_products,
@@ -662,6 +663,10 @@ async def _merge_woo_catalog_item(
     existing_by_name: dict[str, dict],
     create_if_missing: bool,
 ) -> str:
+    # Woo permalinks/images come from the remote catalog, not the user —
+    # drop non-web schemes instead of persisting them into <a href> data.
+    permalink = neutralize_web_url(permalink) or ""
+    image_url = neutralize_web_url(image_url)
     normalized_url = _normalize_store_product_url(permalink)
     normalized_name = _normalize_store_product_name(name)
     match = existing_by_url.get(normalized_url) or existing_by_name.get(normalized_name)
