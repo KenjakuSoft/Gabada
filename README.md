@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v0.7.2-2F80ED?style=for-the-badge"></a>
+  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v0.7.3-2F80ED?style=for-the-badge"></a>
   <a href="https://github.com/KenjakuSoft/Gabada/actions/workflows/release.yml"><img alt="Release workflow" src="https://img.shields.io/badge/release%20workflow-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white&style=for-the-badge"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-34A853?style=for-the-badge"></a>
 </p>
@@ -45,7 +45,7 @@ when a site layout changes.
 
 ## Current Release
 
-Latest stable release: `v0.7.2`
+Latest stable release: `v0.7.3`
 
 Recent highlights:
 
@@ -510,7 +510,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./packaging/build_release.sh --app-version 0.7.2
+./packaging/build_release.sh --app-version 0.7.3
 ```
 
 Pushing a `v*` tag or publishing a GitHub Release triggers

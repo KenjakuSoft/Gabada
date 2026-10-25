@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.7.3] - 2026-10-26
+
+### Security
+- **All 41 open Dependabot alerts fixed** by updating frontend dependencies inside their existing version ranges: axios 1.20.0 (18 alerts — proxy-credential inheritance, prototype pollution in auth and option handling, `maxBodyLength` bypasses, recursive form serialization), react-router 7.18.4 (5 — open redirects, RSC CSRF/XSS, route-matching denial of service), vite 8.3.5 (5 — dev-server file-allowlist bypasses and launch-editor credential disclosure), postcss 8.5.31, nanoid 3.3.20, js-yaml 4.3.2, brace-expansion 1.1.21/5.0.12, follow-redirects 1.16.1, source-map-js 1.2.2, and browserslist/baseline-browser-mapping updates. `npm audit` now reports 0 vulnerabilities, and no `package.json` ranges changed.
+- **Backend dependencies were audited too.** `pip-audit` found no known vulnerabilities in `backend/requirements.txt` or the Windows packaging requirements.
+
+### Changed
+- **The Vite config no longer uses `__dirname`.** The `@` alias is resolved from `import.meta.url`, removing Vite 8.3's warning about the upcoming native config loader.
+- App version bumped to **0.7.3**.
+
 ## [0.7.2] - 2026-10-26
 
 ### Fixed
@@ -345,7 +355,8 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
-[Unreleased]: https://github.com/KenjakuSoft/Gabada/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/KenjakuSoft/Gabada/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.7.3
 [0.7.2]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.7.2
 [0.7.1]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.7.1
 [0.7.0]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.7.0
