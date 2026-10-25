@@ -1,4 +1,5 @@
 import logging
+import sqlite3
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -30,6 +31,24 @@ from database.models import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/products", tags=["products"])
+
+
+async def _require_product(db, product_id: int) -> None:
+    rows = await db.execute_fetchall(
+        "SELECT 1 FROM products WHERE id = ?",
+        (product_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+
+async def _require_store_link(db, product_id: int, product_store_id: int) -> None:
+    rows = await db.execute_fetchall(
+        "SELECT 1 FROM product_stores WHERE id = ? AND product_id = ?",
+        (product_store_id, product_id),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Store link not found")
 
 
 @router.get("/", response_model=list[Product])
@@ -97,6 +116,8 @@ async def add_store_link(product_id: int, body: ProductStoreCreate):
 
     db = await get_db()
     try:
+        await _require_product(db, product_id)
+
         store_rows = await db.execute_fetchall(
             """SELECT manual_only, storage_state_path
                FROM stores
@@ -105,6 +126,16 @@ async def add_store_link(product_id: int, body: ProductStoreCreate):
         )
         if not store_rows:
             raise HTTPException(status_code=404, detail="Store not found")
+
+        existing_link = await db.execute_fetchall(
+            "SELECT id FROM product_stores WHERE product_id = ? AND store_id = ?",
+            (product_id, body.store_id),
+        )
+        if existing_link:
+            raise HTTPException(
+                status_code=409,
+                detail="This store is already linked to the product",
+            )
 
         store_row = store_rows[0]
         manual_only = bool(store_row["manual_only"])
@@ -125,14 +156,23 @@ async def add_store_link(product_id: int, body: ProductStoreCreate):
         ):
             config = await auto_detect_config(provided_url, config)
 
-        product_store_id = await create_store_link(
-            db,
-            product_id=product_id,
-            store_id=body.store_id,
-            product_url=provided_url,
-            scrape_config_json=config.model_dump_json(),
-            is_active=has_real_url,
-        )
+        try:
+            product_store_id = await create_store_link(
+                db,
+                product_id=product_id,
+                store_id=body.store_id,
+                product_url=provided_url,
+                scrape_config_json=config.model_dump_json(),
+                is_active=has_real_url,
+            )
+        except sqlite3.IntegrityError as exc:
+            await db.rollback()
+            if "UNIQUE constraint failed" in str(exc):
+                raise HTTPException(
+                    status_code=409,
+                    detail="This store is already linked to the product",
+                ) from exc
+            raise
         await db.commit()
         summaries = await get_store_summaries(db, product_id)
         match = next((summary for summary in summaries if summary.id == product_store_id), None)
@@ -328,6 +368,7 @@ async def update_store_link(
 async def get_override(product_id: int, product_store_id: int):
     db = await get_db()
     try:
+        await _require_store_link(db, product_id, product_store_id)
         rows = await db.execute_fetchall(
             "SELECT * FROM product_store_overrides WHERE product_store_id=?",
             (product_store_id,),
@@ -357,6 +398,7 @@ async def upsert_override(
 ):
     db = await get_db()
     try:
+        await _require_store_link(db, product_id, product_store_id)
         await db.execute(
             """INSERT INTO product_store_overrides
                    (product_store_id, manual_price, manual_stock_status, manual_warranty, override_note)
@@ -385,6 +427,7 @@ async def upsert_override(
 async def delete_override(product_id: int, product_store_id: int):
     db = await get_db()
     try:
+        await _require_store_link(db, product_id, product_store_id)
         rows = await db.execute_fetchall(
             """SELECT imported_dealer_price, imported_warranty
                FROM product_store_overrides

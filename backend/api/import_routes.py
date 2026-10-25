@@ -17,6 +17,7 @@ except Exception:  # pragma: no cover - optional dependency during local setup
     xlrd = None
 
 from api.product_service import create_product_with_store, create_store_link
+from api.price_log_utils import PriceSnapshot, compute_price_change
 from database.db import get_db
 from database.models import (
     ApiImportRequest,
@@ -1358,44 +1359,22 @@ def _normalize_import_stock(status: Optional[str]) -> str:
     return "unknown"
 
 
-def _effective_price(price: Optional[float], discounted_price: Optional[float]) -> Optional[float]:
-    return discounted_price if discounted_price is not None else price
-
-
 def _compute_file_change(previous: Optional[dict], row: FileImportRow) -> tuple[str, Optional[float], Optional[float], Optional[str]]:
-    current_effective = _effective_price(row.price, row.discounted_price)
-    current_stock = row.stock_status or "unknown"
-    if previous is None:
-        return "new", None, None, None
-
-    previous_effective = _effective_price(previous.get("price"), previous.get("discounted_price"))
-    previous_stock = previous.get("stock_status") or "unknown"
-
-    price_changed = False
-    price_delta: Optional[float] = None
-    if previous_effective is not None and current_effective is not None:
-        delta = current_effective - previous_effective
-        if abs(delta) > 0.001:
-            price_delta = round(delta, 2)
-            price_changed = True
-    elif previous_effective is None and current_effective is not None:
-        price_changed = True
-
-    stock_changed = previous_stock != current_stock
-
-    if price_changed and stock_changed:
-        return "price_and_stock", price_delta, previous_effective, previous_stock
-    if price_changed:
-        if price_delta is not None:
-            return ("price_up" if price_delta > 0 else "price_down"), price_delta, previous_effective, previous_stock
-        return "price_up", price_delta, previous_effective, previous_stock
-    if stock_changed:
-        if current_stock == "out_of_stock":
-            return "stock_out", price_delta, previous_effective, previous_stock
-        if current_stock in ("in_stock", "limited"):
-            return "stock_in", price_delta, previous_effective, previous_stock
-        return "stock_change", price_delta, previous_effective, previous_stock
-    return "no_change", price_delta, previous_effective, previous_stock
+    previous_snapshot = PriceSnapshot.from_row(previous) if previous is not None else None
+    change = compute_price_change(
+        PriceSnapshot(
+            price=row.price,
+            discounted_price=row.discounted_price,
+            stock_status=row.stock_status,
+        ),
+        previous_snapshot,
+    )
+    return (
+        change.change_type,
+        change.price_delta,
+        change.previous_price,
+        change.previous_stock_status,
+    )
 
 
 def _placeholder_product_url(store_id: int, row: FileImportRow) -> str:
@@ -1502,7 +1481,7 @@ async def _latest_price_log(db, product_store_id: int):
         """SELECT price, discounted_price, stock_status
            FROM price_logs
            WHERE product_store_id = ?
-           ORDER BY scraped_at DESC
+           ORDER BY scraped_at DESC, id DESC
            LIMIT 1""",
         (product_store_id,),
     )

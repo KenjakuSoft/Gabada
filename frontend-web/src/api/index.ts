@@ -159,11 +159,18 @@ export const logsApi = {
     })
     return data
   },
-  all: async (params?: {
-    limit?: number
-    offset?: number
-  }): Promise<PriceLog[]> => {
-    const { data } = await http.get<PriceLog[]>('/logs/', { params })
+  all: async (
+    productStoreId: number,
+    params?: { from?: string | null; to?: string | null; limit?: number },
+  ): Promise<PriceLog[]> => {
+    const { data } = await http.get<PriceLog[]>('/logs/', {
+      params: {
+        product_store_id: productStoreId,
+        from: params?.from || undefined,
+        to: params?.to || undefined,
+        limit: params?.limit,
+      },
+    })
     return data
   },
 }

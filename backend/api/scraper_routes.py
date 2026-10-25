@@ -23,7 +23,12 @@ from database.models import (
     SelectorLabSaveResponse,
     SelectorLabTestRequest,
 )
-from api.price_log_utils import get_settings_currency, infer_currency_code
+from api.price_log_utils import (
+    PriceSnapshot,
+    compute_price_change,
+    get_settings_currency,
+    infer_currency_code,
+)
 from scraper import site_profiles
 from scraper.engine import inspect_selectors, probe, save_login_state, scrape
 from scraper.site_profiles import apply_platform_defaults
@@ -64,12 +69,6 @@ def _validate_scrape_url(url: str) -> str:
 
 
 ScrapeRunSummary = dict[str, object]
-
-
-def _effective_price(
-    price: Optional[float], discounted_price: Optional[float]
-) -> Optional[float]:
-    return discounted_price if discounted_price is not None else price
 
 
 def _has_any_price(result: ScrapeResult) -> bool:
@@ -113,48 +112,21 @@ async def _compute_change(
         (product_store_id,),
     )
 
-    if not rows:
-        return "new", None, None, None
-
-    previous = rows[0]
-    previous_effective = _effective_price(
-        previous["price"], previous["discounted_price"]
+    previous = PriceSnapshot.from_row(rows[0]) if rows else None
+    change = compute_price_change(
+        PriceSnapshot(
+            price=result.price,
+            discounted_price=result.discounted_price,
+            stock_status=result.stock_status,
+        ),
+        previous,
     )
-    current_effective = _effective_price(result.price, result.discounted_price)
-    previous_stock = previous["stock_status"] or "unknown"
-    current_stock = result.stock_status or "unknown"
-
-    price_changed = False
-    price_delta: Optional[float] = None
-
-    if previous_effective is not None and current_effective is not None:
-        delta = current_effective - previous_effective
-        if abs(delta) > 0.001:
-            price_delta = round(delta, 2)
-            price_changed = True
-    elif previous_effective is None and current_effective is not None:
-        price_changed = True
-
-    stock_changed = previous_stock != current_stock
-
-    if price_changed and stock_changed:
-        change_type = "price_and_stock"
-    elif price_changed:
-        if price_delta is not None:
-            change_type = "price_up" if price_delta > 0 else "price_down"
-        else:
-            change_type = "price_up"
-    elif stock_changed:
-        if current_stock == "out_of_stock":
-            change_type = "stock_out"
-        elif current_stock in ("in_stock", "limited"):
-            change_type = "stock_in"
-        else:
-            change_type = "stock_change"
-    else:
-        change_type = "no_change"
-
-    return change_type, price_delta, previous_effective, previous_stock
+    return (
+        change.change_type,
+        change.price_delta,
+        change.previous_price,
+        change.previous_stock_status,
+    )
 
 
 async def _do_scrape(product_store_id: int) -> ScrapeRunSummary:
@@ -385,6 +357,10 @@ async def manual_scrape(product_store_id: int):
     if status == "not_found":
         raise HTTPException(status_code=404, detail=summary.get("error"))
     if status == "skipped":
+        if summary.get("reason") != "manual_only":
+            # A no-price scrape is a normal "nothing changed" outcome; only a
+            # manual-only store link is an actual conflict.
+            return summary
         raise HTTPException(
             status_code=409,
             detail="This store link is manual-only and cannot be scraped.",

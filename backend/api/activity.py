@@ -36,7 +36,7 @@ _ACTIVITY_QUERY = """
 
 @router.get("/", response_model=list[ActivityEntry])
 async def get_activity(
-    limit: int = Query(default=100, le=500),
+    limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     change_type: Optional[str] = Query(default=None),
 ):

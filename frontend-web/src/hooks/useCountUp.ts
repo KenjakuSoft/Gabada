@@ -54,7 +54,12 @@ export function useCountUp(
       const progress = Math.min(1, (t - start) / duration)
       const eased = 1 - Math.pow(1 - progress, 3)
       const cur = from + (to - from) * eased
-      setDisplay(Number(cur.toFixed(decimals)))
+      const rounded = Number(cur.toFixed(decimals))
+      setDisplay(rounded)
+      // Keep the animation origin in sync with what the user sees so an
+      // interrupted animation resumes from the current value, not the old
+      // target.
+      fromRef.current = rounded
       if (progress < 1) {
         rafRef.current = requestAnimationFrame(step)
       } else {

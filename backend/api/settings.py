@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import json
 import logging
+import math
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,17 +47,25 @@ async def _ensure_row(db) -> None:
 
 
 def _row_to_settings(r) -> Settings:
-    exchange_rates = {}
+    exchange_rates: dict[str, float] = {}
     try:
         parsed_rates = json.loads(r["exchange_rates"] or "{}")
-        if isinstance(parsed_rates, dict):
-            exchange_rates = {
-                str(code).upper(): float(rate)
-                for code, rate in parsed_rates.items()
-                if isinstance(code, str) and float(rate) > 0
-            }
-    except Exception:
-        exchange_rates = {}
+    except (TypeError, ValueError):
+        parsed_rates = {}
+
+    # Drop only the unusable entries. One corrupt rate must not discard every
+    # other locally configured conversion.
+    if isinstance(parsed_rates, dict):
+        for code, rate in parsed_rates.items():
+            normalized_code = str(code or "").strip().upper()
+            if not normalized_code:
+                continue
+            try:
+                numeric_rate = float(rate)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(numeric_rate) and numeric_rate > 0:
+                exchange_rates[normalized_code] = numeric_rate
 
     return Settings(
         currency_code=r["currency_code"],
@@ -185,10 +194,10 @@ async def update_settings(body: SettingsUpdate) -> Settings:
                         status_code=400,
                         detail=f"Invalid exchange rate for {normalized_code}",
                     )
-                if numeric_rate <= 0:
+                if not math.isfinite(numeric_rate) or numeric_rate <= 0:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Exchange rate for {normalized_code} must be greater than 0",
+                        detail=f"Exchange rate for {normalized_code} must be a finite number greater than 0",
                     )
                 normalized_rates[normalized_code] = numeric_rate
             value = json.dumps(normalized_rates, sort_keys=True)

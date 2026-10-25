@@ -12,7 +12,7 @@ async def get_logs(
     product_store_id: int,
     from_date: Optional[date] = Query(None, alias="from"),
     to_date: Optional[date] = Query(None, alias="to"),
-    limit: int = Query(365, le=1000),
+    limit: int = Query(365, ge=1, le=1000),
 ):
     db = await get_db()
     try:
@@ -49,7 +49,7 @@ async def get_logs_for_product(
     product_id: int,
     from_date: Optional[date] = Query(None, alias="from"),
     to_date: Optional[date] = Query(None, alias="to"),
-    limit: int = Query(1000, le=5000),
+    limit: int = Query(1000, ge=1, le=5000),
 ):
     """All logs for every store carrying this product — useful for chart overlays."""
     db = await get_db()

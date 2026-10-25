@@ -1,6 +1,5 @@
 import json
 import re
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from app_paths import resolve_storage_state_path
@@ -397,6 +396,32 @@ async def manual_api_sync(store_id: int):
     return await sync_store_api_catalog(store_id)
 
 
+def _remove_login_session_file(saved_path: str | None) -> None:
+    """Delete a store's saved Playwright session, if it still exists.
+
+    Invalid or out-of-bounds paths are ignored (legacy database rows), matching
+    the clear-login-session endpoint's behavior.
+    """
+    if not saved_path:
+        return
+
+    try:
+        resolved = resolve_storage_state_path(saved_path)
+    except Exception:
+        return
+
+    if not resolved.exists():
+        return
+
+    try:
+        resolved.unlink()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not remove saved login session file: {exc}",
+        )
+
+
 @router.post("/{store_id}/login-session", response_model=StoreLoginSessionResponse)
 async def capture_login_session(store_id: int, body: StoreLoginSessionRequest):
     db = await get_db()
@@ -448,21 +473,7 @@ async def clear_login_session(store_id: int):
     finally:
         await db.close()
 
-    resolved: Path | None = None
-    if saved_path:
-        try:
-            resolved = resolve_storage_state_path(saved_path)
-        except Exception:
-            resolved = None
-
-    if resolved and resolved.exists():
-        try:
-            resolved.unlink()
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Could not remove saved login session file: {exc}",
-            )
+    _remove_login_session_file(saved_path)
 
     db = await get_db()
     try:
@@ -506,6 +517,7 @@ async def delete_store(store_id: int):
         rows = await db.execute_fetchall(_STORE_SELECT + " WHERE id=?", (store_id,))
         if not rows:
             raise HTTPException(status_code=404, detail="Store not found")
+        _remove_login_session_file(rows[0]["storage_state_path"])
         await _clear_store_catalog_rows(db, store_id)
         await db.execute("DELETE FROM stores WHERE id=?", (store_id,))
         await db.commit()

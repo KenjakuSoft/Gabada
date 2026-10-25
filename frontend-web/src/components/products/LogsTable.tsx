@@ -325,7 +325,18 @@ function StockTransition({ log }: { log: PriceLog }) {
   return <StockPill status={log.stock_status} />
 }
 
+const CHANGE_TYPE_LABELS: Record<string, string> = {
+  new: 'First scrape',
+  price_up: 'Price up',
+  price_down: 'Price down',
+  price_and_stock: 'Price + stock',
+  stock_in: 'Back in stock',
+  stock_out: 'Out of stock',
+  stock_change: 'Stock change',
+  no_change: 'No change',
+}
+
 function formatChangeType(changeType: string | null): string {
   if (!changeType) return '-'
-  return changeType.replaceAll('_', ' ')
+  return CHANGE_TYPE_LABELS[changeType] ?? changeType.replaceAll('_', ' ')
 }
