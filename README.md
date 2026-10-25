@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v0.7.1-2F80ED?style=for-the-badge"></a>
+  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v0.7.2-2F80ED?style=for-the-badge"></a>
   <a href="https://github.com/KenjakuSoft/Gabada/actions/workflows/release.yml"><img alt="Release workflow" src="https://img.shields.io/badge/release%20workflow-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white&style=for-the-badge"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-34A853?style=for-the-badge"></a>
 </p>
@@ -45,16 +45,17 @@ when a site layout changes.
 
 ## Current Release
 
-Latest stable release: `v0.7.1`
+Latest stable release: `v0.7.2`
 
 Recent highlights:
 
-- **Client-rendered React/Next storefronts extract correctly.** Frameworks that render `{currency} {value}` as sibling DOM text nodes ("LKR" + "168,000.00") no longer lose the price in the smart scan, and the post-navigation rendered-price poll accepts any visible currency-prefixed number instead of only WooCommerce-style class names — SPAs extract as soon as their data fetch lands. Verified live against a Next.js App Router storefront on Vercel.
-- **Meta-tag extraction strategy.** The waterfall now reads OpenGraph / Twitter product meta tags (`product:price:amount`, `og:price:amount`, sale price, currency, `og:availability`, `twitter:label1`/`twitter:data1` price pairs) after JSON-LD and microdata. Shopify and many custom storefronts expose these even when richer structured data is absent.
-- **Four new platform fingerprints with default selectors:** OpenCart, BigCommerce, Wix Stores, and Squarespace — wired into platform auto-detect, Probe suggestions, and `sites.toml` profiles.
-- **The Turnstile auto-clicker works on modern SeleniumBase again.** The stealth path now targets `tab.solve_captcha()` (SeleniumBase 4.50+; dependency floor raised to 4.50.5) with the legacy `uc_gui_*` names kept as fallbacks — on recent releases the old names never existed in CDP mode, so the auto-clicker was silently a no-op. Verified live against a store's interactive Turnstile.
-- **Currency recognition broadened from 9 to ~48 currencies** (ISO codes plus the ₺ ₩ ₫ ₴ ₦ ₱ ₪ symbols) across the smart scan, Selector Lab, buy-area classifier, and raw-price scoring — plus new guards so model numbers ("B1503", "256GB") and long "free …" prose can no longer become bogus prices.
-- Earlier in the 0.6.x line: variant JSON-LD stock protected end-to-end; collapsible Activity feed with per-store drill-down; local API hardening (DNS-rebinding defense, security headers, session-path confinement, URL scheme allowlist); Epic Games Store buy-box scoping; SeleniumBase Cloudflare stealth fallback; API catalog imports (Steam / Apple App Store / GOG / Custom JSON); per-row currency tagging; saved Selector Lab profiles winning over stale platform defaults.
+- **Price changes now match across every ingestion path.** Scraping, file imports, and API catalog sync share one classifier, so a sale price, a stock flip, or a first-seen price gets the same label no matter how the data arrived.
+- **Cleaner price history.** Sub-cent float noise is no longer logged as a price move, the first real price after a "call for price" page is logged as "new" rather than "price up", and same-second logs resolve deterministically to the newest row.
+- **Clearer manual scrapes and input limits.** A scrape that legitimately finds no price returns a skipped summary instead of `409`, and logs/activity reject non-positive limits with `422`.
+- **Safer settings and store management.** One corrupt exchange rate no longer wipes the rest, non-finite rates are rejected, and deleting a store removes its saved login-session file.
+- **Tighter product links.** Missing products, duplicate store links, and cross-product override access now return proper `404`/`409` responses instead of database errors or silent writes.
+- **UI polish.** Human-readable change labels in the logs table, a fixed logs API client, and a count-up animation that resumes from the value on screen.
+- Earlier in the 0.7.x line: meta-tag extraction, OpenCart/BigCommerce/Wix/Squarespace fingerprints, modern SeleniumBase Turnstile support, ~48 currencies, and client-rendered Next.js storefront support.
 
 See [CHANGELOG.md](./CHANGELOG.md) for full release notes.
 
@@ -509,7 +510,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./packaging/build_release.sh --app-version 0.7.1
+./packaging/build_release.sh --app-version 0.7.2
 ```
 
 Pushing a `v*` tag or publishing a GitHub Release triggers

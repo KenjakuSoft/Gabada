@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.7.2] - 2026-10-26
+
+### Fixed
+- **Price changes are classified the same way everywhere.** Scraping, file imports, and API catalog sync each carried their own copy of the comparison logic, and the copies had drifted apart. They now share one classifier, so the same price and stock transition produces the same change type on every ingestion path.
+- **The first real price is no longer reported as "price up".** When the previous snapshot had no usable price (a "call for price" page, or a stock-only import), the first number that appeared was logged as a directionless increase. It is now logged as "new".
+- **Sub-cent float noise is no longer logged as a price move.** A change is only recorded after rounding to cents and checking the tolerance, so values like 12.300000000000001 and 12.30 stay "no change".
+- **The latest price log is picked deterministically.** Two logs written in the same second were resolved by timestamp alone, so the "previous" row could flip between runs; imports and catalog sync now break the tie by `id DESC`.
+- **A manual scrape that finds no price no longer fails.** Only links explicitly marked manual-only return `409`; a normal scrape that legitimately finds no price now returns its summary with a skipped status.
+- **Out-of-range `limit` values are rejected for logs and activity.** A limit of `0` or below now returns `422` instead of an empty or confusing page.
+- **One corrupt exchange rate no longer discards the rest.** Unusable entries are skipped individually instead of wiping the whole map, and non-finite values (`NaN`, `Infinity`) are rejected when rates are saved.
+- **Deleting a store now removes its saved login session.** The Playwright storage-state file is deleted with the store instead of being left behind on disk.
+- **Product store-link guards.** Linking a store to a missing product returns `404`, linking the same store twice returns `409` instead of a database error, and per-link overrides can no longer be reached through another product's id.
+
+### Improved
+- **Readable change labels in the logs table** ("Price up", "Back in stock", "First scrape") instead of raw snake_case values.
+- **The logs API client now sends the required product-store id** plus the optional date range, so `logsApi.all()` can actually load a product's history.
+- **The count-up animation resumes from the value on screen** when a new value arrives mid-animation, instead of restarting from the old origin.
+- Added five regression test files covering the shared classifier, API limits, link guards, exchange rates, and session cleanup. Full backend suite: 196 tests.
+
 ## [0.7.1] - 2026-07-06
 
 ### Security
@@ -326,7 +345,8 @@ First tagged Windows release line.
 - Activity feed, categories, LKR currency support.
 - Initial scaffold of the price and stock tracker.
 
-[Unreleased]: https://github.com/KenjakuSoft/Gabada/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/KenjakuSoft/Gabada/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.7.2
 [0.7.1]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.7.1
 [0.7.0]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.7.0
 [0.6.7]: https://github.com/KenjakuSoft/Gabada/releases/tag/v0.6.7
