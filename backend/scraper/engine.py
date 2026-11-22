@@ -5212,8 +5212,44 @@ async def _wait_for_price_text(page: Page, *, timeout_ms: int = 4000) -> bool:
     return False
 
 
+_TRANSIENT_NAV_ERRORS = (
+    "net::ERR_HTTP2_PROTOCOL_ERROR",
+    "net::ERR_EMPTY_RESPONSE",
+    "net::ERR_CONNECTION_RESET",
+    "net::ERR_CONNECTION_ABORTED",
+    "net::ERR_HTTP2_SERVER_REFUSED_STREAM",
+    "net::ERR_SPDY_PROTOCOL_ERROR",
+    "net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+)
+
+_NAV_RETRY_DELAY_MS = 1500
+_NAV_MAX_RETRIES = 2
+
+
+def _is_transient_nav_error(exc: Exception) -> bool:
+    """A transport-layer error a WAF / flaky origin can throw on first hit."""
+    text = str(exc)
+    return any(token in text for token in _TRANSIENT_NAV_ERRORS)
+
+
 async def _navigate(page: Page, url: str, config: ScrapeConfig) -> bool:
-    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            break
+        except Exception as exc:
+            if attempts > _NAV_MAX_RETRIES or not _is_transient_nav_error(exc):
+                raise
+            logger.warning(
+                "Transient nav error (%s) on %s, retry %d/%d",
+                exc,
+                url,
+                attempts,
+                _NAV_MAX_RETRIES,
+            )
+            await asyncio.sleep(_NAV_RETRY_DELAY_MS / 1000.0)
 
     # Challenge handling: if the landing page is a challenge, give it a
     # chance to auto-resolve before we look for product selectors.
