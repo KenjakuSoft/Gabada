@@ -5,6 +5,11 @@ All notable changes to Gabada are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-11-23
+
+### Changed
+- **All backend dependencies bumped to their current releases** across both venvs (fastapi, uvicorn, playwright, beautifulsoup4, httpx, aiosqlite, apscheduler, pydantic, python-multipart, pillow, openpyxl, pdfplumber, xlrd, seleniumbase) plus pyinstaller for packaging. Playwright's bundled Chromium was refreshed. Full test suite passes and live scraping verified against the upgraded stack.
+
 ## [0.7.5] - 2026-11-23
 
 ### Fixed
