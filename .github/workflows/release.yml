@@ -211,12 +211,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The three platform jobs run in parallel and all try to create the
+          # release. "gh release create" fails with HTTP 422 "tag already
+          # exists" when another job already created it — treat that as fine
+          # and always proceed to upload this job's own assets.
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" \
               --title "Gabada $RELEASE_TAG" \
-              --notes "Automated release for $RELEASE_TAG. See CHANGELOG.md for details."
+              --notes "Automated release for $RELEASE_TAG. See CHANGELOG.md for details." \
+              || true
           fi
           for f in packaging/output/*; do
             [[ -f "$f" ]] || continue
-            gh release upload "$RELEASE_TAG" "$f" --clobber
+            gh release upload "$RELEASE_TAG" "$f" --clobber || true
           done
