@@ -1,19 +1,19 @@
-fastapi>=0.111.0
-uvicorn[standard]>=0.29.0
-playwright>=1.44.0
-beautifulsoup4>=4.12.0
-httpx>=0.27.0
-aiosqlite>=0.20.0
-apscheduler>=3.10.4
-pydantic>=2.7.0
-python-multipart>=0.0.9
-pillow>=10.3.0
-openpyxl>=3.1.0
-pdfplumber>=0.11.0
-xlrd>=2.0.1
+fastapi>=0.165.0
+uvicorn[standard]>=0.54.0
+playwright>=1.65.2
+beautifulsoup4>=4.15.0
+httpx>=0.28.1
+aiosqlite>=0.22.1
+apscheduler>=3.11.3
+pydantic>=2.14.4
+python-multipart>=0.0.34
+pillow>=13.0.0
+openpyxl>=3.1.5
+pdfplumber>=0.11.11
+xlrd>=2.0.2
 # Stealth-Chrome fallback for Cloudflare / DataDome bot challenges.
 # The scraper boots without it (the import is gated in scraper/stealth.py),
 # but protected stores will fail without it installed.
 # 4.50+ moves the CDP captcha solver onto the Tab object (tab.solve_captcha),
 # which scraper/stealth.py targets first.
-seleniumbase>=4.50.5
+seleniumbase>=4.58.3
