@@ -1,5 +1,5 @@
 APP_NAME = "Gabada"
-APP_VERSION = "0.7.3"
+APP_VERSION = "0.7.4"
 APP_REPOSITORY = "KenjakuSoft/Gabada"
 
 
