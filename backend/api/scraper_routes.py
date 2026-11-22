@@ -1,11 +1,16 @@
 import json
 import logging
-from typing import Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from api.price_log_utils import (
+    PriceSnapshot,
+    compute_price_change,
+    get_settings_currency,
+    infer_currency_code,
+)
 from database.db import get_db
 from database.models import (
     BuyAreaPickRequest,
@@ -14,20 +19,14 @@ from database.models import (
     ProbeRequest,
     ProbeResponse,
     ScrapeConfig,
-    ScrapeSelectors,
     ScrapeResult,
+    ScrapeSelectors,
     SelectorLabProfile,
     SelectorLabRequest,
     SelectorLabResponse,
     SelectorLabSaveRequest,
     SelectorLabSaveResponse,
     SelectorLabTestRequest,
-)
-from api.price_log_utils import (
-    PriceSnapshot,
-    compute_price_change,
-    get_settings_currency,
-    infer_currency_code,
 )
 from scraper import site_profiles
 from scraper.engine import inspect_selectors, probe, save_login_state, scrape
@@ -102,7 +101,7 @@ async def _latest_price_row(db, product_store_id: int):
 
 async def _compute_change(
     db, product_store_id: int, result: ScrapeResult
-) -> tuple[str, Optional[float], Optional[float], Optional[str]]:
+) -> tuple[str, float | None, float | None, str | None]:
     """Return (change_type, price_delta, previous_price, previous_stock_status)."""
     rows = await db.execute_fetchall(
         """SELECT price, discounted_price, stock_status
@@ -403,8 +402,8 @@ async def probe_url(request: ProbeRequest) -> ProbeResponse:
 
 def _config_from_selector_body(
     body: SelectorLabRequest,
-    selectors: Optional[dict[str, Optional[str]]] = None,
-    platform: Optional[str] = None,
+    selectors: dict[str, str | None] | None = None,
+    platform: str | None = None,
 ) -> ScrapeConfig:
     selector_values = selectors or {}
     return ScrapeConfig(
@@ -426,7 +425,7 @@ def _config_from_selector_body(
     )
 
 
-async def _resolve_saved_store_session(url: str) -> tuple[Optional[str], Optional[str]]:
+async def _resolve_saved_store_session(url: str) -> tuple[str | None, str | None]:
     hostname = site_profiles.normalize_hostname(url)
     if not hostname:
         return None, None
@@ -450,9 +449,9 @@ async def _resolve_saved_store_session(url: str) -> tuple[Optional[str], Optiona
 
 async def _diagnostic_config(
     body: ProbeRequest | SelectorLabRequest,
-    selectors: Optional[dict[str, Optional[str]]] = None,
-    platform: Optional[str] = None,
-) -> tuple[ScrapeConfig, Optional[str]]:
+    selectors: dict[str, str | None] | None = None,
+    platform: str | None = None,
+) -> tuple[ScrapeConfig, str | None]:
     if isinstance(body, ProbeRequest):
         config = ScrapeConfig(
             use_playwright=body.use_playwright,

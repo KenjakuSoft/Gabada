@@ -7,7 +7,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from api.price_log_utils import infer_currency_code  # noqa: E402
+from api.price_log_utils import infer_currency_code
 
 
 def test_infers_lkr_from_rs_raw_price() -> None:

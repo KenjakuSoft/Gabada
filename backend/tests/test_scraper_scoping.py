@@ -25,13 +25,13 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from database.models import ScrapeResult  # noqa: E402
-from scraper.engine import (  # noqa: E402
+from database.models import ScrapeResult
+from scraper.engine import (
     _get_product_root,
     _resolve_custom_stock_status,
     _review_result_with_smart_scan,
 )
-from scraper.site_profiles import PLATFORM_SELECTORS  # noqa: E402
+from scraper.site_profiles import PLATFORM_SELECTORS
 
 
 def _smart_data(

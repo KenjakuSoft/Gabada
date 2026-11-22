@@ -13,9 +13,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-import database.db as db_module  # noqa: E402
-from api import products as products_api  # noqa: E402
-from database.models import (  # noqa: E402
+import database.db as db_module
+from api import products as products_api
+from database.models import (
     ProductStoreCreate,
     ProductStoreOverrideUpsert,
 )

@@ -12,8 +12,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-import database.db as db_module  # noqa: E402
-from api import stores as stores_api  # noqa: E402
+import database.db as db_module
+from api import stores as stores_api
 
 
 def _prepare_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

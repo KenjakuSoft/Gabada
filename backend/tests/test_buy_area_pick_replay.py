@@ -15,8 +15,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from database.models import BuyAreaItem, BuyAreaPick, ScrapeResult  # noqa: E402
-from scraper.engine import (  # noqa: E402
+from database.models import BuyAreaItem, BuyAreaPick, ScrapeResult
+from scraper.engine import (
     _apply_buy_area_picks,
     _best_match_for_pick,
     _buy_area_pick_score,

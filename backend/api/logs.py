@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Query
-from typing import Optional
 from datetime import date
+
+from fastapi import APIRouter, Query
+
 from database.db import get_db
 from database.models import PriceLog
 
@@ -10,8 +11,8 @@ router = APIRouter(prefix="/logs", tags=["logs"])
 @router.get("/", response_model=list[PriceLog])
 async def get_logs(
     product_store_id: int,
-    from_date: Optional[date] = Query(None, alias="from"),
-    to_date: Optional[date] = Query(None, alias="to"),
+    from_date: date | None = Query(None, alias="from"),
+    to_date: date | None = Query(None, alias="to"),
     limit: int = Query(365, ge=1, le=1000),
 ):
     db = await get_db()
@@ -47,8 +48,8 @@ async def get_logs(
 @router.get("/product/{product_id}", response_model=list[PriceLog])
 async def get_logs_for_product(
     product_id: int,
-    from_date: Optional[date] = Query(None, alias="from"),
-    to_date: Optional[date] = Query(None, alias="to"),
+    from_date: date | None = Query(None, alias="from"),
+    to_date: date | None = Query(None, alias="to"),
     limit: int = Query(1000, ge=1, le=5000),
 ):
     """All logs for every store carrying this product — useful for chart overlays."""

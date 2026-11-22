@@ -25,7 +25,6 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
@@ -43,6 +42,7 @@ from database.models import (
 from scheduler.jobs import pause_scheduler, reschedule, resume_scheduler
 from services import drive_sync
 from services.backup_bundle import (
+    BACKUP_DB_NAME,
     backup_sqlite_file,
     create_backup_bundle,
     extract_backup_bundle,
@@ -50,7 +50,6 @@ from services.backup_bundle import (
     restore_site_profiles,
     timestamp_slug,
     validate_backup_database,
-    BACKUP_DB_NAME,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,7 +57,7 @@ router = APIRouter(prefix="/drive", tags=["drive"])
 
 # Re-use the same lock as settings.py so manual import/export and Drive push/
 # restore cannot run concurrently.
-from api.settings import _TRANSFER_LOCK  # noqa: E402
+from api.settings import _TRANSFER_LOCK
 
 
 def _backups_dir() -> Path:
@@ -94,7 +93,7 @@ async def _require_access_token() -> str:
 
 
 def _to_snapshot(item: dict) -> DriveSnapshot:
-    def _parse_dt(value) -> Optional[datetime]:
+    def _parse_dt(value) -> datetime | None:
         if not value:
             return None
         try:
@@ -122,7 +121,7 @@ async def get_status() -> DriveStatus:
     tokens = drive_sync.load_tokens()
     last_push = drive_sync.load_last_push() or {}
     last_at = last_push.get("at")
-    parsed_last_at: Optional[datetime] = None
+    parsed_last_at: datetime | None = None
     if last_at:
         try:
             parsed_last_at = datetime.fromisoformat(last_at.replace("Z", "+00:00"))

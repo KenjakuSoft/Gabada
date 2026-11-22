@@ -1,4 +1,5 @@
 import aiosqlite
+
 from app_paths import database_path
 
 DB_PATH = str(database_path())

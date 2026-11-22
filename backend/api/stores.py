@@ -2,6 +2,9 @@ import json
 import re
 
 from fastapi import APIRouter, HTTPException
+
+from api.import_routes import sync_store_woo_catalog
+from services.api_catalog import sync_store_api_catalog
 from app_paths import resolve_storage_state_path
 from database.db import get_db
 from database.models import (
@@ -13,7 +16,6 @@ from database.models import (
     StoreUpdate,
     WooSyncResult,
 )
-from api.import_routes import sync_store_api_catalog, sync_store_woo_catalog
 from scraper.engine import save_login_state
 from services.api_catalog import api_provider_base_url, normalize_api_platform
 

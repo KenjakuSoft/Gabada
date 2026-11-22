@@ -7,8 +7,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from database.models import UpdateAsset  # noqa: E402
-from services.update_checker import (  # noqa: E402
+from database.models import UpdateAsset
+from services.update_checker import (
     _recommended_asset,
     is_newer_version,
     version_parts,

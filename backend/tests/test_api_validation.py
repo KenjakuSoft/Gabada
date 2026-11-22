@@ -13,9 +13,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from api import activity as activity_api  # noqa: E402
-from api import logs as logs_api  # noqa: E402
-from api import scraper_routes  # noqa: E402
+from api import activity as activity_api
+from api import logs as logs_api
+from api import scraper_routes
 
 
 class _EmptyDb:
@@ -59,7 +59,7 @@ def test_logs_accepts_minimum_limit(client: TestClient) -> None:
 
 @pytest.mark.parametrize("limit", [0, -1, 5001])
 def test_product_logs_reject_out_of_range_limit(client: TestClient, limit: int) -> None:
-    response = client.get(f"/logs/product/1", params={"limit": limit})
+    response = client.get("/logs/product/1", params={"limit": limit})
 
     assert response.status_code == 422
 

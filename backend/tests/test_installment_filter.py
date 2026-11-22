@@ -14,7 +14,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from scraper.engine import _is_installment_price, _parse_price  # noqa: E402
+from scraper.engine import _is_installment_price, _parse_price
 
 
 def test_cash_card_price_is_not_installment() -> None:

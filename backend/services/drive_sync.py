@@ -28,11 +28,11 @@ import threading
 import time
 import urllib.parse
 import webbrowser
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -68,7 +68,7 @@ def _credentials_path() -> Path:
     return data_dir() / CREDENTIALS_FILE
 
 
-def load_credentials() -> Optional[DriveCredentials]:
+def load_credentials() -> DriveCredentials | None:
     path = _credentials_path()
     if not path.exists():
         return None
@@ -110,7 +110,7 @@ def _last_push_path() -> Path:
     return data_dir() / LAST_PUSH_FILE
 
 
-def load_last_push() -> Optional[dict[str, Any]]:
+def load_last_push() -> dict[str, Any] | None:
     path = _last_push_path()
     if not path.exists():
         return None
@@ -128,7 +128,7 @@ def save_last_push(name: str, snapshot_id: str) -> None:
             {
                 "name": name,
                 "snapshot_id": snapshot_id,
-                "at": datetime.now(timezone.utc).isoformat(),
+                "at": datetime.now(UTC).isoformat(),
             },
             indent=2,
         ),
@@ -147,10 +147,10 @@ def auth_in_progress() -> bool:
 @dataclass
 class DriveTokens:
     access_token: str
-    refresh_token: Optional[str]
+    refresh_token: str | None
     expires_at: float  # epoch seconds
-    scope: Optional[str] = None
-    account_email: Optional[str] = None
+    scope: str | None = None
+    account_email: str | None = None
 
     def is_expiring(self, slack: int = 60) -> bool:
         return time.time() + slack >= self.expires_at
@@ -160,7 +160,7 @@ def _tokens_path() -> Path:
     return data_dir() / TOKEN_FILE
 
 
-def load_tokens() -> Optional[DriveTokens]:
+def load_tokens() -> DriveTokens | None:
     path = _tokens_path()
     if not path.exists():
         return None
@@ -205,22 +205,22 @@ class _PendingAuth:
     state: str
     redirect_uri: str
     started_at: float
-    code: Optional[str] = None
-    error: Optional[str] = None
+    code: str | None = None
+    error: str | None = None
 
 
 _auth_lock = threading.Lock()
-_pending: Optional[_PendingAuth] = None
-_loopback_server: Optional[HTTPServer] = None
-_loopback_thread: Optional[threading.Thread] = None
+_pending: _PendingAuth | None = None
+_loopback_server: HTTPServer | None = None
+_loopback_thread: threading.Thread | None = None
 
 
 class _LoopbackHandler(BaseHTTPRequestHandler):
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: Any) -> None:
         # Silence the default stderr logging — route through our logger instead.
         logger.debug("Loopback: %s", format % args)
 
-    def do_GET(self) -> None:  # noqa: N802 — http.server signature
+    def do_GET(self) -> None:
         global _pending
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path != "/oauth2callback":
@@ -342,7 +342,7 @@ def cancel_auth() -> None:
     _stop_loopback()
 
 
-async def poll_auth(client_id: str, client_secret: str, *, timeout_seconds: int = 240) -> Optional[DriveTokens]:
+async def poll_auth(client_id: str, client_secret: str, *, timeout_seconds: int = 240) -> DriveTokens | None:
     """Poll the loopback handler for a captured code and exchange for tokens.
 
     Returns the persisted tokens on success, ``None`` if the user has not yet
@@ -406,7 +406,7 @@ async def poll_auth(client_id: str, client_secret: str, *, timeout_seconds: int 
     return tokens
 
 
-async def _userinfo_email(client: httpx.AsyncClient, access_token: str) -> Optional[str]:
+async def _userinfo_email(client: httpx.AsyncClient, access_token: str) -> str | None:
     try:
         resp = await client.get(
             USERINFO_URL,
@@ -580,7 +580,7 @@ async def upload_snapshot(access_token: str, zip_path: Path, name: str) -> dict[
             "Content-Type: application/zip\r\n\r\n"
         ).encode("utf-8")
         body += zip_path.read_bytes()
-        body += f"\r\n--{boundary}--\r\n".encode("utf-8")
+        body += f"\r\n--{boundary}--\r\n".encode()
         resp = await _request(
             "POST",
             f"{DRIVE_UPLOAD_BASE}/files",
@@ -635,7 +635,7 @@ async def prune_old_snapshots(
     return deleted
 
 
-def make_snapshot_filename(stamp: Optional[str] = None) -> str:
+def make_snapshot_filename(stamp: str | None = None) -> str:
     if stamp is None:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return f"{SNAPSHOT_PREFIX}{stamp}.zip"

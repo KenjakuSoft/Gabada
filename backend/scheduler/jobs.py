@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -86,7 +85,7 @@ def stop_scheduler() -> None:
         _scheduler.shutdown(wait=False)
 
 
-def next_run_time() -> Optional[str]:
+def next_run_time() -> str | None:
     job = _scheduler.get_job(_JOB_ID)
     if job and job.next_run_time:
         return job.next_run_time.isoformat()

@@ -15,13 +15,11 @@ import json
 import shutil
 import sqlite3
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from app_paths import database_path, is_frozen, site_profiles_path
 from database.models import DatabaseCounts
-
 
 BACKUP_DB_NAME = "gabada.db"
 BACKUP_SITE_PROFILES_NAME = "sites.toml"
@@ -96,7 +94,7 @@ def create_backup_bundle(
     metadata = {
         "format": "gabada-backup",
         "version": 1,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "install_mode": "desktop" if is_frozen() else "source",
         "counts": counts.model_dump(),
         "includes_site_profiles": site_profiles_path().exists(),
@@ -143,13 +141,13 @@ def _extract_member_capped(
 def extract_backup_bundle(
     bundle_path: Path,
     stage_dir: Path,
-) -> tuple[Path, Optional[Path]]:
+) -> tuple[Path, Path | None]:
     """Extract the SQLite DB and (if present) ``sites.toml`` from a bundle zip.
 
     Returns ``(db_path, site_profiles_path_or_None)``.
     """
     extracted_db = stage_dir / BACKUP_DB_NAME
-    extracted_profiles: Optional[Path] = None
+    extracted_profiles: Path | None = None
     with zipfile.ZipFile(bundle_path, "r") as archive:
         members = archive.namelist()
         db_member = next(
@@ -200,4 +198,4 @@ def restore_site_profiles(source_path: Path) -> None:
 
 
 def timestamp_slug() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d-%H%M%S")

@@ -5,7 +5,6 @@ import shutil
 import sys
 from pathlib import Path
 
-
 APP_NAME = "Gabada"
 _ENV_DATA_DIR = "GABADA_DATA_DIR"
 _ENV_BROWSERS_PATH = "PLAYWRIGHT_BROWSERS_PATH"

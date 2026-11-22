@@ -36,7 +36,6 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Optional
 from urllib.parse import urlparse
 
 from app_paths import site_profiles_path
@@ -72,7 +71,7 @@ PLATFORM_WAIT_FOR: dict[str, str] = {
     "facebook-marketplace": "div[role='main']",
 }
 
-PLATFORM_SELECTORS: dict[str, dict[str, Optional[str]]] = {
+PLATFORM_SELECTORS: dict[str, dict[str, str | None]] = {
     "cs-cart": {
         "title": ".ty-product-block-title",
         "price": ".ty-price-retail-price .ty-price-num, .ty-price-retail-price, .ty-list-price .ty-price-num, .ty-list-price",
@@ -226,8 +225,8 @@ def apply_platform_defaults(config: ScrapeConfig, platform: str) -> ScrapeConfig
 @dataclass(frozen=True)
 class SiteProfile:
     hostname: str
-    platform: Optional[str] = None
-    wait_for: Optional[str] = None
+    platform: str | None = None
+    wait_for: str | None = None
     selectors: dict[str, str] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
 
@@ -270,7 +269,7 @@ def _hostname_candidates(host: str) -> list[str]:
     return [".".join(parts[i:]) for i in range(max(0, len(parts) - 1))]
 
 
-def find_profile(url: str) -> Optional[SiteProfile]:
+def find_profile(url: str) -> SiteProfile | None:
     profiles = _load()
     if not profiles:
         return None
@@ -280,8 +279,7 @@ def find_profile(url: str) -> Optional[SiteProfile]:
         return None
     if not host:
         return None
-    if host.startswith("www."):
-        host = host[4:]
+    host = host.removeprefix("www.")
     for candidate in _hostname_candidates(host):
         entry = profiles.get(candidate)
         if not entry:
@@ -299,11 +297,11 @@ def find_profile(url: str) -> Optional[SiteProfile]:
 
 
 def _selector_should_yield_to_profile(
-    current_value: Optional[str],
-    profile_value: Optional[str],
+    current_value: str | None,
+    profile_value: str | None,
     *,
-    config_platform: Optional[str],
-    profile_platform: Optional[str],
+    config_platform: str | None,
+    profile_platform: str | None,
     field: str,
 ) -> bool:
     """Let saved site-profile selectors override stale platform defaults.
@@ -487,7 +485,7 @@ def list_hostnames() -> list[str]:
     return sorted(_load().keys())
 
 
-def normalize_hostname(value: str) -> Optional[str]:
+def normalize_hostname(value: str) -> str | None:
     raw = (value or "").strip()
     if not raw:
         return None
@@ -498,12 +496,11 @@ def normalize_hostname(value: str) -> Optional[str]:
         host = ""
     if not host:
         host = raw.split("/")[0].strip().lower()
-    if host.startswith("www."):
-        host = host[4:]
+    host = host.removeprefix("www.")
     return host or None
 
 
-def get_exact_profile(hostname: str) -> Optional[SiteProfile]:
+def get_exact_profile(hostname: str) -> SiteProfile | None:
     normalized = normalize_hostname(hostname)
     if not normalized:
         return None
@@ -566,10 +563,10 @@ def _serialize_profiles(profiles: dict[str, dict]) -> str:
 def upsert_profile(
     hostname: str,
     *,
-    platform: Optional[str] = None,
-    wait_for: Optional[str] = None,
-    selectors: Optional[dict[str, Optional[str]]] = None,
-    headers: Optional[dict[str, str]] = None,
+    platform: str | None = None,
+    wait_for: str | None = None,
+    selectors: dict[str, str | None] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> SiteProfile:
     normalized = normalize_hostname(hostname)
     if not normalized:

@@ -20,14 +20,13 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from api.import_routes import _latest_price_log as import_latest_log  # noqa: E402
-from api.price_log_utils import (  # noqa: E402
+from api.import_routes import _latest_price_log as import_latest_log
+from api.price_log_utils import (
     PriceSnapshot,
     compute_price_change,
     effective_price,
 )
-from services.api_catalog import _latest_price_log as catalog_latest_log  # noqa: E402
-
+from services.api_catalog import _latest_price_log as catalog_latest_log
 
 # ── Effective price ─────────────────────────────────────────────────────────
 

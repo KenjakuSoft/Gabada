@@ -14,8 +14,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from database.models import ScrapeResult  # noqa: E402
-from scraper.engine import (  # noqa: E402
+from database.models import ScrapeResult
+from scraper.engine import (
     _parse_price,
     _parse_stock,
     _review_result_with_smart_scan,

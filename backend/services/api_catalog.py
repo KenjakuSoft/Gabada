@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import quote, urljoin, urlparse
 
 import httpx
 from fastapi import HTTPException
 
-from api.product_service import create_product_with_store, create_store_link
 from api.price_log_utils import PriceSnapshot, compute_price_change
+from api.product_service import create_product_with_store, create_store_link
 from database.db import get_db
 from database.models import (
     ApiImportRequest,
@@ -80,7 +80,7 @@ def api_provider_base_url(platform: str | None) -> str | None:
     return API_PROVIDER_BASE_URLS.get(value)
 
 
-def steam_app_id_from_value(value: str | int | None) -> Optional[int]:
+def steam_app_id_from_value(value: str | int | None) -> int | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -100,7 +100,7 @@ def steam_app_id_from_value(value: str | int | None) -> Optional[int]:
     return None
 
 
-def apple_app_id_from_value(value: str | int | None) -> Optional[str]:
+def apple_app_id_from_value(value: str | int | None) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -122,7 +122,7 @@ def apple_app_id_from_value(value: str | int | None) -> Optional[str]:
     return None
 
 
-def gog_slug_from_value(value: str | int | None) -> Optional[str]:
+def gog_slug_from_value(value: str | int | None) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -221,7 +221,7 @@ def _chunked(values: list[int], size: int) -> list[list[int]]:
     return [values[index : index + size] for index in range(0, len(values), size)]
 
 
-def _money_from_steam_cents(value: Any) -> Optional[float]:
+def _money_from_steam_cents(value: Any) -> float | None:
     if value in (None, ""):
         return None
     try:
@@ -230,7 +230,7 @@ def _money_from_steam_cents(value: Any) -> Optional[float]:
         return None
 
 
-def _formatted_money(currency: Optional[str], value: Optional[float]) -> Optional[str]:
+def _formatted_money(currency: str | None, value: float | None) -> str | None:
     if value is None:
         return None
     if currency:
@@ -238,7 +238,7 @@ def _formatted_money(currency: Optional[str], value: Optional[float]) -> Optiona
     return f"{value:,.2f}"
 
 
-def _number_from_value(value: Any) -> Optional[float]:
+def _number_from_value(value: Any) -> float | None:
     if value in (None, ""):
         return None
     if isinstance(value, bool):
@@ -332,7 +332,7 @@ def _steam_stock_status(data: dict[str, Any]) -> str:
     return "in_stock"
 
 
-def _steam_preview_from_detail(app_id: int, payload: dict[str, Any]) -> Optional[ApiProductPreview]:
+def _steam_preview_from_detail(app_id: int, payload: dict[str, Any]) -> ApiProductPreview | None:
     if payload.get("success") is False:
         return None
     data = payload.get("data") if "data" in payload else payload
@@ -365,7 +365,7 @@ def _steam_preview_from_detail(app_id: int, payload: dict[str, Any]) -> Optional
     )
 
 
-def _steam_preview_from_search_item(item: dict[str, Any]) -> Optional[ApiProductPreview]:
+def _steam_preview_from_search_item(item: dict[str, Any]) -> ApiProductPreview | None:
     app_id = steam_app_id_from_value(item.get("id") or item.get("appid"))
     name = (item.get("name") or "").strip()
     if app_id is None or not name:
@@ -497,7 +497,7 @@ async def _steam_search(
     return [detail_by_id.get(item.external_id, item) for item in search_previews]
 
 
-def _apple_preview_from_item(item: dict[str, Any]) -> Optional[ApiProductPreview]:
+def _apple_preview_from_item(item: dict[str, Any]) -> ApiProductPreview | None:
     app_id = apple_app_id_from_value(item.get("trackId") or item.get("collectionId"))
     name = (item.get("trackName") or item.get("collectionName") or "").strip()
     if not app_id or not name:
@@ -636,7 +636,7 @@ async def _apple_search(
     return previews
 
 
-def _protocol_url(value: Any) -> Optional[str]:
+def _protocol_url(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
@@ -645,7 +645,7 @@ def _protocol_url(value: Any) -> Optional[str]:
     return text
 
 
-def _extract_balanced_json_object(text: str, marker: str) -> Optional[dict[str, Any]]:
+def _extract_balanced_json_object(text: str, marker: str) -> dict[str, Any] | None:
     marker_index = text.find(marker)
     if marker_index < 0:
         return None
@@ -684,14 +684,14 @@ def _extract_balanced_json_object(text: str, marker: str) -> Optional[dict[str, 
     return None
 
 
-def _regex_group(text: str, pattern: str) -> Optional[str]:
-    match = re.search(pattern, text, re.S)
+def _regex_group(text: str, pattern: str) -> str | None:
+    match = re.search(pattern, text, re.DOTALL)
     if not match:
         return None
     return match.group(1)
 
 
-def _gog_money_fields(product: dict[str, Any], currency: Optional[str], symbol: Optional[str]) -> dict[str, Any]:
+def _gog_money_fields(product: dict[str, Any], currency: str | None, symbol: str | None) -> dict[str, Any]:
     price_data = product.get("price")
     if not isinstance(price_data, dict):
         return {
@@ -709,7 +709,7 @@ def _gog_money_fields(product: dict[str, Any], currency: Optional[str], symbol: 
     if final is None:
         final = base
 
-    def raw(value: Optional[float]) -> Optional[str]:
+    def raw(value: float | None) -> str | None:
         if value is None:
             return None
         if value == 0:
@@ -751,9 +751,9 @@ def _gog_stock_status(product: dict[str, Any]) -> str:
 def _gog_preview_from_card_product(
     product: dict[str, Any],
     *,
-    currency: Optional[str],
-    symbol: Optional[str],
-) -> Optional[ApiProductPreview]:
+    currency: str | None,
+    symbol: str | None,
+) -> ApiProductPreview | None:
     title = str(product.get("title") or "").strip()
     slug = gog_slug_from_value(product.get("url")) or gog_slug_from_value(product.get("slug"))
     if not title or not slug:
@@ -792,7 +792,7 @@ def _gog_preview_from_card_product(
     )
 
 
-async def _gog_fetch_product_page(slug: str) -> Optional[ApiProductPreview]:
+async def _gog_fetch_product_page(slug: str) -> ApiProductPreview | None:
     url = f"{API_PROVIDER_BASE_URLS['gog']}/en/game/{slug}"
     async with httpx.AsyncClient(timeout=_API_TIMEOUT, follow_redirects=True) as client:
         try:
@@ -902,7 +902,7 @@ def _custom_field_path(config: dict[str, Any], key: str, default: str) -> Any:
     return mapping.get(short_key) or mapping.get(key) or config.get(key) or default
 
 
-def _string_or_none(value: Any) -> Optional[str]:
+def _string_or_none(value: Any) -> str | None:
     if value in (None, ""):
         return None
     return str(value).strip() or None
@@ -1035,7 +1035,7 @@ def _custom_preview_from_item(
     *,
     config: dict[str, Any],
     base_url: str | None,
-) -> Optional[ApiProductPreview]:
+) -> ApiProductPreview | None:
     if not isinstance(item, dict):
         return None
 
@@ -1396,7 +1396,7 @@ async def _existing_store_product_maps(db, store_id: int) -> tuple[dict[str, dic
     return by_url, by_name
 
 
-async def _find_any_product_by_name(db, canonical_name: str) -> Optional[dict]:
+async def _find_any_product_by_name(db, canonical_name: str) -> dict | None:
     rows = await db.execute_fetchall(
         """SELECT id, canonical_name, image_url
            FROM products
@@ -1416,7 +1416,7 @@ async def _merge_api_catalog_item(
     existing_by_url: dict[str, dict],
     existing_by_name: dict[str, dict],
     create_if_missing: bool,
-) -> tuple[str, Optional[int]]:
+) -> tuple[str, int | None]:
     # Permalinks/images come from the remote catalog feed, not the user —
     # drop non-web schemes instead of persisting them into <a href> data.
     # api:// is the internal sentinel for products with no web page.
@@ -1491,7 +1491,7 @@ async def _merge_api_catalog_item(
     return "created", product_store_id
 
 
-async def _latest_price_log(db, product_store_id: int) -> Optional[dict]:
+async def _latest_price_log(db, product_store_id: int) -> dict | None:
     rows = await db.execute_fetchall(
         """SELECT price, discounted_price, stock_status
            FROM price_logs
@@ -1503,9 +1503,9 @@ async def _latest_price_log(db, product_store_id: int) -> Optional[dict]:
 
 
 def _compute_api_change(
-    previous: Optional[dict],
+    previous: dict | None,
     item: ApiProductPreview,
-) -> tuple[str, Optional[float], Optional[float], Optional[str]]:
+) -> tuple[str, float | None, float | None, str | None]:
     previous_snapshot = PriceSnapshot.from_row(previous) if previous is not None else None
     change = compute_price_change(
         PriceSnapshot(
@@ -1528,7 +1528,7 @@ async def _insert_api_snapshot(
     *,
     product_store_id: int,
     item: ApiProductPreview,
-) -> tuple[ScrapeResult, str, Optional[float]]:
+) -> tuple[ScrapeResult, str, float | None]:
     previous = await _latest_price_log(db, product_store_id)
     change_type, price_delta, previous_price, previous_stock_status = _compute_api_change(previous, item)
 

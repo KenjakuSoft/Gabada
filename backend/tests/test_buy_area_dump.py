@@ -22,8 +22,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from database.models import BuyAreaItem  # noqa: E402
-from scraper.engine import _coerce_buy_area_items  # noqa: E402
+from database.models import BuyAreaItem
+from scraper.engine import _coerce_buy_area_items
 
 
 def test_coerce_normalises_kind_and_drops_empty_text() -> None:

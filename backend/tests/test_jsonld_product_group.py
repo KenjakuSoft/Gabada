@@ -26,7 +26,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from scraper.engine import _extract_jsonld_result_from_scripts  # noqa: E402
+from scraper.engine import _extract_jsonld_result_from_scripts
 
 
 def _wrap(payload: dict) -> list[str]:

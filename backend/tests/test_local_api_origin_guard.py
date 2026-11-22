@@ -7,7 +7,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from main import _is_allowed_browser_origin  # noqa: E402
+from main import _is_allowed_browser_origin
 
 
 def test_allows_desktop_and_vite_local_origins() -> None:

@@ -10,8 +10,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from database.models import ScrapeConfig  # noqa: E402
-from scraper import stealth  # noqa: E402
+from database.models import ScrapeConfig
+from scraper import stealth
 
 
 def test_is_available_returns_bool() -> None:

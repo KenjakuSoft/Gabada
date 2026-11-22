@@ -2,9 +2,8 @@ import csv
 import io
 import logging
 import re
-from typing import Any, Optional
-from urllib.parse import parse_qsl, quote
-from urllib.parse import urlparse, urlunparse
+from typing import Any
+from urllib.parse import parse_qsl, quote, urlparse, urlunparse
 
 import httpx
 import openpyxl
@@ -16,8 +15,8 @@ try:
 except Exception:  # pragma: no cover - optional dependency during local setup
     xlrd = None
 
-from api.product_service import create_product_with_store, create_store_link
 from api.price_log_utils import PriceSnapshot, compute_price_change
+from api.product_service import create_product_with_store, create_store_link
 from database.db import get_db
 from database.models import (
     ApiImportRequest,
@@ -30,17 +29,14 @@ from database.models import (
     ScrapeConfig,
     Store,
     WooImportRequest,
-    WooProductPreview,
     WooPreviewRequest,
+    WooProductPreview,
     WooSyncResult,
     neutralize_web_url,
 )
 from services.api_catalog import (
     fetch_api_preview_products,
     import_api_products,
-    sync_all_enabled_api_stores,
-    sync_api_product_store,
-    sync_store_api_catalog,
 )
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -81,7 +77,7 @@ def _normalize_woo_site_url(site_url: str) -> str:
     raw = (site_url or "").strip()
     if not raw:
         raise HTTPException(status_code=400, detail="Site URL is required")
-    if not re.match(r"^https?://", raw, re.I):
+    if not re.match(r"^https?://", raw, re.IGNORECASE):
         raw = f"https://{raw}"
     parsed = urlparse(raw)
     if not parsed.netloc:
@@ -91,8 +87,7 @@ def _normalize_woo_site_url(site_url: str) -> str:
         if cleaned_path.endswith(suffix):
             cleaned_path = cleaned_path[: -len(suffix)]
             break
-    if cleaned_path.endswith("/index.php"):
-        cleaned_path = cleaned_path[: -len("/index.php")]
+    cleaned_path = cleaned_path.removesuffix("/index.php")
     return urlunparse(
         (
             parsed.scheme.lower(),
@@ -233,11 +228,11 @@ async def _woo_get_products(
     consumer_key: str,
     consumer_secret: str,
     params: dict,
-    preferred_endpoint: Optional[str] = None,
-    preferred_auth_mode: Optional[str] = None,
+    preferred_endpoint: str | None = None,
+    preferred_auth_mode: str | None = None,
 ) -> tuple[httpx.Response, str, str]:
     attempts: list[str] = []
-    last_request_error: Optional[httpx.RequestError] = None
+    last_request_error: httpx.RequestError | None = None
     endpoints = _woo_products_urls(site_url)
     if preferred_endpoint in endpoints:
         endpoints = [preferred_endpoint] + [
@@ -311,10 +306,10 @@ async def _woo_get_public_store_products(
     *,
     site_url: str,
     params: dict,
-    preferred_endpoint: Optional[str] = None,
+    preferred_endpoint: str | None = None,
 ) -> tuple[httpx.Response, str]:
     attempts: list[str] = []
-    last_request_error: Optional[httpx.RequestError] = None
+    last_request_error: httpx.RequestError | None = None
     endpoints = _woo_store_products_urls(site_url)
     if preferred_endpoint in endpoints:
         endpoints = [preferred_endpoint] + [
@@ -355,8 +350,8 @@ async def _woo_get_public_store_products(
 async def _woo_fetch_preview_products_v3(body: WooPreviewRequest) -> list[WooProductPreview]:
     per_page = _woo_per_page(body.per_page)
     async with httpx.AsyncClient(timeout=_WOO_TIMEOUT) as client:
-        resolved_endpoint: Optional[str] = None
-        resolved_auth_mode: Optional[str] = None
+        resolved_endpoint: str | None = None
+        resolved_auth_mode: str | None = None
         if not body.fetch_all:
             resp, _, _ = await _woo_get_products(
                 client,
@@ -433,7 +428,7 @@ async def _woo_fetch_preview_products_v3(body: WooPreviewRequest) -> list[WooPro
 async def _woo_fetch_preview_products_store_api(body: WooPreviewRequest) -> list[WooProductPreview]:
     per_page = _woo_per_page(body.per_page)
     async with httpx.AsyncClient(timeout=_WOO_TIMEOUT) as client:
-        resolved_endpoint: Optional[str] = None
+        resolved_endpoint: str | None = None
         if not body.fetch_all:
             resp, _ = await _woo_get_public_store_products(
                 client,
@@ -641,7 +636,7 @@ async def _existing_store_product_maps(db, store_id: int) -> tuple[dict[str, dic
     return by_url, by_name
 
 
-async def _find_any_product_by_name(db, canonical_name: str) -> Optional[dict]:
+async def _find_any_product_by_name(db, canonical_name: str) -> dict | None:
     rows = await db.execute_fetchall(
         """SELECT id, canonical_name, image_url
            FROM products
@@ -659,7 +654,7 @@ async def _merge_woo_catalog_item(
     store_id: int,
     name: str,
     permalink: str,
-    image_url: Optional[str],
+    image_url: str | None,
     existing_by_url: dict[str, dict],
     existing_by_name: dict[str, dict],
     create_if_missing: bool,
@@ -814,8 +809,8 @@ async def _woo_fetch_products_by_ids_v3(body: WooImportRequest) -> list[dict]:
 
     products_by_id: dict[int, dict] = {}
     async with httpx.AsyncClient(timeout=_WOO_TIMEOUT) as client:
-        resolved_endpoint: Optional[str] = None
-        resolved_auth_mode: Optional[str] = None
+        resolved_endpoint: str | None = None
+        resolved_auth_mode: str | None = None
         for chunk in _chunked(product_ids, _WOO_API_MAX_PER_PAGE):
             resp, resolved_endpoint, resolved_auth_mode = await _woo_get_products(
                 client,
@@ -845,7 +840,7 @@ async def _woo_fetch_products_by_ids_store_api(body: WooImportRequest) -> list[d
 
     products_by_id: dict[int, dict] = {}
     async with httpx.AsyncClient(timeout=_WOO_TIMEOUT) as client:
-        resolved_endpoint: Optional[str] = None
+        resolved_endpoint: str | None = None
         for chunk in _chunked(product_ids, _WOO_API_MAX_PER_PAGE):
             resp, resolved_endpoint = await _woo_get_public_store_products(
                 client,
@@ -949,7 +944,7 @@ def _normalize_headers(raw_headers: list[str]) -> list[str]:
     return headers
 
 
-def _tabular_preview(rows: list[list[str]], *, file_format: str, source_name: Optional[str] = None) -> FileImportPreviewResponse:
+def _tabular_preview(rows: list[list[str]], *, file_format: str, source_name: str | None = None) -> FileImportPreviewResponse:
     nonempty_rows = [row for row in rows if any(cell.strip() for cell in row)]
     if not nonempty_rows:
         raise HTTPException(400, "No usable rows found in the file")
@@ -970,7 +965,7 @@ def _tabular_preview(rows: list[list[str]], *, file_format: str, source_name: Op
 
 
 def _csv_preview(content: bytes) -> FileImportPreviewResponse:
-    text: Optional[str] = None
+    text: str | None = None
     for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
         try:
             text = content.decode(encoding)
@@ -991,7 +986,7 @@ def _excel_preview(content: bytes) -> FileImportPreviewResponse:
         except Exception:
             workbook = None
         else:
-            best_sheet_name: Optional[str] = None
+            best_sheet_name: str | None = None
             best_rows: list[list[str]] = []
             for worksheet in workbook.sheets():
                 rows = [
@@ -1023,7 +1018,7 @@ def _excel_preview(content: bytes) -> FileImportPreviewResponse:
             )
         raise HTTPException(400, f"Could not read Excel file: {exc}")
 
-    best_sheet_name: Optional[str] = None
+    best_sheet_name: str | None = None
     best_rows: list[list[str]] = []
     try:
         for worksheet in workbook.worksheets:
@@ -1155,7 +1150,7 @@ def _extract_pdf_text_rows(page) -> list[list[str]]:
 
     lines: list[list[dict]] = []
     current_line: list[dict] = []
-    current_top: Optional[float] = None
+    current_top: float | None = None
     row_tolerance = 7.5
 
     for word in sorted(words, key=lambda item: (item["top"], item["x0"])):
@@ -1179,7 +1174,7 @@ def _extract_pdf_text_rows(page) -> list[list[str]]:
     for line in lines:
         cells: list[str] = []
         current_cell = ""
-        previous_x1: Optional[float] = None
+        previous_x1: float | None = None
 
         for word in sorted(line, key=lambda item: item["x0"]):
             x0 = float(word["x0"])
@@ -1232,7 +1227,7 @@ def _pdf_preview(content: bytes) -> FileImportPreviewResponse:
     try:
         with pdfplumber.open(io.BytesIO(content)) as pdf:
             for page_index, page in enumerate(pdf.pages):
-                page_best: Optional[dict] = None
+                page_best: dict | None = None
                 for settings in _PDF_TABLE_STRATEGIES:
                     try:
                         raw_tables = page.extract_tables(table_settings=settings) or []
@@ -1291,7 +1286,7 @@ def _pdf_preview(content: bytes) -> FileImportPreviewResponse:
     return _tabular_preview(rows, file_format="pdf")
 
 
-def _parse_import_price(value: Optional[float | str]) -> Optional[float]:
+def _parse_import_price(value: float | str | None) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -1324,9 +1319,9 @@ def _parse_import_price(value: Optional[float | str]) -> Optional[float]:
 
 
 def _normalize_import_prices(
-    price: Optional[float],
-    discounted_price: Optional[float],
-) -> tuple[Optional[float], Optional[float]]:
+    price: float | None,
+    discounted_price: float | None,
+) -> tuple[float | None, float | None]:
     if price is None and discounted_price is not None:
         return discounted_price, None
     if price is None or discounted_price is None:
@@ -1336,7 +1331,7 @@ def _normalize_import_prices(
     return price, discounted_price
 
 
-def _normalize_import_stock(status: Optional[str]) -> str:
+def _normalize_import_stock(status: str | None) -> str:
     text = (status or "").strip().lower()
     if not text:
         return "unknown"
@@ -1359,7 +1354,7 @@ def _normalize_import_stock(status: Optional[str]) -> str:
     return "unknown"
 
 
-def _compute_file_change(previous: Optional[dict], row: FileImportRow) -> tuple[str, Optional[float], Optional[float], Optional[str]]:
+def _compute_file_change(previous: dict | None, row: FileImportRow) -> tuple[str, float | None, float | None, str | None]:
     previous_snapshot = PriceSnapshot.from_row(previous) if previous is not None else None
     change = compute_price_change(
         PriceSnapshot(
@@ -1493,9 +1488,9 @@ async def _upsert_import_target(
     *,
     row: FileImportRow,
     store_id: int,
-    category_id: Optional[int],
+    category_id: int | None,
     create_missing_products: bool,
-) -> tuple[Optional[int], Optional[int], str]:
+) -> tuple[int | None, int | None, str]:
     provided_url = (row.url or "").strip()
     has_real_url = bool(provided_url)
     entered_name = row.name.strip()

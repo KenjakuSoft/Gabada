@@ -17,7 +17,6 @@ import uvicorn
 from app_paths import configure_runtime_environment, logs_dir
 from main import app
 
-
 HOST = "127.0.0.1"
 PORT_RANGE = range(8000, 8011)
 LOG_PATH = logs_dir() / "gabada.log"

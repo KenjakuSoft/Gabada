@@ -1,7 +1,7 @@
 import asyncio
-import sys
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -17,15 +17,22 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
-from app_version import APP_VERSION
-from app_paths import configure_runtime_environment, frontend_dist_dir
-from database.db import init_db
-from scraper.engine import start_browser, stop_browser
-from scheduler.jobs import start_scheduler, stop_scheduler
 from api import (
-    products, stores, logs, scraper_routes, categories, activity,
-    import_routes, settings, drive_routes,
+    activity,
+    categories,
+    drive_routes,
+    import_routes,
+    logs,
+    products,
+    scraper_routes,
+    settings,
+    stores,
 )
+from app_paths import configure_runtime_environment, frontend_dist_dir
+from app_version import APP_VERSION
+from database.db import init_db
+from scheduler.jobs import start_scheduler, stop_scheduler
+from scraper.engine import start_browser, stop_browser
 
 
 class NoCacheHTMLStaticFiles(StaticFiles):

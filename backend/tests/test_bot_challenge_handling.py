@@ -7,7 +7,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from scraper.engine import _bot_challenge_result  # noqa: E402
+from scraper.engine import _bot_challenge_result
 
 
 def test_bot_challenge_result_stops_price_extraction() -> None:

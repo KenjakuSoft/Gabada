@@ -12,8 +12,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from api import settings as settings_api  # noqa: E402
-from database.models import SettingsUpdate  # noqa: E402
+from api import settings as settings_api
+from database.models import SettingsUpdate
 
 
 def _row(exchange_rates: str) -> dict:

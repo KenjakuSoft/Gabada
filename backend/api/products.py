@@ -1,6 +1,5 @@
 import logging
 import sqlite3
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -52,7 +51,7 @@ async def _require_store_link(db, product_id: int, product_store_id: int) -> Non
 
 
 @router.get("/", response_model=list[Product])
-async def list_products(category_id: Optional[int] = Query(None)):
+async def list_products(category_id: int | None = Query(None)):
     db = await get_db()
     try:
         return await fetch_products(db, category_id)

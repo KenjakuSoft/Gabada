@@ -20,11 +20,10 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-import main as backend_main  # noqa: E402
-from app_paths import resolve_storage_state_path  # noqa: E402
-
+import main as backend_main
+from app_paths import resolve_storage_state_path
 
 # ── Path confinement ────────────────────────────────────────────────────────
 

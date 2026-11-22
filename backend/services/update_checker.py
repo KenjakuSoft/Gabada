@@ -3,14 +3,13 @@ from __future__ import annotations
 import platform as platform_module
 import re
 import sys
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
 from app_paths import is_frozen
 from app_version import APP_REPOSITORY, APP_VERSION, normalized_version
 from database.models import UpdateAsset, UpdateCheckResponse
-
 
 _GITHUB_LATEST_RELEASE_URL = (
     f"https://api.github.com/repos/{APP_REPOSITORY}/releases/latest"
@@ -60,7 +59,7 @@ def _asset_kind(name: str) -> str:
     return "other"
 
 
-def _asset_platform(name: str) -> Optional[str]:
+def _asset_platform(name: str) -> str | None:
     lowered = name.lower()
     for platform in ("windows", "linux", "macos"):
         if platform in lowered:
@@ -68,7 +67,7 @@ def _asset_platform(name: str) -> Optional[str]:
     return None
 
 
-def _asset_arch(name: str) -> Optional[str]:
+def _asset_arch(name: str) -> str | None:
     lowered = name.lower()
     for arch in ("x64", "arm64"):
         if arch in lowered:
@@ -90,7 +89,7 @@ def _asset_from_github(raw: dict[str, Any]) -> UpdateAsset:
 
 def _recommended_asset(
     assets: list[UpdateAsset], platform: str, arch: str
-) -> Optional[UpdateAsset]:
+) -> UpdateAsset | None:
     scored: list[tuple[int, UpdateAsset]] = []
     for asset in assets:
         if asset.kind == "manifest":

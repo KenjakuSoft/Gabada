@@ -1,9 +1,8 @@
 import re
+from datetime import datetime
+from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, Field
-from typing import Annotated, Optional, Any
-from datetime import datetime
-
 
 # ── URL scheme guard ──────────────────────────────────────────────────────────
 #
@@ -19,7 +18,7 @@ _C0_AND_SPACE = "".join(map(chr, range(0x21)))
 _WEB_URL_SCHEMES = frozenset({"http", "https"})
 
 
-def _url_scheme(value: str) -> Optional[str]:
+def _url_scheme(value: str) -> str | None:
     cleaned = _URL_TAB_NL_RE.sub("", value.strip(_C0_AND_SPACE))
     match = _URL_SCHEME_RE.match(cleaned)
     return match.group(1).lower() if match else None
@@ -43,8 +42,8 @@ def ensure_web_url(value: Any) -> Any:
 
 
 def neutralize_web_url(
-    value: Optional[str], *, allow_api_scheme: bool = False
-) -> Optional[str]:
+    value: str | None, *, allow_api_scheme: bool = False
+) -> str | None:
     """Drop-don't-raise variant for URLs that arrive from external systems.
 
     WooCommerce catalogs and custom JSON feeds supply permalinks and image
@@ -85,51 +84,51 @@ class StoreCreate(BaseModel):
     name: str
     base_url: WebUrl = ""
     manual_only: bool = False
-    login_url: Optional[WebUrl] = None
+    login_url: WebUrl | None = None
     woo_enabled: bool = False
-    woo_site_url: Optional[WebUrl] = None
-    woo_consumer_key: Optional[str] = None
-    woo_consumer_secret: Optional[str] = None
+    woo_site_url: WebUrl | None = None
+    woo_consumer_key: str | None = None
+    woo_consumer_secret: str | None = None
     woo_auto_import_new: bool = False
     api_enabled: bool = False
-    api_platform: Optional[str] = None
-    api_base_url: Optional[WebUrl] = None
-    api_key: Optional[str] = None
+    api_platform: str | None = None
+    api_base_url: WebUrl | None = None
+    api_key: str | None = None
     api_config: dict[str, Any] = Field(default_factory=dict)
     api_auto_import_new: bool = False
 
 
 class StoreUpdate(BaseModel):
-    name: Optional[str] = None
-    base_url: Optional[WebUrl] = None
-    manual_only: Optional[bool] = None
-    login_url: Optional[WebUrl] = None
-    storage_state_path: Optional[str] = None
-    woo_enabled: Optional[bool] = None
-    woo_site_url: Optional[WebUrl] = None
-    woo_consumer_key: Optional[str] = None
-    woo_consumer_secret: Optional[str] = None
-    woo_auto_import_new: Optional[bool] = None
-    api_enabled: Optional[bool] = None
-    api_platform: Optional[str] = None
-    api_base_url: Optional[WebUrl] = None
-    api_key: Optional[str] = None
-    api_config: Optional[dict[str, Any]] = None
-    api_auto_import_new: Optional[bool] = None
+    name: str | None = None
+    base_url: WebUrl | None = None
+    manual_only: bool | None = None
+    login_url: WebUrl | None = None
+    storage_state_path: str | None = None
+    woo_enabled: bool | None = None
+    woo_site_url: WebUrl | None = None
+    woo_consumer_key: str | None = None
+    woo_consumer_secret: str | None = None
+    woo_auto_import_new: bool | None = None
+    api_enabled: bool | None = None
+    api_platform: str | None = None
+    api_base_url: WebUrl | None = None
+    api_key: str | None = None
+    api_config: dict[str, Any] | None = None
+    api_auto_import_new: bool | None = None
 
 class Store(StoreCreate):
     id: int
     # Output model: rows written before the WebUrl guard existed may hold
     # values the validator would reject — never fail a read over stored data.
     base_url: str = ""
-    login_url: Optional[str] = None
-    woo_site_url: Optional[str] = None
-    api_base_url: Optional[str] = None
-    storage_state_path: Optional[str] = None
-    session_updated_at: Optional[datetime] = None
+    login_url: str | None = None
+    woo_site_url: str | None = None
+    api_base_url: str | None = None
+    storage_state_path: str | None = None
+    session_updated_at: datetime | None = None
     created_at: datetime
-    woo_last_synced_at: Optional[datetime] = None
-    api_last_synced_at: Optional[datetime] = None
+    woo_last_synced_at: datetime | None = None
+    api_last_synced_at: datetime | None = None
     model_config = {"from_attributes": True}
 
 
@@ -151,7 +150,7 @@ class WooSyncResult(BaseModel):
     created: int = 0
     existing: int = 0
     auto_import_new: bool = False
-    synced_at: Optional[datetime] = None
+    synced_at: datetime | None = None
 
 
 class ApiSyncResult(BaseModel):
@@ -163,18 +162,18 @@ class ApiSyncResult(BaseModel):
     existing: int = 0
     updated: int = 0
     auto_import_new: bool = False
-    synced_at: Optional[datetime] = None
+    synced_at: datetime | None = None
 
 
 # ── Scrape config ─────────────────────────────────────────────────────────────
 
 class ScrapeSelectors(BaseModel):
-    title: Optional[str] = None
-    price: Optional[str] = None
-    discounted_price: Optional[str] = None
-    dealer_price: Optional[str] = None
-    stock_status: Optional[str] = None
-    image: Optional[str] = None
+    title: str | None = None
+    price: str | None = None
+    discounted_price: str | None = None
+    dealer_price: str | None = None
+    stock_status: str | None = None
+    image: str | None = None
 
 _BUY_AREA_TARGET_FIELDS = (
     "price",
@@ -199,29 +198,29 @@ class BuyAreaPick(BaseModel):
     """
 
     target_field: str  # one of _BUY_AREA_TARGET_FIELDS
-    selector: Optional[str] = None
-    dom_path: Optional[str] = None
+    selector: str | None = None
+    dom_path: str | None = None
     kind: str = "price"
     text: str = ""
-    value: Optional[float] = None
-    qualifier: Optional[str] = None
-    label_before: Optional[str] = None
-    label_after: Optional[str] = None
+    value: float | None = None
+    qualifier: str | None = None
+    label_before: str | None = None
+    label_after: str | None = None
     # Recorded for the user's reference; not used for matching.
-    picked_at: Optional[datetime] = None
+    picked_at: datetime | None = None
 
 
 class ScrapeConfig(BaseModel):
     use_playwright: bool = True
-    wait_for: Optional[str] = None
+    wait_for: str | None = None
     wait_timeout: int = 15000
     selectors: ScrapeSelectors = ScrapeSelectors()
     # Authenticated / customised scraping
     cookies: list[dict[str, Any]] = Field(default_factory=list)
     headers: dict[str, str] = Field(default_factory=dict)
-    storage_state_path: Optional[str] = None
+    storage_state_path: str | None = None
     # Hint from platform auto-detection, e.g. "cs-cart", "woocommerce", "shopify"
-    platform: Optional[str] = None
+    platform: str | None = None
     # User-pinned buy-area items. Engine replays these after the waterfall
     # to override ``target_field`` with the matching live item. At most one
     # pick per ``target_field``; later writes for the same field overwrite.
@@ -231,10 +230,10 @@ class ScrapeConfig(BaseModel):
 # ── Manual override ───────────────────────────────────────────────────────────
 
 class ProductStoreOverrideUpsert(BaseModel):
-    manual_price: Optional[float] = None
-    manual_stock_status: Optional[str] = None
-    manual_warranty: Optional[str] = None
-    override_note: Optional[str] = None
+    manual_price: float | None = None
+    manual_stock_status: str | None = None
+    manual_warranty: str | None = None
+    override_note: str | None = None
 
 class ProductStoreOverride(ProductStoreOverrideUpsert):
     id: int
@@ -247,24 +246,24 @@ class ProductStoreOverride(ProductStoreOverrideUpsert):
 
 class ProductCreate(BaseModel):
     canonical_name: str
-    image_url: Optional[WebUrl] = None
-    category_id: Optional[int] = None
+    image_url: WebUrl | None = None
+    category_id: int | None = None
 
 class ProductStoreCreate(BaseModel):
     store_id: int
-    product_url: Optional[WebUrl] = None
+    product_url: WebUrl | None = None
     scrape_config: ScrapeConfig = ScrapeConfig()
     # Probe the URL and auto-fill wait_for + selectors based on detected
     # platform. Any fields already set in scrape_config are preserved.
     auto_detect: bool = True
 
 class ProductStoreUpdate(BaseModel):
-    product_url: Optional[WebUrl] = None
+    product_url: WebUrl | None = None
     clear_logs_on_url_change: bool = False
-    manual_price: Optional[float] = None
-    manual_stock_status: Optional[str] = None
-    manual_warranty: Optional[str] = None
-    override_note: Optional[str] = None
+    manual_price: float | None = None
+    manual_stock_status: str | None = None
+    manual_warranty: str | None = None
+    override_note: str | None = None
 
 class ProductStoreSummary(BaseModel):
     id: int
@@ -274,32 +273,32 @@ class ProductStoreSummary(BaseModel):
     store_manual_only: bool = False
     product_url: str
     is_active: bool
-    latest_price: Optional[float] = None
-    latest_discounted_price: Optional[float] = None
-    latest_dealer_price: Optional[float] = None
-    latest_warranty: Optional[str] = None
-    latest_stock_status: Optional[str] = None
-    latest_raw_price: Optional[str] = None
-    latest_raw_discounted: Optional[str] = None
-    latest_raw_dealer: Optional[str] = None
-    latest_currency_code: Optional[str] = None
-    latest_scraped_at: Optional[datetime] = None
-    latest_change_type: Optional[str] = None
-    latest_price_delta: Optional[float] = None
-    manual_price: Optional[float] = None
-    manual_stock_status: Optional[str] = None
-    manual_warranty: Optional[str] = None
-    override_note: Optional[str] = None
+    latest_price: float | None = None
+    latest_discounted_price: float | None = None
+    latest_dealer_price: float | None = None
+    latest_warranty: str | None = None
+    latest_stock_status: str | None = None
+    latest_raw_price: str | None = None
+    latest_raw_discounted: str | None = None
+    latest_raw_dealer: str | None = None
+    latest_currency_code: str | None = None
+    latest_scraped_at: datetime | None = None
+    latest_change_type: str | None = None
+    latest_price_delta: float | None = None
+    manual_price: float | None = None
+    manual_stock_status: str | None = None
+    manual_warranty: str | None = None
+    override_note: str | None = None
 
     model_config = {"from_attributes": True}
 
 class Product(BaseModel):
     id: int
     canonical_name: str
-    image_url: Optional[str] = None
-    category_id: Optional[int] = None
-    category_name: Optional[str] = None
-    category_color: Optional[str] = None
+    image_url: str | None = None
+    category_id: int | None = None
+    category_name: str | None = None
+    category_color: str | None = None
     created_at: datetime
     stores: list[ProductStoreSummary] = []
 
@@ -312,20 +311,20 @@ class PriceLog(BaseModel):
     id: int
     product_store_id: int
     scraped_at: datetime
-    title: Optional[str] = None
-    price: Optional[float] = None
-    discounted_price: Optional[float] = None
-    dealer_price: Optional[float] = None
-    warranty: Optional[str] = None
-    stock_status: Optional[str] = None
-    raw_price: Optional[str] = None
-    raw_discounted: Optional[str] = None
-    raw_dealer: Optional[str] = None
-    currency_code: Optional[str] = None
-    change_type: Optional[str] = None
-    price_delta: Optional[float] = None
-    previous_price: Optional[float] = None
-    previous_stock_status: Optional[str] = None
+    title: str | None = None
+    price: float | None = None
+    discounted_price: float | None = None
+    dealer_price: float | None = None
+    warranty: str | None = None
+    stock_status: str | None = None
+    raw_price: str | None = None
+    raw_discounted: str | None = None
+    raw_dealer: str | None = None
+    currency_code: str | None = None
+    change_type: str | None = None
+    price_delta: float | None = None
+    previous_price: float | None = None
+    previous_stock_status: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -337,17 +336,17 @@ class ActivityEntry(BaseModel):
     store_id: int
     store_name: str
     change_type: str
-    price: Optional[float] = None
-    discounted_price: Optional[float] = None
-    dealer_price: Optional[float] = None
-    raw_price: Optional[str] = None
-    raw_discounted: Optional[str] = None
-    raw_dealer: Optional[str] = None
-    currency_code: Optional[str] = None
-    price_delta: Optional[float] = None
-    previous_price: Optional[float] = None
-    stock_status: Optional[str] = None
-    previous_stock_status: Optional[str] = None
+    price: float | None = None
+    discounted_price: float | None = None
+    dealer_price: float | None = None
+    raw_price: str | None = None
+    raw_discounted: str | None = None
+    raw_dealer: str | None = None
+    currency_code: str | None = None
+    price_delta: float | None = None
+    previous_price: float | None = None
+    stock_status: str | None = None
+    previous_stock_status: str | None = None
     scraped_at: datetime
 
     model_config = {"from_attributes": True}
@@ -356,22 +355,22 @@ class ActivityEntry(BaseModel):
 # ── Scrape result (internal) ──────────────────────────────────────────────────
 
 class ScrapeResult(BaseModel):
-    title: Optional[str] = None
-    price: Optional[float] = None
-    discounted_price: Optional[float] = None
-    dealer_price: Optional[float] = None
+    title: str | None = None
+    price: float | None = None
+    discounted_price: float | None = None
+    dealer_price: float | None = None
     stock_status: str = "unknown"
-    raw_price: Optional[str] = None
-    raw_discounted: Optional[str] = None
-    raw_dealer: Optional[str] = None
+    raw_price: str | None = None
+    raw_discounted: str | None = None
+    raw_dealer: str | None = None
     review_status: str = "ok"
     review_notes: list[str] = Field(default_factory=list)
     # When the price-review step keeps one price over a competing candidate,
     # surface the rejected candidate so the UI can offer a manual choice.
-    review_alternative_price: Optional[float] = None
-    review_alternative_raw: Optional[str] = None
-    review_alternative_label: Optional[str] = None
-    error: Optional[str] = None
+    review_alternative_price: float | None = None
+    review_alternative_raw: str | None = None
+    review_alternative_label: str | None = None
+    error: str | None = None
 
 
 # ── WooCommerce import ────────────────────────────────────────────────────────
@@ -385,10 +384,10 @@ class WooProductPreview(BaseModel):
     woo_id: int
     name: str
     permalink: str
-    regular_price: Optional[str] = None
-    sale_price: Optional[str] = None
+    regular_price: str | None = None
+    sale_price: str | None = None
     stock_status: str = "unknown"
-    image_url: Optional[str] = None
+    image_url: str | None = None
     categories: list[str] = []
 
 class WooPreviewRequest(BaseModel):
@@ -410,25 +409,25 @@ class ApiProductPreview(BaseModel):
     external_id: str
     name: str
     permalink: str
-    price: Optional[float] = None
-    discounted_price: Optional[float] = None
-    currency: Optional[str] = None
-    raw_price: Optional[str] = None
-    raw_discounted: Optional[str] = None
+    price: float | None = None
+    discounted_price: float | None = None
+    currency: str | None = None
+    raw_price: str | None = None
+    raw_discounted: str | None = None
     stock_status: str = "unknown"
-    image_url: Optional[str] = None
+    image_url: str | None = None
     categories: list[str] = []
 
 
 class ApiPreviewRequest(BaseModel):
     platform: str = "steam"
-    query: Optional[str] = None
+    query: str | None = None
     external_ids: list[str] = Field(default_factory=list)
-    country_code: Optional[str] = "US"
-    language: Optional[str] = "english"
+    country_code: str | None = "US"
+    language: str | None = "english"
     limit: int = 25
-    base_url: Optional[WebUrl] = None
-    api_key: Optional[str] = None
+    base_url: WebUrl | None = None
+    api_key: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -436,10 +435,10 @@ class ApiImportRequest(BaseModel):
     platform: str = "steam"
     store_id: int
     external_ids: list[str]
-    country_code: Optional[str] = "US"
-    language: Optional[str] = "english"
-    base_url: Optional[WebUrl] = None
-    api_key: Optional[str] = None
+    country_code: str | None = "US"
+    language: str | None = "english"
+    base_url: WebUrl | None = None
+    api_key: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -451,25 +450,25 @@ class FileImportPreviewResponse(BaseModel):
     rows: list[list[str]] = Field(default_factory=list)
     total_rows: int
     file_format: str  # "csv", "excel", "pdf"
-    source_name: Optional[str] = None
+    source_name: str | None = None
 
 class FileImportRow(BaseModel):
     name: str
-    source_index: Optional[int] = None
-    product_id: Optional[int] = None
-    product_store_id: Optional[int] = None
-    url: Optional[WebUrl] = None
-    image_url: Optional[WebUrl] = None
-    price: Optional[str | float] = None
-    discounted_price: Optional[str | float] = None
-    dealer_price: Optional[str | float] = None
-    warranty: Optional[str] = None
-    stock_status: Optional[str] = None
+    source_index: int | None = None
+    product_id: int | None = None
+    product_store_id: int | None = None
+    url: WebUrl | None = None
+    image_url: WebUrl | None = None
+    price: str | float | None = None
+    discounted_price: str | float | None = None
+    dealer_price: str | float | None = None
+    warranty: str | None = None
+    stock_status: str | None = None
 
 class FileImportCommitRequest(BaseModel):
     rows: list[FileImportRow]
     store_id: int
-    category_id: Optional[int] = None
+    category_id: int | None = None
     create_missing_products: bool = True
     missing_rows_policy: str = "ignore"
     full_catalog_seen_product_store_ids: list[int] = Field(default_factory=list)
@@ -489,23 +488,23 @@ class FileImportCommitResponse(BaseModel):
 
 class QuickAddRequest(BaseModel):
     urls: list[WebUrl]
-    category_id: Optional[int] = None
-    store_id: Optional[int] = None
+    category_id: int | None = None
+    store_id: int | None = None
 
 
 class QuickAddResult(BaseModel):
     url: str
     status: str  # "ok" | "error"
-    product_id: Optional[int] = None
-    product_store_id: Optional[int] = None
-    name: Optional[str] = None
-    store_id: Optional[int] = None
-    store_name: Optional[str] = None
-    platform: Optional[str] = None
-    price: Optional[float] = None
-    discounted_price: Optional[float] = None
-    stock_status: Optional[str] = None
-    error: Optional[str] = None
+    product_id: int | None = None
+    product_store_id: int | None = None
+    name: str | None = None
+    store_id: int | None = None
+    store_name: str | None = None
+    platform: str | None = None
+    price: float | None = None
+    discounted_price: float | None = None
+    stock_status: str | None = None
+    error: str | None = None
 
 
 class QuickAddResponse(BaseModel):
@@ -516,14 +515,14 @@ class QuickAddResponse(BaseModel):
 
 class ProbeCandidate(BaseModel):
     text: str
-    value: Optional[float] = None
+    value: float | None = None
     score: int = 0
-    font_size: Optional[float] = None
-    font_weight: Optional[int] = None
+    font_size: float | None = None
+    font_weight: int | None = None
     struck: bool = False
     dealer: bool = False
     variant_alt: bool = False
-    dom_path: Optional[str] = None
+    dom_path: str | None = None
 
 
 class BuyAreaItem(BaseModel):
@@ -556,106 +555,106 @@ class BuyAreaItem(BaseModel):
     #   "other"     — visible text that didn't classify cleanly
     kind: str
     text: str
-    value: Optional[float] = None
-    qualifier: Optional[str] = None
-    selector: Optional[str] = None
-    dom_path: Optional[str] = None
-    tag: Optional[str] = None
+    value: float | None = None
+    qualifier: str | None = None
+    selector: str | None = None
+    dom_path: str | None = None
+    tag: str | None = None
     struck: bool = False
     is_button: bool = False
     is_disabled: bool = False
-    font_size: Optional[float] = None
-    font_weight: Optional[int] = None
+    font_size: float | None = None
+    font_weight: int | None = None
     # Visual / DOM-order index inside the buy area, useful for replaying
     # a saved user mapping when selectors rotate.
     order: int = 0
-    label_before: Optional[str] = None
-    label_after: Optional[str] = None
+    label_before: str | None = None
+    label_after: str | None = None
     near_badges: list[str] = Field(default_factory=list)
-    near_price: Optional[str] = None
+    near_price: str | None = None
 
 
 class ProbeResponse(BaseModel):
     url: str
-    final_url: Optional[str] = None
+    final_url: str | None = None
     platform: str = "generic"
-    suggested_wait_for: Optional[str] = None
-    suggested_selectors: dict[str, Optional[str]] = Field(default_factory=dict)
+    suggested_wait_for: str | None = None
+    suggested_selectors: dict[str, str | None] = Field(default_factory=dict)
     json_ld_found: bool = False
-    json_ld_name: Optional[str] = None
-    json_ld_price: Optional[float] = None
-    json_ld_availability: Optional[str] = None
+    json_ld_name: str | None = None
+    json_ld_price: float | None = None
+    json_ld_availability: str | None = None
     extracted: ScrapeResult = ScrapeResult()
     candidates: list[ProbeCandidate] = Field(default_factory=list)
     buy_area: list[BuyAreaItem] = Field(default_factory=list)
-    buy_area_root: Optional[str] = None
+    buy_area_root: str | None = None
     notes: list[str] = Field(default_factory=list)
 
 
 class SelectorLabCandidate(BaseModel):
     selector: str
-    dom_path: Optional[str] = None
-    text: Optional[str] = None
-    sample: Optional[str] = None
-    value: Optional[float] = None
-    stock_status: Optional[str] = None
-    tag: Optional[str] = None
+    dom_path: str | None = None
+    text: str | None = None
+    sample: str | None = None
+    value: float | None = None
+    stock_status: str | None = None
+    tag: str | None = None
     source: str = "dom"
     confidence: int = 0
     kind_hints: list[str] = Field(default_factory=list)
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class SelectorLabProfile(BaseModel):
     hostname: str
-    matched_hostname: Optional[str] = None
-    platform: Optional[str] = None
-    wait_for: Optional[str] = None
-    selectors: dict[str, Optional[str]] = Field(default_factory=dict)
+    matched_hostname: str | None = None
+    platform: str | None = None
+    wait_for: str | None = None
+    selectors: dict[str, str | None] = Field(default_factory=dict)
 
 
 class SelectorLabResponse(BaseModel):
     url: str
-    final_url: Optional[str] = None
-    hostname: Optional[str] = None
+    final_url: str | None = None
+    hostname: str | None = None
     platform: str = "generic"
     # True when the page's buy area carries installment / pay-later amounts
     # (KOKO, Mintpay, ...) near the real price — the UI defaults its
     # candidate list to "helpful only" on such pages.
     noisy_price_context: bool = False
-    root_selector: Optional[str] = None
+    root_selector: str | None = None
     extracted: ScrapeResult = ScrapeResult()
-    current_profile: Optional[SelectorLabProfile] = None
-    suggested_assignments: dict[str, Optional[str]] = Field(default_factory=dict)
+    current_profile: SelectorLabProfile | None = None
+    suggested_assignments: dict[str, str | None] = Field(default_factory=dict)
     candidates: list[SelectorLabCandidate] = Field(default_factory=list)
     buy_area: list[BuyAreaItem] = Field(default_factory=list)
-    buy_area_root: Optional[str] = None
+    buy_area_root: str | None = None
     notes: list[str] = Field(default_factory=list)
 
 
 class ProbeRequest(BaseModel):
     url: str
     use_playwright: bool = True
-    wait_for: Optional[str] = None
+    wait_for: str | None = None
     wait_timeout: int = 15000
     cookies: list[dict[str, Any]] = Field(default_factory=list)
     headers: dict[str, str] = Field(default_factory=dict)
-    storage_state_path: Optional[str] = None
+    storage_state_path: str | None = None
 
 
 class SelectorLabRequest(BaseModel):
     url: str
     use_playwright: bool = True
-    wait_for: Optional[str] = None
+    wait_for: str | None = None
     wait_timeout: int = 15000
     cookies: list[dict[str, Any]] = Field(default_factory=list)
     headers: dict[str, str] = Field(default_factory=dict)
-    storage_state_path: Optional[str] = None
+    storage_state_path: str | None = None
 
 
 class SelectorLabTestRequest(SelectorLabRequest):
-    platform: Optional[str] = None
-    selectors: dict[str, Optional[str]] = Field(default_factory=dict)
+    platform: str | None = None
+    selectors: dict[str, str | None] = Field(default_factory=dict)
     # Live buy-area picks the user has staged in the Selector Lab UI.
     # Passed through to the test scrape so the test reflects what the next
     # real scrape would produce, without requiring the user to save first.
@@ -663,12 +662,12 @@ class SelectorLabTestRequest(SelectorLabRequest):
 
 
 class SelectorLabSaveRequest(BaseModel):
-    url: Optional[str] = None
-    store_id: Optional[int] = None
-    hostname: Optional[str] = None
-    platform: Optional[str] = None
-    wait_for: Optional[str] = None
-    selectors: dict[str, Optional[str]] = Field(default_factory=dict)
+    url: str | None = None
+    store_id: int | None = None
+    hostname: str | None = None
+    platform: str | None = None
+    wait_for: str | None = None
+    selectors: dict[str, str | None] = Field(default_factory=dict)
 
 
 class SelectorLabSaveResponse(BaseModel):
@@ -715,22 +714,22 @@ class Settings(BaseModel):
     price_display_mode: str = "regional"  # "regional" | "source"
     exchange_rates: dict[str, float] = Field(default_factory=dict)
     theme: str = "system"  # "light" | "dark" | "system"
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
 
 class SettingsUpdate(BaseModel):
-    currency_code: Optional[str] = None
-    currency_symbol: Optional[str] = None
-    country_code: Optional[str] = None
-    timezone: Optional[str] = None
-    scrape_cron: Optional[str] = None
-    scrape_enabled: Optional[bool] = None
-    locale: Optional[str] = None
-    price_display_mode: Optional[str] = None
-    exchange_rates: Optional[dict[str, float]] = None
-    theme: Optional[str] = None
+    currency_code: str | None = None
+    currency_symbol: str | None = None
+    country_code: str | None = None
+    timezone: str | None = None
+    scrape_cron: str | None = None
+    scrape_enabled: bool | None = None
+    locale: str | None = None
+    price_display_mode: str | None = None
+    exchange_rates: dict[str, float] | None = None
+    theme: str | None = None
 
 
 class DatabaseCounts(BaseModel):
@@ -749,7 +748,7 @@ class DatabaseTransferInfo(BaseModel):
     install_mode: str
     recommended_export_name: str
     counts: DatabaseCounts = DatabaseCounts()
-    database_modified_at: Optional[datetime] = None
+    database_modified_at: datetime | None = None
 
 
 class DatabaseImportResponse(BaseModel):
@@ -764,25 +763,25 @@ class DatabaseImportResponse(BaseModel):
 class UpdateAsset(BaseModel):
     name: str
     browser_download_url: str
-    size: Optional[int] = None
+    size: int | None = None
     kind: str = "other"
-    platform: Optional[str] = None
-    arch: Optional[str] = None
+    platform: str | None = None
+    arch: str | None = None
 
 
 class UpdateCheckResponse(BaseModel):
     current_version: str
-    latest_version: Optional[str] = None
+    latest_version: str | None = None
     update_available: bool = False
-    release_url: Optional[str] = None
-    release_name: Optional[str] = None
-    published_at: Optional[datetime] = None
+    release_url: str | None = None
+    release_name: str | None = None
+    published_at: datetime | None = None
     install_mode: str = "source"
     platform: str
     arch: str
-    recommended_asset: Optional[UpdateAsset] = None
+    recommended_asset: UpdateAsset | None = None
     assets: list[UpdateAsset] = []
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # ── Drive sync ────────────────────────────────────────────────────────────────
@@ -800,18 +799,18 @@ class DriveAuthStartResponse(BaseModel):
 class DriveStatus(BaseModel):
     configured: bool = False  # client_id + secret saved
     signed_in: bool = False
-    account_email: Optional[str] = None
+    account_email: str | None = None
     auth_in_progress: bool = False
-    last_push_at: Optional[datetime] = None
-    last_push_name: Optional[str] = None
+    last_push_at: datetime | None = None
+    last_push_name: str | None = None
 
 
 class DriveSnapshot(BaseModel):
     id: str
     name: str
-    size: Optional[int] = None
-    created_time: Optional[datetime] = None
-    modified_time: Optional[datetime] = None
+    size: int | None = None
+    created_time: datetime | None = None
+    modified_time: datetime | None = None
 
 
 class DriveSnapshotList(BaseModel):

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+
 from database.db import get_db
 from database.models import Category, CategoryCreate
 

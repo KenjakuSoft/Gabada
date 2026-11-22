@@ -16,8 +16,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Optional
+from typing import Any
 
 from playwright.async_api import Page, Playwright
 
@@ -146,7 +147,7 @@ async def stealth_navigate(
     *,
     headless: bool = False,
     settle_seconds: float = 8.0,
-) -> AsyncIterator[Optional[Page]]:
+) -> AsyncIterator[Page | None]:
     """Yield a Playwright Page that is already at ``url`` inside a stealth Chrome.
 
     The flow that actually beats Cloudflare:
@@ -179,7 +180,7 @@ async def stealth_navigate(
 
     driver = None
     browser = None
-    page: Optional[Page] = None
+    page: Page | None = None
 
     try:
         try:

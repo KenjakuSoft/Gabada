@@ -1,11 +1,11 @@
 import logging
 import re
-from typing import Optional
 from urllib.parse import unquote, urlparse
 
 import aiosqlite
 from fastapi import HTTPException
 
+from api.price_log_utils import get_settings_currency, infer_currency_code
 from database.models import (
     Product,
     ProductStoreSummary,
@@ -14,10 +14,11 @@ from database.models import (
     ScrapeSelectors,
     neutralize_web_url,
 )
-from api.price_log_utils import get_settings_currency, infer_currency_code
 from scraper.engine import probe as probe_url
 from scraper.site_profiles import (
     apply_platform_defaults,
+)
+from scraper.site_profiles import (
     apply_profile as apply_site_profile,
 )
 
@@ -113,8 +114,8 @@ async def create_product_record(
     db: aiosqlite.Connection,
     *,
     canonical_name: str,
-    image_url: Optional[str],
-    category_id: Optional[int],
+    image_url: str | None,
+    category_id: int | None,
 ) -> int:
     # Safety net for catalog-sourced values that bypass the request models
     # (Woo sync, API imports): never persist a non-web URL scheme.
@@ -132,7 +133,7 @@ async def create_store_link(
     product_id: int,
     store_id: int,
     product_url: str,
-    scrape_config_json: Optional[str] = None,
+    scrape_config_json: str | None = None,
     is_active: bool = True,
 ) -> int:
     # Same safety net as create_product_record. api:// is the internal
@@ -159,11 +160,11 @@ async def create_product_with_store(
     db: aiosqlite.Connection,
     *,
     canonical_name: str,
-    image_url: Optional[str],
-    category_id: Optional[int],
+    image_url: str | None,
+    category_id: int | None,
     store_id: int,
     product_url: str,
-    scrape_config_json: Optional[str] = None,
+    scrape_config_json: str | None = None,
     is_active: bool = True,
 ) -> tuple[int, int]:
     product_id = await create_product_record(
@@ -253,7 +254,7 @@ def _row_to_product(row: aiosqlite.Row, stores: list[ProductStoreSummary]) -> Pr
 
 
 async def fetch_products(
-    db: aiosqlite.Connection, category_id: Optional[int] = None
+    db: aiosqlite.Connection, category_id: int | None = None
 ) -> list[Product]:
     if category_id is not None:
         rows = await db.execute_fetchall(
@@ -274,7 +275,7 @@ async def fetch_products(
 
 async def fetch_product(
     db: aiosqlite.Connection, product_id: int
-) -> Optional[Product]:
+) -> Product | None:
     rows = await db.execute_fetchall(_PRODUCT_QUERY + " WHERE p.id = ?", (product_id,))
     if not rows:
         return None
@@ -310,7 +311,7 @@ def title_from_url(url: str) -> str:
 
 async def find_or_create_store_for_url(
     db: aiosqlite.Connection, url: str
-) -> tuple[int, str, Optional[str]]:
+) -> tuple[int, str, str | None]:
     """Return the existing store for a URL hostname, creating one when needed."""
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
@@ -341,7 +342,7 @@ async def find_or_create_store_for_url(
 async def fetch_quick_add_store(
     db: aiosqlite.Connection,
     store_id: int,
-) -> tuple[int, str, Optional[str]]:
+) -> tuple[int, str, str | None]:
     rows = await db.execute_fetchall(
         """SELECT id, name, manual_only, storage_state_path
            FROM stores
@@ -362,8 +363,8 @@ async def quick_add_one(
     db: aiosqlite.Connection,
     *,
     url: str,
-    category_id: Optional[int],
-    store_id: Optional[int] = None,
+    category_id: int | None,
+    store_id: int | None = None,
 ) -> QuickAddResult:
     url = url.strip()
     if not url:

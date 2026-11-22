@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
-
+from typing import Any
 
 # Currency values are stored with two decimal places. A difference smaller
 # than this after rounding is treated as unchanged so sub-cent float noise
@@ -19,26 +19,16 @@ _LKR_RE = re.compile(r"(?i)(?:\bLKR\b|\bRs\.?\s|රු\.?)")
 # match is not enough — only treat a token as a currency when it is a real
 # ISO 4217 code.
 _ISO_4217_CODES = frozenset(
-    """
-    AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND
-    BOB BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF
-    DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD
-    HNL HRK HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW
-    KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU
-    MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR
-    PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SLL SOS SRD
-    SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU
-    UZS VED VES VND VUV WST XAF XCD XOF XPF YER ZAR ZMW ZWL
-    """.split()
+    ["AED", "AFN", "ALL", "AMD", "ANG", "AOA", "ARS", "AUD", "AWG", "AZN", "BAM", "BBD", "BDT", "BGN", "BHD", "BIF", "BMD", "BND", "BOB", "BRL", "BSD", "BTN", "BWP", "BYN", "BZD", "CAD", "CDF", "CHF", "CLP", "CNY", "COP", "CRC", "CUP", "CVE", "CZK", "DJF", "DKK", "DOP", "DZD", "EGP", "ERN", "ETB", "EUR", "FJD", "FKP", "GBP", "GEL", "GHS", "GIP", "GMD", "GNF", "GTQ", "GYD", "HKD", "HNL", "HRK", "HTG", "HUF", "IDR", "ILS", "INR", "IQD", "IRR", "ISK", "JMD", "JOD", "JPY", "KES", "KGS", "KHR", "KMF", "KPW", "KRW", "KWD", "KYD", "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LYD", "MAD", "MDL", "MGA", "MKD", "MMK", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK", "MXN", "MYR", "MZN", "NAD", "NGN", "NIO", "NOK", "NPR", "NZD", "OMR", "PAB", "PEN", "PGK", "PHP", "PKR", "PLN", "PYG", "QAR", "RON", "RSD", "RUB", "RWF", "SAR", "SBD", "SCR", "SDG", "SEK", "SGD", "SHP", "SLE", "SLL", "SOS", "SRD", "SSP", "STN", "SVC", "SYP", "SZL", "THB", "TJS", "TMT", "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH", "UGX", "USD", "UYU", "UZS", "VED", "VES", "VND", "VUV", "WST", "XAF", "XCD", "XOF", "XPF", "YER", "ZAR", "ZMW", "ZWL"]
 )
 
 
-def normalize_currency_code(value: Optional[str]) -> Optional[str]:
+def normalize_currency_code(value: str | None) -> str | None:
     code = (value or "").strip().upper()
     return code if len(code) == 3 and code.isalpha() else None
 
 
-def _explicit_iso_code(upper: str) -> Optional[str]:
+def _explicit_iso_code(upper: str) -> str | None:
     """Return the first standalone token that is a real ISO 4217 code."""
     for match in _CODE_RE.finditer(upper):
         if match.group(1) in _ISO_4217_CODES:
@@ -47,10 +37,10 @@ def _explicit_iso_code(upper: str) -> Optional[str]:
 
 
 def infer_currency_code(
-    *raw_values: Optional[str],
-    local_code: Optional[str] = None,
-    local_symbol: Optional[str] = None,
-) -> Optional[str]:
+    *raw_values: str | None,
+    local_code: str | None = None,
+    local_symbol: str | None = None,
+) -> str | None:
     local = normalize_currency_code(local_code)
     symbol = (local_symbol or "").strip()
     text = " ".join(str(value) for value in raw_values if value)
@@ -87,7 +77,7 @@ def infer_currency_code(
     return local
 
 
-async def get_settings_currency(db) -> tuple[Optional[str], Optional[str]]:
+async def get_settings_currency(db) -> tuple[str | None, str | None]:
     try:
         rows = await db.execute_fetchall(
             "SELECT currency_code, currency_symbol FROM settings WHERE id = 1"
@@ -100,8 +90,8 @@ async def get_settings_currency(db) -> tuple[Optional[str], Optional[str]]:
 
 
 def effective_price(
-    price: Optional[float], discounted_price: Optional[float]
-) -> Optional[float]:
+    price: float | None, discounted_price: float | None
+) -> float | None:
     """Return the price a shopper would pay, preferring a sale price."""
     return discounted_price if discounted_price is not None else price
 
@@ -110,12 +100,12 @@ def effective_price(
 class PriceSnapshot:
     """The price/stock fields needed to classify a change."""
 
-    price: Optional[float] = None
-    discounted_price: Optional[float] = None
-    stock_status: Optional[str] = None
+    price: float | None = None
+    discounted_price: float | None = None
+    stock_status: str | None = None
 
     @property
-    def effective_price(self) -> Optional[float]:
+    def effective_price(self) -> float | None:
         return effective_price(self.price, self.discounted_price)
 
     @property
@@ -123,7 +113,7 @@ class PriceSnapshot:
         return self.stock_status or "unknown"
 
     @classmethod
-    def from_row(cls, row: Mapping[str, Any]) -> "PriceSnapshot":
+    def from_row(cls, row: Mapping[str, Any]) -> PriceSnapshot:
         return cls(
             price=row["price"],
             discounted_price=row["discounted_price"],
@@ -136,14 +126,14 @@ class PriceChange:
     """A classified transition between two price snapshots."""
 
     change_type: str
-    price_delta: Optional[float] = None
-    previous_price: Optional[float] = None
-    previous_stock_status: Optional[str] = None
+    price_delta: float | None = None
+    previous_price: float | None = None
+    previous_stock_status: str | None = None
 
 
 def compute_price_change(
     current: PriceSnapshot,
-    previous: Optional[PriceSnapshot],
+    previous: PriceSnapshot | None,
 ) -> PriceChange:
     """Classify how ``current`` differs from ``previous``.
 
@@ -161,7 +151,7 @@ def compute_price_change(
     previous_stock = previous.normalized_stock_status
     current_stock = current.normalized_stock_status
 
-    price_delta: Optional[float] = None
+    price_delta: float | None = None
     price_changed = False
     first_price = False
 

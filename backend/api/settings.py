@@ -4,13 +4,12 @@ import json
 import logging
 import math
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
-
-from apscheduler.triggers.cron import CronTrigger
 
 from app_paths import data_dir, database_path, is_frozen, site_profiles_path
 from database.db import get_db, init_db
@@ -24,14 +23,28 @@ from database.models import (
 )
 from scheduler.jobs import next_run_time, pause_scheduler, reschedule, resume_scheduler
 from services.backup_bundle import (
-    backup_sqlite_file as _backup_sqlite_file,
-    create_backup_bundle as _create_backup_bundle,
-    extract_backup_bundle as _extract_backup_bundle,
-    restore_live_database as _restore_live_database,
-    restore_site_profiles as _restore_site_profiles,
-    timestamp_slug as _timestamp_slug,
-    validate_backup_database as _validate_backup_database,
     BACKUP_DB_NAME as _BACKUP_DB_NAME,
+)
+from services.backup_bundle import (
+    backup_sqlite_file as _backup_sqlite_file,
+)
+from services.backup_bundle import (
+    create_backup_bundle as _create_backup_bundle,
+)
+from services.backup_bundle import (
+    extract_backup_bundle as _extract_backup_bundle,
+)
+from services.backup_bundle import (
+    restore_live_database as _restore_live_database,
+)
+from services.backup_bundle import (
+    restore_site_profiles as _restore_site_profiles,
+)
+from services.backup_bundle import (
+    timestamp_slug as _timestamp_slug,
+)
+from services.backup_bundle import (
+    validate_backup_database as _validate_backup_database,
 )
 from services.update_checker import check_for_updates, update_check_error
 
@@ -100,7 +113,7 @@ def _database_transfer_info() -> DatabaseTransferInfo:
         counts = _validate_backup_database(live_path)
         modified_at = datetime.fromtimestamp(
             live_path.stat().st_mtime,
-            tz=timezone.utc,
+            tz=UTC,
         )
 
     profiles_path = site_profiles_path()

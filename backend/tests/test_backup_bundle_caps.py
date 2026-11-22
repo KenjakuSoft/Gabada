@@ -3,19 +3,18 @@ from __future__ import annotations
 import sys
 import zipfile
 from pathlib import Path
-from typing import Optional
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-import pytest  # noqa: E402
+import pytest
 
-from services import backup_bundle  # noqa: E402
+from services import backup_bundle
 
 
 def _write_bundle(
-    path: Path, db_bytes: bytes, profiles_bytes: Optional[bytes] = None
+    path: Path, db_bytes: bytes, profiles_bytes: bytes | None = None
 ) -> None:
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(backup_bundle.BACKUP_DB_NAME, db_bytes)

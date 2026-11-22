@@ -14,46 +14,58 @@ Design goals:
 
 One shared Playwright browser for the app lifetime.
 """
-import json
-import re
 import asyncio
+import json
 import logging
+import re
 from hashlib import sha1
-from typing import Any, Optional
+from typing import Any
 
-from app_paths import configure_runtime_environment, resolve_storage_state_path, sessions_dir
 from playwright.async_api import (
-    async_playwright,
     Browser,
     BrowserContext,
-    Playwright,
     Page,
+    Playwright,
+    async_playwright,
 )
 
+from app_paths import (
+    configure_runtime_environment,
+    resolve_storage_state_path,
+    sessions_dir,
+)
 from database.models import (
     BuyAreaItem,
     BuyAreaPick,
     ProbeCandidate,
     ProbeResponse,
+    ScrapeConfig,
+    ScrapeResult,
     SelectorLabCandidate,
     SelectorLabProfile,
     SelectorLabResponse,
-    ScrapeConfig,
-    ScrapeResult,
-)
-from scraper.site_profiles import (
-    PLATFORM_SELECTORS as _PLATFORM_SELECTORS,
-    PLATFORM_WAIT_FOR as _PLATFORM_WAIT_FOR,
-    apply_profile as _apply_site_profile,
-    find_profile as _find_site_profile,
-    normalize_hostname as _normalize_hostname,
 )
 from scraper import stealth as _stealth
+from scraper.site_profiles import (
+    PLATFORM_SELECTORS as _PLATFORM_SELECTORS,
+)
+from scraper.site_profiles import (
+    PLATFORM_WAIT_FOR as _PLATFORM_WAIT_FOR,
+)
+from scraper.site_profiles import (
+    apply_profile as _apply_site_profile,
+)
+from scraper.site_profiles import (
+    find_profile as _find_site_profile,
+)
+from scraper.site_profiles import (
+    normalize_hostname as _normalize_hostname,
+)
 
 logger = logging.getLogger(__name__)
 
-_playwright: Optional[Playwright] = None
-_browser: Optional[Browser] = None
+_playwright: Playwright | None = None
+_browser: Browser | None = None
 _lock = asyncio.Lock()
 
 
@@ -99,11 +111,11 @@ _FREE_PRICE_EXCLUSION_RE = re.compile(
 )
 
 
-def _is_installment_price(raw: Optional[str]) -> bool:
+def _is_installment_price(raw: str | None) -> bool:
     return bool(raw and _INSTALLMENT_RE.search(raw))
 
 
-def _is_free_price(raw: Optional[str]) -> bool:
+def _is_free_price(raw: str | None) -> bool:
     if not raw:
         return False
     return bool(_FREE_PRICE_RE.search(raw)) and not bool(
@@ -113,7 +125,7 @@ def _is_free_price(raw: Optional[str]) -> bool:
 
 # ── Price & stock parsers ─────────────────────────────────────────────────────
 
-def _parse_price(raw: Optional[str]) -> Optional[float]:
+def _parse_price(raw: str | None) -> float | None:
     if not raw:
         return None
     if _is_installment_price(raw):
@@ -208,8 +220,8 @@ _STOCK_STATUS_PRIORITY = {
 
 
 def _should_replace_stock_status(
-    current: Optional[str],
-    candidate: Optional[str],
+    current: str | None,
+    candidate: str | None,
 ) -> bool:
     candidate = candidate or "unknown"
     current = current or "unknown"
@@ -224,8 +236,8 @@ def _should_replace_stock_status(
 
 
 def _should_apply_stock_candidate(
-    current: Optional[str],
-    candidate: Optional[str],
+    current: str | None,
+    candidate: str | None,
     *,
     structured_variant_stock_locked: bool = False,
 ) -> bool:
@@ -240,7 +252,7 @@ def _should_apply_stock_candidate(
     return _should_replace_stock_status(current, candidate)
 
 
-def _parse_stock(raw: Optional[str]) -> str:
+def _parse_stock(raw: str | None) -> str:
     if not raw:
         return "unknown"
     t = raw.strip()
@@ -1131,9 +1143,9 @@ def _buy_area_pick_score(pick: BuyAreaPick, item: BuyAreaItem) -> int:
 def _best_match_for_pick(
     pick: BuyAreaPick,
     items: list[BuyAreaItem],
-) -> tuple[Optional[BuyAreaItem], int]:
+) -> tuple[BuyAreaItem | None, int]:
     """Return the highest-scoring live item for a pick (or ``None, 0``)."""
-    best: Optional[BuyAreaItem] = None
+    best: BuyAreaItem | None = None
     best_score = 0
     for item in items:
         score = _buy_area_pick_score(pick, item)
@@ -1231,7 +1243,7 @@ def _apply_buy_area_picks(
 
 async def _query_selector_scoped(
     page: Page,
-    selector: Optional[str],
+    selector: str | None,
     *,
     root=None,
     allow_page_fallback: bool = True,
@@ -1253,7 +1265,7 @@ async def _query_selector_scoped(
 
 async def _query_selector_all_scoped(
     page: Page,
-    selector: Optional[str],
+    selector: str | None,
     *,
     root=None,
     allow_page_fallback: bool = True,
@@ -1273,7 +1285,7 @@ async def _query_selector_all_scoped(
         return []
 
 
-async def _read_element_text(el) -> Optional[str]:
+async def _read_element_text(el) -> str | None:
     if not el:
         return None
     try:
@@ -1387,7 +1399,7 @@ _SMART_TITLE_CONTEXT_RE = re.compile(
 )
 
 
-def _raw_price_signal(raw: Optional[str]) -> int:
+def _raw_price_signal(raw: str | None) -> int:
     if not raw:
         return -100
     text = raw.strip()
@@ -1411,7 +1423,7 @@ def _raw_price_signal(raw: Optional[str]) -> int:
     return score
 
 
-def _smart_candidate_has_price_context(candidate: Optional[dict[str, Any]]) -> bool:
+def _smart_candidate_has_price_context(candidate: dict[str, Any] | None) -> bool:
     if not candidate:
         return False
     blob = " ".join(
@@ -1421,7 +1433,7 @@ def _smart_candidate_has_price_context(candidate: Optional[dict[str, Any]]) -> b
     return bool(_SMART_PRICE_CONTEXT_RE.search(blob))
 
 
-def _smart_candidate_looks_like_title(candidate: Optional[dict[str, Any]]) -> bool:
+def _smart_candidate_looks_like_title(candidate: dict[str, Any] | None) -> bool:
     if not candidate:
         return False
     tag = str(candidate.get("tag") or "").lower()
@@ -1436,9 +1448,9 @@ def _smart_candidate_looks_like_title(candidate: Optional[dict[str, Any]]) -> bo
 
 
 def _smart_candidate_is_weak_price(
-    candidate: Optional[dict[str, Any]],
-    raw: Optional[str],
-    value: Optional[float],
+    candidate: dict[str, Any] | None,
+    raw: str | None,
+    value: float | None,
 ) -> bool:
     if not candidate or raw is None or value is None:
         return False
@@ -1490,26 +1502,26 @@ def _sanitize_smart_scan_result(
     return _normalize_scrape_result(sanitized)
 
 
-def _current_price_pair(result: ScrapeResult) -> tuple[Optional[float], Optional[str]]:
+def _current_price_pair(result: ScrapeResult) -> tuple[float | None, str | None]:
     if result.discounted_price is not None:
         return result.discounted_price, result.raw_discounted
     return result.price, result.raw_price
 
 
-def _regular_price_pair(result: ScrapeResult) -> tuple[Optional[float], Optional[str]]:
+def _regular_price_pair(result: ScrapeResult) -> tuple[float | None, str | None]:
     if result.discounted_price is None:
         return None, None
     return result.price, result.raw_price
 
 
-def _prices_close(left: Optional[float], right: Optional[float]) -> bool:
+def _prices_close(left: float | None, right: float | None) -> bool:
     if left is None or right is None:
         return False
     tolerance = max(5.0, min(abs(left), abs(right)) * 0.025)
     return abs(left - right) <= tolerance
 
 
-def _price_ratio(left: Optional[float], right: Optional[float]) -> float:
+def _price_ratio(left: float | None, right: float | None) -> float:
     if left is None or right is None:
         return float("inf")
     low = min(abs(left), abs(right))
@@ -1540,7 +1552,7 @@ def _review_result_with_smart_scan(
     *,
     has_custom: bool,
     structured_price_locked: bool,
-    user_locks: Optional[set[str]] = None,
+    user_locks: set[str] | None = None,
 ) -> ScrapeResult:
     locks = set(user_locks or set())
     # If the user locked any price field via Selector Lab, their pick is
@@ -1844,10 +1856,10 @@ def _review_result_with_smart_scan(
 
 
 def _should_replace_price(
-    current_price: Optional[float],
-    current_raw: Optional[str],
-    candidate_price: Optional[float],
-    candidate_raw: Optional[str],
+    current_price: float | None,
+    current_raw: str | None,
+    candidate_price: float | None,
+    candidate_raw: str | None,
 ) -> bool:
     if candidate_price is None:
         return False
@@ -2003,7 +2015,7 @@ def _jsonld_has_variant_offers(product: dict[str, Any]) -> bool:
     )
 
 
-def _jsonld_offer_price(offer: dict[str, Any]) -> tuple[Optional[float], Optional[str]]:
+def _jsonld_offer_price(offer: dict[str, Any]) -> tuple[float | None, str | None]:
     for key in ("price", "lowPrice"):
         raw_value = offer.get(key)
         if raw_value is None:
@@ -2060,8 +2072,8 @@ def _extract_jsonld_product(item: dict[str, Any]) -> ScrapeResult:
         if stock != "unknown":
             stocks.append(stock)
 
-    price: Optional[float] = None
-    raw_price: Optional[str] = None
+    price: float | None = None
+    raw_price: str | None = None
     if price_candidates:
         price, raw_price = min(price_candidates, key=lambda candidate: candidate[0])
 
@@ -2203,7 +2215,7 @@ def _meta_tags_result(pairs: list[tuple[str, str]]) -> ScrapeResult:
         if key and value:
             meta.setdefault(key, value)
 
-    def first(*keys: str) -> Optional[str]:
+    def first(*keys: str) -> str | None:
         for key in keys:
             value = meta.get(key)
             if value:
@@ -2219,7 +2231,7 @@ def _meta_tags_result(pairs: list[tuple[str, str]]) -> ScrapeResult:
 
     currency = first("product:price:currency", "og:price:currency")
 
-    def with_currency(raw: Optional[str]) -> Optional[str]:
+    def with_currency(raw: str | None) -> str | None:
         if not raw:
             return None
         if currency and not _RAW_PRICE_CURRENCY_RE.search(raw):
@@ -2480,7 +2492,7 @@ async def _try_common(page: Page) -> ScrapeResult:
 _FB_MARKETPLACE_HOSTS = {"facebook.com", "m.facebook.com"}
 
 
-def _is_facebook_marketplace_url(url: Optional[str]) -> bool:
+def _is_facebook_marketplace_url(url: str | None) -> bool:
     if not url:
         return False
     try:
@@ -2496,7 +2508,7 @@ def _is_facebook_marketplace_url(url: Optional[str]) -> bool:
         return False
 
 
-def _facebook_marketplace_item_id(url: Optional[str]) -> Optional[str]:
+def _facebook_marketplace_item_id(url: str | None) -> str | None:
     if not url:
         return None
     try:
@@ -2585,18 +2597,18 @@ def _extract_fb_object_ranges(blob: str, key: str) -> list[tuple[int, int, str]]
             return ranges
 
 
-def _extract_fb_object(blob: str, key: str) -> Optional[str]:
+def _extract_fb_object(blob: str, key: str) -> str | None:
     ranges = _extract_fb_object_ranges(blob, key)
     return ranges[0][2] if ranges else None
 
 
-def _fb_positions(blob: str, needle: Optional[str]) -> list[int]:
+def _fb_positions(blob: str, needle: str | None) -> list[int]:
     if not blob or not needle:
         return []
     return [m.start() for m in re.finditer(re.escape(needle), blob)]
 
 
-def _fb_nearest_distance(pos: int, anchors: list[int]) -> Optional[int]:
+def _fb_nearest_distance(pos: int, anchors: list[int]) -> int | None:
     if not anchors:
         return None
     return min(abs(pos - anchor) for anchor in anchors)
@@ -2619,7 +2631,7 @@ def _fb_scope_for_object(
 
 def _fb_select_listing_scope(
     blobs: list[str],
-    item_id: Optional[str],
+    item_id: str | None,
 ) -> tuple[str, str] | tuple[None, None]:
     """Choose the listing_price object scoped to the Marketplace item id.
 
@@ -2627,7 +2639,7 @@ def _fb_select_listing_scope(
     lists. This keeps the extractor anchored to the item URL instead of the
     first price in the page's script order.
     """
-    best: Optional[tuple[tuple[int, ...], str, str]] = None
+    best: tuple[tuple[int, ...], str, str] | None = None
     for script_index, blob in enumerate(blobs):
         if not blob:
             continue
@@ -2660,7 +2672,7 @@ def _fb_select_listing_scope(
     return best[1], best[2]
 
 
-def _extract_fb_amount(obj_str: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+def _extract_fb_amount(obj_str: str | None) -> tuple[str | None, str | None]:
     """Pull ``amount`` and decoded ``formatted_amount`` from a price object."""
     if not obj_str:
         return None, None
@@ -2675,14 +2687,14 @@ def _extract_fb_amount(obj_str: Optional[str]) -> tuple[Optional[str], Optional[
     return amount, formatted
 
 
-def _extract_fb_formatted_price(blob: str) -> Optional[str]:
+def _extract_fb_formatted_price(blob: str) -> str | None:
     m = _FB_FORMATTED_PRICE_TEXT_RE.search(blob)
     if not m:
         return None
     return _decode_fb_json_string(m.group(1))
 
 
-async def _find_fb_dom_strikethrough(page: Page) -> Optional[str]:
+async def _find_fb_dom_strikethrough(page: Page) -> str | None:
     """Read the visible strikethrough price straight from the DOM.
 
     Used when JSON extraction misses ``strikethrough_price`` (FB renames
@@ -4188,7 +4200,7 @@ async def _run_selector_lab(page: Page) -> dict:
         }
 
 
-def _lab_profile(url: str) -> Optional[SelectorLabProfile]:
+def _lab_profile(url: str) -> SelectorLabProfile | None:
     matched = _find_site_profile(url)
     if not matched:
         return None
@@ -4217,7 +4229,7 @@ def _selector_lab_candidate_from_item(
     item: dict[str, Any],
     *,
     source_fallback: str = "dom",
-) -> Optional[SelectorLabCandidate]:
+) -> SelectorLabCandidate | None:
     selector = str(item.get("selector") or "").strip()
     if not selector:
         return None
@@ -4245,7 +4257,7 @@ def _selector_lab_candidate_from_item(
 
 def _smart_scan_candidate_matches(
     item: dict[str, Any],
-    target: Optional[dict[str, Any]],
+    target: dict[str, Any] | None,
 ) -> bool:
     if not target:
         return False
@@ -4273,10 +4285,10 @@ def _smart_scan_candidate_matches(
 def _smart_scan_candidate_to_selector_candidate(
     item: dict[str, Any],
     *,
-    main: Optional[dict[str, Any]],
-    original: Optional[dict[str, Any]],
-    dealer: Optional[dict[str, Any]],
-) -> Optional[SelectorLabCandidate]:
+    main: dict[str, Any] | None,
+    original: dict[str, Any] | None,
+    dealer: dict[str, Any] | None,
+) -> SelectorLabCandidate | None:
     selector = str(item.get("selector") or "").strip()
     if not selector:
         return None
@@ -4385,8 +4397,8 @@ def _merge_selector_lab_candidates(
 
 def _suggest_selector_assignments(
     candidates: list[SelectorLabCandidate],
-    profile: Optional[SelectorLabProfile],
-) -> dict[str, Optional[str]]:
+    profile: SelectorLabProfile | None,
+) -> dict[str, str | None]:
     def is_noise(candidate: SelectorLabCandidate) -> bool:
         blob = " ".join(
             part
@@ -4404,7 +4416,7 @@ def _suggest_selector_assignments(
             or _SELECTOR_LAB_RELATED_RE.search(blob)
         )
 
-    def best_candidate(field: str) -> Optional[SelectorLabCandidate]:
+    def best_candidate(field: str) -> SelectorLabCandidate | None:
         ranked = [candidate for candidate in candidates if field in candidate.kind_hints]
         if not ranked:
             return None
@@ -4435,7 +4447,7 @@ def _suggest_selector_assignments(
                 return None
         return candidate
 
-    suggested: dict[str, Optional[str]] = {
+    suggested: dict[str, str | None] = {
         "wait_for": profile.wait_for if profile else None,
     }
     for field in _SELECTOR_LAB_FIELDS:
@@ -4649,7 +4661,7 @@ def _smart_scan_result_from_data(data: dict[str, Any]) -> ScrapeResult:
     original = data.get("original")
     dealer = data.get("dealer")
 
-    def candidate_value(candidate: dict[str, Any]) -> Optional[float]:
+    def candidate_value(candidate: dict[str, Any]) -> float | None:
         text = candidate.get("text")
         parsed = _parse_price(text)
         if parsed is not None:
@@ -4703,9 +4715,9 @@ async def _try_smart_scan(page: Page) -> ScrapeResult:
 
 def _is_platform_default_selector(
     *,
-    platform: Optional[str],
+    platform: str | None,
     field: str,
-    selector: Optional[str],
+    selector: str | None,
 ) -> bool:
     if not platform or not selector:
         return False
@@ -4714,11 +4726,11 @@ def _is_platform_default_selector(
 
 
 def _resolve_custom_stock_status(
-    base_stock: Optional[str],
-    parsed_stock: Optional[str],
+    base_stock: str | None,
+    parsed_stock: str | None,
     *,
-    platform: Optional[str],
-    stock_selector: Optional[str],
+    platform: str | None,
+    stock_selector: str | None,
     structured_variant_stock_locked: bool = False,
 ) -> str:
     base = base_stock or "unknown"
@@ -4768,11 +4780,11 @@ async def _apply_custom(
     price_scope_only = product_root is not None
 
     async def get_text(
-        selector: Optional[str],
+        selector: str | None,
         *,
         root=None,
         allow_page_fallback: bool = True,
-    ) -> Optional[str]:
+    ) -> str | None:
         # Iterate over every match and return the first one with non-empty
         # inner_text.
         #
@@ -5335,7 +5347,7 @@ async def _scrape_via_stealth(url: str, config: ScrapeConfig) -> ScrapeResult:
 
 async def _probe_via_stealth(
     url: str, config: ScrapeConfig, response: ProbeResponse
-) -> Optional[ScrapeResult]:
+) -> ScrapeResult | None:
     """Retry probe extraction through stealth Chrome.
 
     Returns the extracted ``ScrapeResult`` on success so the caller can
@@ -5537,7 +5549,7 @@ async def probe(url: str, config: ScrapeConfig) -> ProbeResponse:
 
 
 async def scrape_with_open_page(
-    page: Page, config: ScrapeConfig, platform_hint: Optional[str] = None
+    page: Page, config: ScrapeConfig, platform_hint: str | None = None
 ) -> ScrapeResult:
     """
     Run the full strategy waterfall on an already-open Page. Used by probe()
@@ -5701,7 +5713,7 @@ _LOGIN_DONE_BUTTON_SCRIPT = """
 
 
 def _login_profile_dir(url: str, save_path: str) -> str:
-    key = sha1(f"{url}|{save_path}".encode("utf-8")).hexdigest()[:16]
+    key = sha1(f"{url}|{save_path}".encode()).hexdigest()[:16]
     profile_dir = sessions_dir() / "dealer-browser-profiles" / key
     profile_dir.mkdir(parents=True, exist_ok=True)
     return str(profile_dir)
@@ -5797,7 +5809,7 @@ async def save_login_state(
         )
         logger.info("Click the floating 'Save login to Gabada' button to return early.")
         deadline = asyncio.get_running_loop().time() + max(5, wait_seconds)
-        redirected_at: Optional[float] = None
+        redirected_at: float | None = None
         save_reason = "timeout"
 
         while asyncio.get_running_loop().time() < deadline:

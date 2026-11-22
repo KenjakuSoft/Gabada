@@ -1,5 +1,6 @@
-from typing import Optional
+
 from fastapi import APIRouter, Query
+
 from database.db import get_db
 from database.models import ActivityEntry
 
@@ -38,7 +39,7 @@ _ACTIVITY_QUERY = """
 async def get_activity(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    change_type: Optional[str] = Query(default=None),
+    change_type: str | None = Query(default=None),
 ):
     """Return recent meaningful price/stock changes, newest first."""
     db = await get_db()

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-import pytest  # noqa: E402
-from pydantic import ValidationError  # noqa: E402
+import pytest
+from pydantic import ValidationError
 
-from database.models import (  # noqa: E402
+from database.models import (
     FileImportRow,
     ProductCreate,
     ProductStoreCreate,
@@ -84,7 +84,7 @@ def test_store_output_model_tolerates_legacy_values() -> None:
         id=1,
         name="legacy",
         base_url="javascript:alert(1)",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     assert store.base_url == "javascript:alert(1)"
 

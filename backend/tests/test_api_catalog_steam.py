@@ -7,9 +7,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from services.api_catalog import (  # noqa: E402
-    _custom_preview_from_item,
+from services.api_catalog import (
     _apple_preview_from_item,
+    _custom_preview_from_item,
     _gog_preview_from_card_product,
     _steam_preview_from_detail,
     apple_app_id_from_value,

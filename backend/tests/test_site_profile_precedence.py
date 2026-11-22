@@ -11,9 +11,9 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from api import product_service  # noqa: E402
-from database.models import ScrapeConfig, ScrapeSelectors  # noqa: E402
-from scraper import site_profiles  # noqa: E402
+from api import product_service
+from database.models import ScrapeConfig, ScrapeSelectors
+from scraper import site_profiles
 
 
 def test_site_profile_overrides_stale_platform_default_selector(
