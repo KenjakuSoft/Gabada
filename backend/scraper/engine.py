@@ -4950,19 +4950,13 @@ async def _open_context(config: ScrapeConfig) -> BrowserContext:
     if not _browser:
         raise RuntimeError("Browser not started")
 
-    # Note: keep `extra_http_headers` minimal. Chromium already sends correct
-    # `Accept`, `Upgrade-Insecure-Requests`, `sec-ch-ua*` etc. based on its
-    # real UA. Overriding those values (or adding them when Chromium already
-    # sent them) causes a mismatch that some CDNs / WAFs (CS-Cart B2B
-    # stores among others) read as bot, responding with a stripped
-    # page that's missing the product block. Only `Accept-Language` — paired
-    # with locale — is safe to set explicitly.
+    # Use Chromium's native user agent by default. Hardcoding a spoofed UA
+    # string (e.g. the old Chrome/124.0.0.0) makes some CDNs / WAFs reject
+    # the request with `ERR_HTTP2_PROTOCOL_ERROR` / `ERR_EMPTY_RESPONSE`
+    # (nexxcom.lk is one). Keep `extra_http_headers` minimal: Chromium already
+    # sends correct `Accept`, `Upgrade-Insecure-Requests`, `sec-ch-ua*` etc.
+    # Only `Accept-Language` — paired with locale — is safe to set explicitly.
     options: dict = dict(
-        user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
         viewport={"width": 1280, "height": 900},
         locale="en-US",
         timezone_id="Asia/Colombo",
@@ -4970,6 +4964,10 @@ async def _open_context(config: ScrapeConfig) -> BrowserContext:
             "Accept-Language": "en-US,en;q=0.9",
         },
     )
+    # Allow a per-config user-agent override via config.headers if the user
+    # explicitly set one (e.g. for a store that needs a specific UA).
+    if config.headers and config.headers.get("User-Agent"):
+        options["user_agent"] = config.headers["User-Agent"]
 
     if config.storage_state_path:
         try:
