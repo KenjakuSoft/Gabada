@@ -62,8 +62,6 @@ def infer_currency_code(
     # Unambiguous currency symbols win over a bare 3-letter token: real ISO
     # codes such as TRY / ALL / GEL / TOP are also common English words, so a
     # visible "Rs"/"$"/"€" anchor is the more trustworthy signal.
-    if symbol and local and symbol in text:
-        return local
     if _LKR_RE.search(text):
         return "LKR"
     if "€" in text:
@@ -75,7 +73,12 @@ def infer_currency_code(
     if "¥" in text:
         return "JPY"
     if "$" in text:
-        return local if symbol == "$" and local else "USD"
+        return "USD"
+
+    # If the local currency symbol appears in the text and it's not $ (handled above),
+    # trust the local config.
+    if symbol and local and symbol in text:
+        return local
 
     code = _explicit_iso_code(upper)
     if code:
