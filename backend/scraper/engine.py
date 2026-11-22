@@ -4952,10 +4952,10 @@ async def _open_context(config: ScrapeConfig) -> BrowserContext:
 
     # Use Chromium's native user agent by default. Hardcoding a spoofed UA
     # string (e.g. the old Chrome/124.0.0.0) makes some CDNs / WAFs reject
-    # the request with `ERR_HTTP2_PROTOCOL_ERROR` / `ERR_EMPTY_RESPONSE`
-    # (nexxcom.lk is one). Keep `extra_http_headers` minimal: Chromium already
-    # sends correct `Accept`, `Upgrade-Insecure-Requests`, `sec-ch-ua*` etc.
-    # Only `Accept-Language` — paired with locale — is safe to set explicitly.
+    # the request with `ERR_HTTP2_PROTOCOL_ERROR` / `ERR_EMPTY_RESPONSE`.
+    # Keep `extra_http_headers` minimal: Chromium already sends correct
+    # `Accept`, `Upgrade-Insecure-Requests`, `sec-ch-ua*` etc. Only
+    # `Accept-Language` — paired with locale — is safe to set explicitly.
     options: dict = dict(
         viewport={"width": 1280, "height": 900},
         locale="en-US",

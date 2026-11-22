@@ -5,21 +5,16 @@ All notable changes to Gabada are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-11-23
+
+### Fixed
+- **More reliable scraping against bot walls.** The scraper now uses Chromium's native user agent instead of a hardcoded spoofed string that some CDNs/WAFs reject, and retries transient transport errors during navigation so a one-off connection drop no longer aborts a scrape with no price.
+
 ## [0.7.4] - 2026-11-22
 
 ### Security
-- **Currency inference bug fixed**: Unambiguous currency symbols (`$`, `€`, `£`, `₹`, `¥`) in scraped text now take precedence over the local configuration, preventing misclassification when local config is mismatched (e.g., `local_currency=EUR` with `local_symbol=$`).
-- **Frontend npm vulnerabilities resolved** (`npm audit` now reports 0 vulnerabilities):
-  - axios 1.20.0 → 1.21.1 (fixes proxy-credential inheritance, prototype pollution in auth/option handling, `maxBodyLength` bypasses, recursive form serialization)
-  - react-router-dom 7.18.4 → 7.18.6 (fixes open redirects, RSC CSRF/XSS, route-matching denial of service)
-  - @tailwindcss/vite 4.2.2 → 4.3.5
-  - @tanstack/react-query 5.99.0 → 5.108.2
-  - vite 8.3.5 → 8.3.8 (dev-server file-allowlist bypasses, launch-editor credential disclosure)
-  - tailwindcss 4.2.2 → 4.3.5
-  - transitive: follow-redirects 1.16.1 → 1.16.3 (proxy-credential cross-realm fix), brace-expansion 1.1.21 → 1.1.22 (DoS fixes), source-map-js 1.2.2 → 1.2.4
-
-### Fixed
-- **Dependabot PR #3 closed**: Outdated axios bump (1.16.0 → 1.18.0) superseded by manual update to 1.21.1 which includes all security fixes.
+- **Currency inference bug fixed**: Unambiguous currency symbols (`$`, `€`, `£`, `₹`, `¥`) in scraped text now take precedence over the local configuration, preventing misclassification when local config is mismatched.
+- **Frontend npm vulnerabilities resolved** (`npm audit` now reports 0 vulnerabilities) across axios, react-router-dom, @tailwindcss/vite, @tanstack/react-query, vite, tailwindcss, and transitive deps (follow-redirects, brace-expansion, source-map-js).
 
 ## [Unreleased]
 

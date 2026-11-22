@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v0.7.3-2F80ED?style=for-the-badge"></a>
+  <a href="https://github.com/KenjakuSoft/Gabada/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v0.7.5-2F80ED?style=for-the-badge"></a>
   <a href="https://github.com/KenjakuSoft/Gabada/actions/workflows/release.yml"><img alt="Release workflow" src="https://img.shields.io/badge/release%20workflow-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white&style=for-the-badge"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-34A853?style=for-the-badge"></a>
 </p>
@@ -45,10 +45,12 @@ when a site layout changes.
 
 ## Current Release
 
-Latest stable release: `v0.7.3`
+Latest stable release: `v0.7.5`
 
 Recent highlights:
 
+- **More reliable scraping against bot walls.** The scraper now uses Chromium's native user agent (instead of a spoofed string that some WAFs reject) and retries transient transport errors during navigation, so one-off connection drops no longer abort a scrape with no price.
+- **Currency inference hardening.** Unambiguous currency symbols (`$`, `€`, `£`, `₹`, `¥`) now win over local configuration, so scraped prices are tagged with the right currency even when the local symbol is misconfigured.
 - **Price changes now match across every ingestion path.** Scraping, file imports, and API catalog sync share one classifier, so a sale price, a stock flip, or a first-seen price gets the same label no matter how the data arrived.
 - **Cleaner price history.** Sub-cent float noise is no longer logged as a price move, the first real price after a "call for price" page is logged as "new" rather than "price up", and same-second logs resolve deterministically to the newest row.
 - **Clearer manual scrapes and input limits.** A scrape that legitimately finds no price returns a skipped summary instead of `409`, and logs/activity reject non-positive limits with `422`.
@@ -510,7 +512,7 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./packaging/build_release.sh --app-version 0.7.3
+./packaging/build_release.sh --app-version 0.7.5
 ```
 
 Pushing a `v*` tag or publishing a GitHub Release triggers
