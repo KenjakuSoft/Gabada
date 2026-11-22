@@ -30,7 +30,7 @@ Keep an eye on the prices of the things you buy — across any online store, on 
 
 ## What is Gabada?
 
-Gabada is a **free, local-first tool that watches product prices and stock for you.**
+Gabada is a **free, open source, local-first tool that watches product prices and stock for you.**
 
 Say you're shopping for a laptop, a console, or a motherboard. Instead of opening ten store tabs every day, you add the product pages once and Gabada keeps track:
 
@@ -405,6 +405,29 @@ Then restart the backend or launcher.
 
 ---
 
+## Open Source
+
+Gabada is **free and fully open source**, released under the permissive [MIT License](./LICENSE).
+
+That means:
+
+- **Free to use** for personal or commercial projects — no fees, no accounts, no limits.
+- **Free to read** the entire codebase — every line of backend, frontend, and scraping logic is public.
+- **Free to modify and adapt** — fork it, change it, make it your own.
+- **Free to distribute** — share it, ship it, build on top of it, as long as you keep the MIT license notice.
+- **No strings attached** — MIT is one of the simplest, most permissive licenses there is. You can even use Gabada inside a closed-source product.
+
+### Contribute
+
+Open source only stays alive with help from people like you, so contributions are welcome, whether that's:
+
+- Reporting a bug or suggesting a feature in the [Issues](https://github.com/KenjakuSoft/Gabada/issues)
+- Improving documentation
+- Opening a pull request with a fix, an improvement, or a new store API adapter or scraper profile
+
+The project is built with Python + FastAPI, React + TypeScript, and Playwright, and the repo includes the full test suite, so a new contributor can get up and running from the [Quick Start](#quick-start) in a few minutes.
+
+See the [MIT License](./LICENSE) for the exact terms.
 ## License
 
 Gabada is released under the [MIT License](./LICENSE).
